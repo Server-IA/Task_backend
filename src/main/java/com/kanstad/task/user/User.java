@@ -35,7 +35,6 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @Entity
 @Table(name = "usuario", /*schema = "seguridad"*/ schema = "public")
-
 public class User implements UserDetails {private static final long serialVersionUID = -4111948693138979290L;
 
 	@Id
