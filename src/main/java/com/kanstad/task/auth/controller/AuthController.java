@@ -55,13 +55,13 @@ public class AuthController {
     }
 
     @GetMapping("/me")
-    @PreAuthorize("hasRole('USER') or hasRole('ADMIN')")
+    //@PreAuthorize("hasRole('USER') or hasRole('ADMIN')")
     public ResponseEntity<UserInfoResponse> getCurrentUser() {
         UserInfoResponse userInfo = authService.getCurrentUser();
         return ResponseEntity.ok(userInfo);
     }
 
-    @PostMapping("/signout")
+    @PostMapping("/logout")
     public ResponseEntity<Map<String, String>> logoutUser() {
         Map<String, String> response = new HashMap<>();
         response.put("message", "You've been signed out!");
