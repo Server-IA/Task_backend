@@ -27,10 +27,7 @@ public class CategoriaEstadoController {
 
     private final CategoriaEstadoMapper categoriaEstadoMapper;
 
-    @GetMapping("/holamundo")
-    public String helloWorld() {
-        return "Hola Mundo";
-    }
+  
     @GetMapping
     public ResponseEntity<List<CategoriaEstado>> findAll(Pageable pageable){
         Page<CategoriaEstado> categoriasEstados = categoriaEstadoRepository.findAll(pageable);
@@ -44,16 +41,7 @@ public class CategoriaEstadoController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    //  @PostMapping
-    //  public ResponseEntity<CategoriaEstado> create(@Valid @RequestBody CategoriaEstado categoriaEstado, UriComponentsBuilder uriComponentsBuilder) {
-    //      CategoriaEstado savedCategoriaEstado = categoriaEstadoRepository.save(categoriaEstado);
-    //      URI location = uriComponentsBuilder.path("/api/categorias-estados/{id}")
-    //              .buildAndExpand(savedCategoriaEstado.getId())
-    //              .toUri();
-    //      return ResponseEntity.created(location).body(savedCategoriaEstado);
-    // }
-
-     @PostMapping
+    @PostMapping
      public ResponseEntity<CategoriaEstado> create(@Valid @RequestBody CategoriaEstadoDTO  newCategoriaEstadoRequest,
         UriComponentsBuilder ucb) {
         CategoriaEstado saveCategoriaEstado = categoriaEstadoRepository.save(categoriaEstadoMapper.toEntity(newCategoriaEstadoRequest));
