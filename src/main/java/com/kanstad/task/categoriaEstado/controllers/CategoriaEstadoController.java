@@ -20,7 +20,7 @@ import java.util.List;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/api/categorias-estados")
+@RequestMapping("/api/categoria-estado")
 public class CategoriaEstadoController {
 
     private final CategoriaEstadoRepository categoriaEstadoRepository;
