@@ -20,6 +20,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import lombok.RequiredArgsConstructor;
 
 import com.kanstad.task.estado.dto.EstadoDTO;
+import com.kanstad.task.estado.dto.EstadoShortDTO;
 import com.kanstad.task.estado.estadoService.EstadoService;
 
 @RestController
@@ -32,6 +33,11 @@ public class EstadoController {
     @GetMapping
     public ResponseEntity<Page<EstadoDTO>> getAllEstados(Pageable pageable) {
         return ResponseEntity.ok(estadoService.getAll(pageable));
+    }
+
+    @GetMapping("/short")
+    public ResponseEntity<Page<EstadoShortDTO>> getAllEstadosShort(Pageable pageable) {
+        return ResponseEntity.ok(estadoService.getAllShort(pageable));
     }
 
     @GetMapping("/{id}")

@@ -12,7 +12,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
-
+import com.kanstad.task.estado.dto.EstadoShortDTO;
 
 
 @Service
@@ -30,6 +30,10 @@ public class EstadoService {
     return estadoRepository.findAll(pageable)
             .map(estadoMapper::toDto); // el map de Page convierte cada entidad en DTO
 }
+        public Page<EstadoShortDTO> getAllShort(Pageable pageable) {
+        return estadoRepository.findAll(pageable)
+                .map(estadoMapper::toShortDTO); // el map de Page convierte cada entidad en DTO
+        }
 
     /**
      * Obtiene un estado por su id.
