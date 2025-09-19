@@ -9,7 +9,7 @@ import com.kanstad.task.categoriaEstado.CategoriaEstado;
 import com.kanstad.task.categoriaEstado.repositories.CategoriaEstadoRepository;
 
 
-import org.springframework.context.MessageSource;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import lombok.RequiredArgsConstructor;
@@ -23,7 +23,7 @@ public class EstadoService {
         private final EstadoRepository estadoRepository;
         private final CategoriaEstadoRepository categoriaEstadoRepository;
         private final EstadoMapper estadoMapper;
-        private final MessageSource messageSource;
+        
 
         /**
          * Obtiene todos los estados.
