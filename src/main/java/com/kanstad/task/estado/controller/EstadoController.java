@@ -19,9 +19,9 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.util.UriComponentsBuilder;
 import lombok.RequiredArgsConstructor;
 
+import com.kanstad.task.estado.Service.EstadoService;
 import com.kanstad.task.estado.dto.EstadoDTO;
 import com.kanstad.task.estado.dto.EstadoShortDTO;
-import com.kanstad.task.estado.estadoService.EstadoService;
 
 @RestController
 @RequestMapping("/api/estado")
@@ -42,7 +42,7 @@ public class EstadoController {
 
     @GetMapping("/{id}")
     public ResponseEntity<EstadoDTO> getEstadoById(@PathVariable Long id) {
-        return ResponseEntity.ok(estadoService.getById(id));
+        return ResponseEntity.ok(estadoService.findByIdOrThrow(id));
     }
 
     @PostMapping
