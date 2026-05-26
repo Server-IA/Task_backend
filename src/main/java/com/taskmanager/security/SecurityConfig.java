@@ -46,8 +46,6 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/solicitar-reset").permitAll()
                         .requestMatchers("/api/auth/reset-password").permitAll()
                         .requestMatchers("/api/auth/refresh").permitAll()
-                        .requestMatchers("/api/estados/**").permitAll()
-                        .requestMatchers("/api/tipos-proyecto/**").permitAll()
                         .anyRequest().authenticated()
                 );
 
