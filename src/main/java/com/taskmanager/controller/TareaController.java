@@ -3,15 +3,18 @@ package com.taskmanager.controller;
 import com.taskmanager.dto.TareaDTO;
 import com.taskmanager.service.ITareaService;
 import com.taskmanager.service.MembershipPermissionService;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
+@Validated
 @RestController
 @RequestMapping("/api/tareas")
 public class TareaController {
@@ -68,7 +71,7 @@ public class TareaController {
     }
 
     @PostMapping
-    public ResponseEntity<TareaDTO> create(@RequestBody TareaDTO dto, Authentication authentication) {
+    public ResponseEntity<TareaDTO> create(@Valid @RequestBody TareaDTO dto, Authentication authentication) {
         membershipPermissionService.requireProyectoAccess(authentication.getName(), dto.getProyectoId());
         TareaDTO created = tareaService.create(dto, authentication.getName());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
@@ -77,7 +80,7 @@ public class TareaController {
     @PutMapping("/{id}")
     public ResponseEntity<TareaDTO> update(
             @PathVariable Long id,
-            @RequestBody TareaDTO dto,
+            @Valid @RequestBody TareaDTO dto,
             Authentication authentication) {
         membershipPermissionService.requireTareaAccess(authentication.getName(), id);
         TareaDTO updated = tareaService.updateWithPermissions(id, dto, authentication.getName());

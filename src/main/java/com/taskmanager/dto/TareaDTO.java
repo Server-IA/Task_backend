@@ -1,5 +1,7 @@
 package com.taskmanager.dto;
 
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -12,7 +14,12 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class TareaDTO {
     private Long id;
+
+    @NotBlank(message = "El título es obligatorio")
+    @Size(max = 300, message = "El título no puede superar los 300 caracteres")
     private String titulo;
+
+    @Size(max = 5000, message = "La descripción no puede superar los 5000 caracteres")
     private String descripcion;
     private Long proyectoId;
     private String proyectoNombre;
