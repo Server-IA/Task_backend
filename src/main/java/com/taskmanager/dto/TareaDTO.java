@@ -8,6 +8,8 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Data
 @NoArgsConstructor
@@ -27,6 +29,8 @@ public class TareaDTO {
     private String estadoNombre;
     private Long asignadoId;
     private String asignadoNombre;
+    private List<Long> asignadoIds = new ArrayList<>();
+    private List<String> asignadoNombres = new ArrayList<>();
     private Long creadorId;
     private String creadorNombre;
     private String prioridad;

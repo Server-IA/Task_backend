@@ -12,7 +12,10 @@ import java.util.List;
 @Repository
 public interface TareaRepository extends JpaRepository<Tarea, Long> {
     List<Tarea> findByProyectoId(Long proyectoId);
-    List<Tarea> findByAsignadoId(Long asignadoId);
+
+    @Query("SELECT DISTINCT t FROM Tarea t JOIN t.asignados a WHERE a.usuario.id = :asignadoId")
+    List<Tarea> findByAsignadoId(@Param("asignadoId") Long asignadoId);
+
     List<Tarea> findByProyectoIdAndEstadoId(Long proyectoId, Long estadoId);
     List<Tarea> findByProyectoIdOrderByOrdenAsc(Long proyectoId);
 

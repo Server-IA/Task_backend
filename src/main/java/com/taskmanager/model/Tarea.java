@@ -9,6 +9,8 @@ import org.hibernate.annotations.SQLRestriction;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "tareas")
@@ -37,9 +39,8 @@ public class Tarea {
     @JoinColumn(name = "estado_id", nullable = false)
     private Estado estado;
 
-    @ManyToOne(fetch = FetchType.EAGER)
-    @JoinColumn(name = "asignado_id")
-    private Usuario asignado;
+    @OneToMany(mappedBy = "tarea", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+    private List<TareaAsignado> asignados = new ArrayList<>();
 
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "creador_id")

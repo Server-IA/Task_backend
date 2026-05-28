@@ -11,7 +11,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -34,8 +36,8 @@ public class TareaService implements ITareaService {
     @Autowired
     private ComentarioTareaRepository comentarioTareaRepository;
 
-        @Autowired
-        private MembershipPermissionService membershipPermissionService;
+    @Autowired
+    private MembershipPermissionService membershipPermissionService;
 
     public List<TareaDTO> findAccessibleForUser(String emailUsuario) {
         Usuario u = usuarioRepository.findByEmail(emailUsuario)
@@ -105,12 +107,7 @@ public class TareaService implements ITareaService {
         tarea.setPrioridad(dto.getPrioridad());
         tarea.setFechaLimite(dto.getFechaLimite());
         tarea.setOrden(dto.getOrden());
-
-        if (dto.getAsignadoId() != null) {
-            Usuario asignado = usuarioRepository.findById(dto.getAsignadoId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Usuario", dto.getAsignadoId()));
-            tarea.setAsignado(asignado);
-        }
+        syncAsignados(tarea, resolveAsignadoIds(dto));
 
         Tarea saved = tareaRepository.save(tarea);
         return convertToDTO(saved);
@@ -141,48 +138,42 @@ public class TareaService implements ITareaService {
         tarea.setFechaLimite(dto.getFechaLimite());
         tarea.setFechaCompletada(dto.getFechaCompletada());
         tarea.setOrden(dto.getOrden());
-
-        if (dto.getAsignadoId() != null) {
-            Usuario asignado = usuarioRepository.findById(dto.getAsignadoId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Usuario", dto.getAsignadoId()));
-            tarea.setAsignado(asignado);
-        } else {
-            tarea.setAsignado(null);
-        }
+        syncAsignados(tarea, resolveAsignadoIds(dto));
 
         Tarea updated = tareaRepository.save(tarea);
         return convertToDTO(updated);
     }
 
-        public TareaDTO updateWithPermissions(Long id, TareaDTO dto, String emailUsuario) {
-                Tarea tarea = tareaRepository.findById(id)
-                                .orElseThrow(() -> new ResourceNotFoundException("Tarea", id));
+    public TareaDTO updateWithPermissions(Long id, TareaDTO dto, String emailUsuario) {
+        Tarea tarea = tareaRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Tarea", id));
 
-                Long uid = membershipPermissionService.requireUserId(emailUsuario);
-                boolean canManage = membershipPermissionService.canManageProyecto(uid, tarea.getProyecto().getId());
-                boolean isCreator = tarea.getCreador() != null && tarea.getCreador().getId().equals(uid);
-                boolean isAssigned = tarea.getAsignado() != null && tarea.getAsignado().getId().equals(uid);
+        Long uid = membershipPermissionService.requireUserId(emailUsuario);
+        boolean canManage = membershipPermissionService.canManageProyecto(uid, tarea.getProyecto().getId());
+        boolean isCreator = tarea.getCreador() != null && tarea.getCreador().getId().equals(uid);
+        boolean isAssigned = tarea.getAsignados().stream()
+                .anyMatch(a -> a.getUsuario().getId().equals(uid));
 
-                if (canManage || isCreator) {
-                        return update(id, dto);
-                }
-
-                if (!isAssigned) {
-                        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "No puedes editar esta tarea");
-                }
-
-                if (dto.getEstadoId() == null) {
-                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "El estado es obligatorio");
-                }
-
-                Estado estado = estadoRepository.findById(dto.getEstadoId())
-                                .orElseThrow(() -> new ResourceNotFoundException("Estado", dto.getEstadoId()));
-
-                tarea.setEstado(estado);
-
-                Tarea updated = tareaRepository.save(tarea);
-                return convertToDTO(updated);
+        if (canManage || isCreator) {
+            return update(id, dto);
         }
+
+        if (!isAssigned) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "No puedes editar esta tarea");
+        }
+
+        if (dto.getEstadoId() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "El estado es obligatorio");
+        }
+
+        Estado estado = estadoRepository.findById(dto.getEstadoId())
+                .orElseThrow(() -> new ResourceNotFoundException("Estado", dto.getEstadoId()));
+
+        tarea.setEstado(estado);
+
+        Tarea updated = tareaRepository.save(tarea);
+        return convertToDTO(updated);
+    }
 
     public void delete(Long id) {
         Tarea tarea = tareaRepository.findById(id)
@@ -192,7 +183,40 @@ public class TareaService implements ITareaService {
                     "Solo se pueden eliminar tareas con estado 'Completado'");
         }
         comentarioTareaRepository.deleteByTareaId(id);
-        tareaRepository.deleteById(id);
+        tareaRepository.delete(tarea);
+    }
+
+    private List<Long> resolveAsignadoIds(TareaDTO dto) {
+        LinkedHashSet<Long> ids = new LinkedHashSet<>();
+        if (dto.getAsignadoIds() != null) {
+            dto.getAsignadoIds().stream().filter(id -> id != null).forEach(ids::add);
+        }
+        if (ids.isEmpty() && dto.getAsignadoId() != null) {
+            ids.add(dto.getAsignadoId());
+        }
+        return new ArrayList<>(ids);
+    }
+
+    private void syncAsignados(Tarea tarea, List<Long> asignadoIds) {
+        tarea.getAsignados().clear();
+        if (asignadoIds == null || asignadoIds.isEmpty()) {
+            return;
+        }
+        for (Long usuarioId : asignadoIds) {
+            Usuario usuario = usuarioRepository.findById(usuarioId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Usuario", usuarioId));
+            TareaAsignado asignacion = new TareaAsignado();
+            asignacion.setTarea(tarea);
+            asignacion.setUsuario(usuario);
+            tarea.getAsignados().add(asignacion);
+        }
+    }
+
+    private String displayName(Usuario usuario) {
+        if (usuario.getApodo() != null && !usuario.getApodo().isBlank()) {
+            return usuario.getApodo();
+        }
+        return usuario.getNombre();
     }
 
     private TareaDTO convertToDTO(Tarea tarea) {
@@ -204,17 +228,25 @@ public class TareaService implements ITareaService {
         dto.setProyectoNombre(tarea.getProyecto().getNombre());
         dto.setEstadoId(tarea.getEstado().getId());
         dto.setEstadoNombre(tarea.getEstado().getNombre());
-        if (tarea.getAsignado() != null) {
-            dto.setAsignadoId(tarea.getAsignado().getId());
-            dto.setAsignadoNombre(tarea.getAsignado().getApodo() != null
-                    ? tarea.getAsignado().getApodo()
-                    : tarea.getAsignado().getNombre());
+
+        List<Long> asignadoIds = new ArrayList<>();
+        List<String> asignadoNombres = new ArrayList<>();
+        if (tarea.getAsignados() != null) {
+            for (TareaAsignado asignacion : tarea.getAsignados()) {
+                asignadoIds.add(asignacion.getUsuario().getId());
+                asignadoNombres.add(displayName(asignacion.getUsuario()));
+            }
         }
+        dto.setAsignadoIds(asignadoIds);
+        dto.setAsignadoNombres(asignadoNombres);
+        if (!asignadoIds.isEmpty()) {
+            dto.setAsignadoId(asignadoIds.get(0));
+            dto.setAsignadoNombre(asignadoNombres.get(0));
+        }
+
         if (tarea.getCreador() != null) {
             dto.setCreadorId(tarea.getCreador().getId());
-            dto.setCreadorNombre(tarea.getCreador().getApodo() != null
-                    ? tarea.getCreador().getApodo()
-                    : tarea.getCreador().getNombre());
+            dto.setCreadorNombre(displayName(tarea.getCreador()));
         }
         dto.setPrioridad(tarea.getPrioridad());
         dto.setFechaLimite(tarea.getFechaLimite());
