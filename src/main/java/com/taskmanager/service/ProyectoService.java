@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -84,6 +85,16 @@ public class ProyectoService implements IProyectoService {
     }
 
     public ProyectoDTO create(ProyectoDTO dto, String emailCreador) {
+        LocalDate hoy = LocalDate.now();
+        if (dto.getFechaInicio() != null && dto.getFechaInicio().isBefore(hoy)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "La fecha de inicio no puede ser una fecha pasada");
+        }
+        if (dto.getFechaFinEstimada() != null && dto.getFechaFinEstimada().isBefore(hoy)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "La fecha fin estimada no puede ser una fecha pasada");
+        }
+
         membershipPermissionService.requireEmpresaManagement(emailCreador, dto.getEmpresaId());
 
         Empresa empresa = empresaRepository.findById(dto.getEmpresaId())
@@ -125,6 +136,16 @@ public class ProyectoService implements IProyectoService {
     }
 
     public ProyectoDTO update(Long id, ProyectoDTO dto) {
+        LocalDate hoy = LocalDate.now();
+        if (dto.getFechaInicio() != null && dto.getFechaInicio().isBefore(hoy)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "La fecha de inicio no puede ser una fecha pasada");
+        }
+        if (dto.getFechaFinEstimada() != null && dto.getFechaFinEstimada().isBefore(hoy)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "La fecha fin estimada no puede ser una fecha pasada");
+        }
+
         Proyecto proyecto = proyectoRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Proyecto", id));
 

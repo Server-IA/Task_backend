@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDate;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -81,6 +82,11 @@ public class TareaService implements ITareaService {
     }
 
     public TareaDTO create(TareaDTO dto, String emailCreador) {
+        if (dto.getFechaLimite() != null && dto.getFechaLimite().isBefore(LocalDate.now())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "La fecha límite no puede ser una fecha pasada");
+        }
+
         Proyecto proyecto = proyectoRepository.findById(dto.getProyectoId())
                 .orElseThrow(() -> new ResourceNotFoundException("Proyecto", dto.getProyectoId()));
 
@@ -111,6 +117,11 @@ public class TareaService implements ITareaService {
     }
 
     public TareaDTO update(Long id, TareaDTO dto) {
+        if (dto.getFechaLimite() != null && dto.getFechaLimite().isBefore(LocalDate.now())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "La fecha límite no puede ser una fecha pasada");
+        }
+
         Tarea tarea = tareaRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Tarea", id));
 
