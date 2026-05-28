@@ -3,10 +3,13 @@ package com.taskmanager.service;
 import com.taskmanager.dto.TipoProyectoDTO;
 import com.taskmanager.exception.ResourceNotFoundException;
 import com.taskmanager.model.TipoProyecto;
+import com.taskmanager.repository.ProyectoRepository;
 import com.taskmanager.repository.TipoProyectoRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -17,6 +20,9 @@ public class TipoProyectoService implements ITipoProyectoService {
     
     @Autowired
     private TipoProyectoRepository tipoProyectoRepository;
+
+    @Autowired
+    private ProyectoRepository proyectoRepository;
     
     public List<TipoProyectoDTO> findAll() {
         return tipoProyectoRepository.findAll().stream()
@@ -56,6 +62,16 @@ public class TipoProyectoService implements ITipoProyectoService {
         if (!tipoProyectoRepository.existsById(id)) {
             throw new ResourceNotFoundException("TipoProyecto", id);
         }
+
+        long proyectosEnUso = proyectoRepository.countByTipoProyectoId(id);
+        if (proyectosEnUso > 0) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    String.format(
+                            "No se puede eliminar este tipo de proyecto porque está en uso por %d proyecto(s). "
+                                    + "Cambia el tipo de esos proyectos antes de eliminarlo.",
+                            proyectosEnUso));
+        }
+
         tipoProyectoRepository.deleteById(id);
     }
     

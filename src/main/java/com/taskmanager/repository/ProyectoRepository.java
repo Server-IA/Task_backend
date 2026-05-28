@@ -13,6 +13,10 @@ import java.util.List;
 public interface ProyectoRepository extends JpaRepository<Proyecto, Long> {
     List<Proyecto> findByEmpresaId(Long empresaId);
 
+    long countByEstadoId(Long estadoId);
+
+    long countByTipoProyectoId(Long tipoProyectoId);
+
     @Query("SELECT DISTINCT p FROM Proyecto p WHERE p.creador.id = :usuarioId OR EXISTS (" +
             "SELECT 1 FROM MiembroProyecto mp WHERE mp.proyecto = p AND mp.usuario.id = :usuarioId)")
     List<Proyecto> findAccessibleByUsuarioId(@Param("usuarioId") Long usuarioId);

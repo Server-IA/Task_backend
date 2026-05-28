@@ -19,6 +19,8 @@ public interface TareaRepository extends JpaRepository<Tarea, Long> {
     List<Tarea> findByProyectoIdAndEstadoId(Long proyectoId, Long estadoId);
     List<Tarea> findByProyectoIdOrderByOrdenAsc(Long proyectoId);
 
+    long countByEstadoId(Long estadoId);
+
     @Query("SELECT t FROM Tarea t WHERE t.proyecto.id IN :proyectoIds ORDER BY t.proyecto.id ASC, t.orden ASC")
     List<Tarea> findByProyectoIdIn(@Param("proyectoIds") List<Long> proyectoIds);
 
