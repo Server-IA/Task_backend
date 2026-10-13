@@ -1,9 +1,0 @@
-target/
-.git/
-.gitignore
-.idea/
-*.iml
-.env
-.env.*
-*.md
-HELP.md
