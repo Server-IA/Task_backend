@@ -14,6 +14,7 @@ import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.WorkspaceMapper;
+import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.repository.WorkspaceRepository;
 import com.taskflow.api.service.WorkspaceService;
@@ -31,6 +32,7 @@ public class WorkspaceServiceImpl implements WorkspaceService {
 
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository memberRepository;
+    private final ProjectMemberRepository projectMemberRepository;
     private final ResourceLookup lookup;
     private final WorkspaceMapper workspaceMapper;
 
@@ -126,6 +128,7 @@ public class WorkspaceServiceImpl implements WorkspaceService {
         if (!actorId.equals(memberUserId) && !roleOf(workspace, actorId).isAdmin()) {
             throw new ForbiddenException("Solo un administrador puede quitar miembros");
         }
+        projectMemberRepository.deleteAllInWorkspace(workspace.getId(), memberUserId);
         memberRepository.delete(member);
     }
 

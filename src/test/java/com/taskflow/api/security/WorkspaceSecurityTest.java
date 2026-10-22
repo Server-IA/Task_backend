@@ -1,6 +1,7 @@
 package com.taskflow.api.security;
 
 import com.taskflow.api.entity.enums.WorkspaceRole;
+import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,10 +29,14 @@ class WorkspaceSecurityTest {
     @Mock
     private WorkspaceMemberRepository memberRepository;
 
+    @Mock
+    private ProjectMemberRepository projectMemberRepository;
+
     @InjectMocks
     private WorkspaceSecurity workspaceSecurity;
 
     private final UUID userId = UUID.randomUUID();
+    private final UUID projectId = UUID.randomUUID();
 
     @BeforeEach
     void authenticate() {
@@ -86,5 +91,32 @@ class WorkspaceSecurityTest {
 
         assertThat(workspaceSecurity.isMember(SLUG)).isFalse();
         verifyNoInteractions(memberRepository);
+    }
+
+    @Test
+    void adminAccedeATodosLosProyectosSinSerMiembro() {
+        when(memberRepository.findRole(SLUG, userId)).thenReturn(Optional.of(WorkspaceRole.ADMIN));
+
+        assertThat(workspaceSecurity.canAccessProject(SLUG, projectId)).isTrue();
+        verifyNoInteractions(projectMemberRepository);
+    }
+
+    @Test
+    void memberSoloAccedeASusProyectos() {
+        when(memberRepository.findRole(SLUG, userId)).thenReturn(Optional.of(WorkspaceRole.MEMBER));
+        when(projectMemberRepository.existsByProjectIdAndUserId(projectId, userId)).thenReturn(false);
+
+        assertThat(workspaceSecurity.canAccessProject(SLUG, projectId)).isFalse();
+
+        when(projectMemberRepository.existsByProjectIdAndUserId(projectId, userId)).thenReturn(true);
+        assertThat(workspaceSecurity.canAccessProject(SLUG, projectId)).isTrue();
+    }
+
+    @Test
+    void sinSerMiembroDelWorkspaceNoAccedeAlProyecto() {
+        when(memberRepository.findRole(SLUG, userId)).thenReturn(Optional.empty());
+
+        assertThat(workspaceSecurity.canAccessProject(SLUG, projectId)).isFalse();
+        verifyNoInteractions(projectMemberRepository);
     }
 }
