@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AccountStatusUserDetailsChecker;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.ProviderManager;
@@ -55,6 +56,8 @@ public class SecurityConfig {
                         .accessDeniedHandler(authenticationHandler))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC_PATHS).permitAll()
+                        // Ver una invitación con su token no requiere sesión (aceptarla sí)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/invitations/*").permitAll()
                         .anyRequest().authenticated())
                 // Orden: RateLimitFilter → JwtAuthFilter → resto de la cadena
                 .addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class)
