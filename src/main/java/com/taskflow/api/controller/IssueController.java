@@ -4,9 +4,11 @@ import com.taskflow.api.dto.request.CreateIssueRequest;
 import com.taskflow.api.dto.request.IssueFilter;
 import com.taskflow.api.dto.request.MoveIssueRequest;
 import com.taskflow.api.dto.request.UpdateIssueRequest;
+import com.taskflow.api.dto.response.ActivityResponse;
 import com.taskflow.api.dto.response.IssueResponse;
 import com.taskflow.api.dto.response.PageResponse;
 import com.taskflow.api.security.UserPrincipal;
+import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.service.IssueService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -39,6 +41,7 @@ import java.util.UUID;
 public class IssueController {
 
     private final IssueService issueService;
+    private final ActivityService activityService;
 
     @Operation(summary = "Listar issues con filtros y paginación",
             description = "Orden por defecto: sortOrder (el del Kanban). Ej.: ?state=…&priority=HIGH&search=login&page=0&size=20")
@@ -94,5 +97,12 @@ public class IssueController {
     public List<IssueResponse> getSubIssues(@PathVariable String slug, @PathVariable UUID projectId,
                                             @PathVariable UUID issueId) {
         return issueService.getSubIssues(slug, projectId, issueId);
+    }
+
+    @Operation(summary = "Historial de cambios del issue")
+    @GetMapping("/{issueId}/activity")
+    public List<ActivityResponse> getActivity(@PathVariable String slug, @PathVariable UUID projectId,
+                                              @PathVariable UUID issueId) {
+        return activityService.getActivity(slug, projectId, issueId);
     }
 }
