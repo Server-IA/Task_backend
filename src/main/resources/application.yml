@@ -1,0 +1,52 @@
+spring:
+  application:
+    name: taskflow-backend
+  config:
+    # Carga las variables del archivo .env (si existe) para el entorno local
+    import: optional:file:.env[.properties]
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate   # Las tablas las crea Flyway
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+        default_batch_fetch_size: 50
+  flyway:
+    enabled: true
+  thymeleaf:
+    check-template-location: false
+
+server:
+  port: 8080
+  error:
+    include-message: never
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
+app:
+  jwt:
+    secret: ${JWT_SECRET}
+    access-expiration-minutes: 15
+    refresh-expiration-days: 7
+  mail:
+    resend-api-key: ${RESEND_API_KEY:}
+    from: ${MAIL_FROM:TaskFlow <onboarding@resend.dev>}
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}
+  # Zona horaria usada para mostrar fechas en los correos
+  timezone: America/Bogota
+  tokens:
+    email-verification-hours: 24
+    password-reset-minutes: 60
+    invitation-days: 7
