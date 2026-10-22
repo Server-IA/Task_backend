@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="es"
+      th:replace="~{email/layout :: layout('Nuevo inicio de sesión', ~{::content})}">
+<body>
+<div th:fragment="content" style="font-size:15px;line-height:1.6;">
+    <p>Hola <strong th:text="${name}">usuario</strong>,</p>
+    <p>Detectamos un nuevo inicio de sesión en tu cuenta:</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:16px 0;font-size:14px;">
+        <tr>
+            <td style="padding:4px 16px 4px 0;color:#6b7280;">Fecha</td>
+            <td th:text="${date}">1 de enero de 2026, 10:00 a. m.</td>
+        </tr>
+        <tr>
+            <td style="padding:4px 16px 4px 0;color:#6b7280;">IP</td>
+            <td th:text="${ip}">127.0.0.1</td>
+        </tr>
+        <tr>
+            <td style="padding:4px 16px 4px 0;color:#6b7280;">Dispositivo</td>
+            <td th:text="${device}">Chrome en Windows</td>
+        </tr>
+    </table>
+    <p>Si fuiste tú, no tienes que hacer nada.</p>
+    <p>
+        <strong>¿No fuiste tú?</strong>
+        <a th:href="${link}" style="color:#3f76ff;">Cambia tu contraseña</a> de inmediato.
+    </p>
+</div>
+</body>
+</html>
