@@ -1,0 +1,27 @@
+package com.taskflow.api.mapper;
+
+import com.taskflow.api.dto.response.LabelResponse;
+import com.taskflow.api.dto.response.ProjectMemberResponse;
+import com.taskflow.api.dto.response.ProjectResponse;
+import com.taskflow.api.dto.response.StateResponse;
+import com.taskflow.api.entity.Label;
+import com.taskflow.api.entity.Project;
+import com.taskflow.api.entity.ProjectMember;
+import com.taskflow.api.entity.State;
+import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
+
+@Mapper(uses = UserMapper.class)
+public interface ProjectMapper {
+
+    @Mapping(target = "workspaceId", source = "workspace.id")
+    ProjectResponse toResponse(Project project);
+
+    @Mapping(target = "joinedAt", source = "createdAt")
+    ProjectMemberResponse toMemberResponse(ProjectMember member);
+
+    @Mapping(target = "group", source = "stateGroup")
+    StateResponse toStateResponse(State state);
+
+    LabelResponse toLabelResponse(Label label);
+}
