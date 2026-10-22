@@ -65,6 +65,15 @@ public class EmailNotifier {
                 "link", link));
     }
 
+    public void sendWorkspaceInvitation(String email, String inviterName, String workspaceName, String token) {
+        String link = properties.frontendUrl() + "/invitations/" + token;
+        send(email, inviterName + " te invitó a " + workspaceName + " en TaskFlow", "invitation", link, Map.of(
+                "inviter", inviterName,
+                "workspace", workspaceName,
+                "link", link,
+                "days", properties.tokens().invitationDays()));
+    }
+
     private void send(String to, String subject, String template, String actionLink, Map<String, Object> variables) {
         if (!properties.mail().enabled() && actionLink != null) {
             // Sin Resend configurado, el enlace se muestra en el log para poder probar el flujo en local.
