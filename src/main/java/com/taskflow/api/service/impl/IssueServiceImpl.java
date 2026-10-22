@@ -1,0 +1,291 @@
+package com.taskflow.api.service.impl;
+
+import com.taskflow.api.dto.request.CreateIssueRequest;
+import com.taskflow.api.dto.request.IssueFilter;
+import com.taskflow.api.dto.request.MoveIssueRequest;
+import com.taskflow.api.dto.request.UpdateIssueRequest;
+import com.taskflow.api.dto.response.IssueResponse;
+import com.taskflow.api.dto.response.PageResponse;
+import com.taskflow.api.entity.Issue;
+import com.taskflow.api.entity.Label;
+import com.taskflow.api.entity.Project;
+import com.taskflow.api.entity.State;
+import com.taskflow.api.entity.User;
+import com.taskflow.api.entity.enums.IssuePriority;
+import com.taskflow.api.exception.BadRequestException;
+import com.taskflow.api.exception.ConflictException;
+import com.taskflow.api.exception.ResourceNotFoundException;
+import com.taskflow.api.mapper.IssueMapper;
+import com.taskflow.api.repository.IssueRepository;
+import com.taskflow.api.repository.IssueSpecifications;
+import com.taskflow.api.repository.LabelRepository;
+import com.taskflow.api.repository.ProjectMemberRepository;
+import com.taskflow.api.repository.ProjectRepository;
+import com.taskflow.api.repository.StateRepository;
+import com.taskflow.api.repository.UserRepository;
+import com.taskflow.api.service.IssueService;
+import com.taskflow.api.util.SortOrderCalculator;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDate;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+
+@Service
+@RequiredArgsConstructor
+public class IssueServiceImpl implements IssueService {
+
+    /** Límite al recorrer la cadena de padres (protege de datos corruptos). */
+    private static final int MAX_PARENT_DEPTH = 100;
+
+    private final IssueRepository issueRepository;
+    private final ProjectRepository projectRepository;
+    private final ProjectMemberRepository projectMemberRepository;
+    private final StateRepository stateRepository;
+    private final LabelRepository labelRepository;
+    private final UserRepository userRepository;
+    private final ResourceLookup lookup;
+    private final IssueMapper issueMapper;
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResponse<IssueResponse> getIssues(String slug, UUID projectId, IssueFilter filter, Pageable pageable) {
+        Project project = lookup.project(slug, projectId);
+        Page<Issue> page = issueRepository.findAll(IssueSpecifications.matching(project.getId(), filter), pageable);
+        return PageResponse.from(page, issueMapper::toResponse);
+    }
+
+    @Override
+    @Transactional
+    public IssueResponse create(String slug, UUID projectId, UUID userId, CreateIssueRequest request) {
+        Project project = lookup.project(slug, projectId);
+        State state = request.stateId() != null
+                ? findState(project, request.stateId())
+                : stateRepository.findFirstByProjectIdOrderByPositionAsc(project.getId())
+                        .orElseThrow(() -> new ConflictException("El proyecto no tiene estados"));
+        validateDates(request.startDate(), request.dueDate());
+
+        Issue issue = new Issue();
+        issue.setProject(project);
+        issue.setTitle(request.title().trim());
+        issue.setDescription(blankToNull(request.description()));
+        issue.setState(state);
+        issue.setPriority(request.priority() != null ? request.priority() : IssuePriority.NONE);
+        if (request.parentId() != null) {
+            issue.setParent(findReferencedIssue(project, request.parentId(), "El issue padre no existe en este proyecto"));
+        }
+        issue.setStartDate(request.startDate());
+        issue.setDueDate(request.dueDate());
+        issue.getAssignees().addAll(resolveAssignees(project, request.assigneeIds()));
+        issue.getLabels().addAll(resolveLabels(project, request.labelIds()));
+        issue.setCreatedBy(lookup.user(userId));
+        issue.setSortOrder(SortOrderCalculator.endOfColumn(issueRepository.findMaxSortOrder(state.getId())));
+        issue.setSequenceId(nextSequenceId(project));
+        issueRepository.save(issue);
+        return issueMapper.toResponse(issue);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public IssueResponse get(String slug, UUID projectId, UUID issueId) {
+        Project project = lookup.project(slug, projectId);
+        return issueMapper.toResponse(findIssue(project, issueId));
+    }
+
+    @Override
+    @Transactional
+    public IssueResponse update(String slug, UUID projectId, UUID issueId, UUID userId, UpdateIssueRequest request) {
+        Project project = lookup.project(slug, projectId);
+        Issue issue = findIssue(project, issueId);
+
+        if (request.title() != null) {
+            if (request.title().isBlank()) {
+                throw new BadRequestException("El título no puede estar vacío");
+            }
+            issue.setTitle(request.title().trim());
+        }
+        if (request.description() != null) {
+            issue.setDescription(blankToNull(request.description()));
+        }
+        if (request.stateId() != null && !request.stateId().equals(issue.getState().getId())) {
+            State state = findState(project, request.stateId());
+            issue.setState(state);
+            issue.setSortOrder(SortOrderCalculator.endOfColumn(issueRepository.findMaxSortOrder(state.getId())));
+        }
+        if (request.priority() != null) {
+            issue.setPriority(request.priority());
+        }
+        if (Boolean.TRUE.equals(request.clearParent())) {
+            issue.setParent(null);
+        } else if (request.parentId() != null) {
+            Issue parent = findReferencedIssue(project, request.parentId(), "El issue padre no existe en este proyecto");
+            ensureNoCycle(issue, parent);
+            issue.setParent(parent);
+        }
+        if (Boolean.TRUE.equals(request.clearStartDate())) {
+            issue.setStartDate(null);
+        } else if (request.startDate() != null) {
+            issue.setStartDate(request.startDate());
+        }
+        if (Boolean.TRUE.equals(request.clearDueDate())) {
+            issue.setDueDate(null);
+        } else if (request.dueDate() != null) {
+            issue.setDueDate(request.dueDate());
+        }
+        validateDates(issue.getStartDate(), issue.getDueDate());
+
+        if (request.assigneeIds() != null) {
+            Set<User> assignees = resolveAssignees(project, request.assigneeIds());
+            issue.getAssignees().clear();
+            issue.getAssignees().addAll(assignees);
+        }
+        if (request.labelIds() != null) {
+            Set<Label> labels = resolveLabels(project, request.labelIds());
+            issue.getLabels().clear();
+            issue.getLabels().addAll(labels);
+        }
+        // El flush ejecuta @PreUpdate para que la respuesta lleve el updatedAt nuevo.
+        return issueMapper.toResponse(issueRepository.saveAndFlush(issue));
+    }
+
+    @Override
+    @Transactional
+    public IssueResponse move(String slug, UUID projectId, UUID issueId, UUID userId, MoveIssueRequest request) {
+        Project project = lookup.project(slug, projectId);
+        Issue issue = findIssue(project, issueId);
+        State target = findState(project, request.stateId());
+
+        Issue above = request.afterIssueId() != null ? findNeighbor(project, target, issue, request.afterIssueId()) : null;
+        Issue below = request.beforeIssueId() != null ? findNeighbor(project, target, issue, request.beforeIssueId()) : null;
+
+        if (above != null && below != null) {
+            if (above.getSortOrder() >= below.getSortOrder()) {
+                throw new BadRequestException("afterIssueId debe estar justo arriba de beforeIssueId en la columna");
+            }
+            if (SortOrderCalculator.needsRebalance(above.getSortOrder(), below.getSortOrder())) {
+                rebalanceColumn(target, issue);
+            }
+        }
+
+        Double maxInColumn = issueRepository.findMaxSortOrder(target.getId());
+        issue.setSortOrder(SortOrderCalculator.between(
+                above != null ? above.getSortOrder() : null,
+                below != null ? below.getSortOrder() : null,
+                maxInColumn));
+        issue.setState(target);
+        return issueMapper.toResponse(issueRepository.saveAndFlush(issue));
+    }
+
+    @Override
+    @Transactional
+    public void delete(String slug, UUID projectId, UUID issueId) {
+        Project project = lookup.project(slug, projectId);
+        // Los sub-issues no se borran: la base de datos les quita el padre (ON DELETE SET NULL).
+        issueRepository.delete(findIssue(project, issueId));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<IssueResponse> getSubIssues(String slug, UUID projectId, UUID issueId) {
+        Project project = lookup.project(slug, projectId);
+        Issue issue = findIssue(project, issueId);
+        return issueRepository.findAllByParentIdOrderBySequenceIdAsc(issue.getId()).stream()
+                .map(issueMapper::toResponse)
+                .toList();
+    }
+
+    /** Incrementa el contador del proyecto en la misma transacción y devuelve el nuevo valor. */
+    private int nextSequenceId(Project project) {
+        projectRepository.incrementIssueCounter(project.getId());
+        return projectRepository.findIssueCounter(project.getId());
+    }
+
+    /** Renumera la columna con separaciones uniformes cuando ya no cabe un promedio entre dos tarjetas. */
+    private void rebalanceColumn(State state, Issue moving) {
+        List<Issue> column = issueRepository.findAllByStateIdOrderBySortOrderAsc(state.getId()).stream()
+                .filter(other -> !other.getId().equals(moving.getId()))
+                .toList();
+        for (int i = 0; i < column.size(); i++) {
+            column.get(i).setSortOrder(SortOrderCalculator.positionAt(i));
+        }
+    }
+
+    private Issue findNeighbor(Project project, State target, Issue moving, UUID neighborId) {
+        if (neighborId.equals(moving.getId())) {
+            throw new BadRequestException("Un issue no puede ser vecino de sí mismo");
+        }
+        Issue neighbor = findReferencedIssue(project, neighborId, "El issue vecino no existe en este proyecto");
+        if (!neighbor.getState().getId().equals(target.getId())) {
+            throw new BadRequestException("Los issues vecinos deben estar en el estado destino");
+        }
+        return neighbor;
+    }
+
+    private void ensureNoCycle(Issue issue, Issue newParent) {
+        Issue current = newParent;
+        for (int depth = 0; current != null && depth < MAX_PARENT_DEPTH; depth++) {
+            if (current.getId().equals(issue.getId())) {
+                throw new BadRequestException("Un issue no puede ser padre de sí mismo ni de sus ancestros");
+            }
+            current = current.getParent();
+        }
+    }
+
+    private Set<User> resolveAssignees(Project project, Collection<UUID> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Set.of();
+        }
+        Set<UUID> distinct = new HashSet<>(ids);
+        List<User> users = userRepository.findAllById(distinct);
+        if (users.size() != distinct.size()
+                || projectMemberRepository.countMembers(project.getId(), distinct) != distinct.size()) {
+            throw new BadRequestException("Los asignados deben ser miembros del proyecto");
+        }
+        return new HashSet<>(users);
+    }
+
+    private Set<Label> resolveLabels(Project project, Collection<UUID> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Set.of();
+        }
+        Set<UUID> distinct = new HashSet<>(ids);
+        List<Label> labels = labelRepository.findAllByProjectIdAndIdIn(project.getId(), distinct);
+        if (labels.size() != distinct.size()) {
+            throw new BadRequestException("Las etiquetas deben pertenecer al proyecto");
+        }
+        return new HashSet<>(labels);
+    }
+
+    private Issue findIssue(Project project, UUID issueId) {
+        return issueRepository.findByIdAndProjectId(issueId, project.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Issue no encontrado"));
+    }
+
+    /** Issue mencionado en el cuerpo de la petición: si no existe, es un dato inválido (400). */
+    private Issue findReferencedIssue(Project project, UUID issueId, String message) {
+        return issueRepository.findByIdAndProjectId(issueId, project.getId())
+                .orElseThrow(() -> new BadRequestException(message));
+    }
+
+    private State findState(Project project, UUID stateId) {
+        return stateRepository.findByIdAndProjectId(stateId, project.getId())
+                .orElseThrow(() -> new BadRequestException("El estado no pertenece al proyecto"));
+    }
+
+    private static void validateDates(LocalDate startDate, LocalDate dueDate) {
+        if (startDate != null && dueDate != null && dueDate.isBefore(startDate)) {
+            throw new BadRequestException("La fecha límite no puede ser anterior a la fecha de inicio");
+        }
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+}

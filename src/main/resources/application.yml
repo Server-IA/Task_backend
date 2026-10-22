@@ -21,6 +21,10 @@ spring:
     enabled: true
   thymeleaf:
     check-template-location: false
+  data:
+    web:
+      pageable:
+        max-page-size: 200
 
 server:
   port: 8080

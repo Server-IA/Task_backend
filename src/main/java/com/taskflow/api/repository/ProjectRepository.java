@@ -1,9 +1,8 @@
 package com.taskflow.api.repository;
 
 import com.taskflow.api.entity.Project;
-import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -31,10 +30,14 @@ public interface ProjectRepository extends JpaRepository<Project, UUID> {
     boolean existsByWorkspaceIdAndIdentifier(UUID workspaceId, String identifier);
 
     /**
-     * Bloquea la fila del proyecto hasta que termine la transacción. Se usa al crear un issue para
-     * incrementar {@code issue_counter} sin que dos peticiones obtengan el mismo número.
+     * Incrementa el contador de issues con un UPDATE atómico. La fila queda bloqueada hasta el final de la
+     * transacción, así dos issues creados a la vez nunca reciben el mismo número.
      */
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select p from Project p where p.id = :id")
-    Optional<Project> findByIdForUpdate(@Param("id") UUID id);
+    @Modifying
+    @Query(value = "UPDATE projects SET issue_counter = issue_counter + 1 WHERE id = :id", nativeQuery = true)
+    int incrementIssueCounter(@Param("id") UUID id);
+
+    /** Lee el contador directamente de la base de datos (no de la entidad en memoria). */
+    @Query("select p.issueCounter from Project p where p.id = :id")
+    int findIssueCounter(@Param("id") UUID id);
 }

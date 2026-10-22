@@ -9,6 +9,7 @@ import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.ProjectMapper;
+import com.taskflow.api.repository.IssueRepository;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.service.StateService;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +25,7 @@ import java.util.UUID;
 public class StateServiceImpl implements StateService {
 
     private final StateRepository stateRepository;
+    private final IssueRepository issueRepository;
     private final ResourceLookup lookup;
     private final ProjectMapper projectMapper;
 
@@ -84,6 +86,9 @@ public class StateServiceImpl implements StateService {
         State state = findState(project, stateId);
         if (stateRepository.countByProjectId(project.getId()) <= 1) {
             throw new ConflictException("El proyecto debe tener al menos un estado");
+        }
+        if (issueRepository.existsByStateId(state.getId())) {
+            throw new ConflictException("El estado tiene issues; muévelos a otro estado antes de eliminarlo");
         }
         stateRepository.delete(state);
     }
