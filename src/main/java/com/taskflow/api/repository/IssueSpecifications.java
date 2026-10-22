@@ -1,7 +1,9 @@
 package com.taskflow.api.repository;
 
 import com.taskflow.api.dto.request.IssueFilter;
+import com.taskflow.api.entity.Cycle;
 import com.taskflow.api.entity.Issue;
+import com.taskflow.api.entity.ProjectModule;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Predicate;
@@ -44,6 +46,12 @@ public final class IssueSpecifications {
             if (hasValues(filter.label())) {
                 predicates.add(root.get("id").in(issuesRelatedTo(query, cb, "labels", filter.label())));
             }
+            if (filter.cycle() != null) {
+                predicates.add(root.get("id").in(issuesOf(query, Cycle.class, filter.cycle())));
+            }
+            if (filter.module() != null) {
+                predicates.add(root.get("id").in(issuesOf(query, ProjectModule.class, filter.module())));
+            }
             if (filter.search() != null && !filter.search().isBlank()) {
                 predicates.add(searchPredicate(root, cb, filter.search().trim()));
             }
@@ -57,6 +65,15 @@ public final class IssueSpecifications {
         Root<Issue> issue = subquery.from(Issue.class);
         subquery.select(issue.get("id"))
                 .where(issue.join(relation).get("id").in(ids));
+        return subquery;
+    }
+
+    /** Ids de los issues de un ciclo o módulo. */
+    private static <T> Subquery<UUID> issuesOf(CriteriaQuery<?> query, Class<T> container, UUID containerId) {
+        Subquery<UUID> subquery = query.subquery(UUID.class);
+        Root<T> root = subquery.from(container);
+        subquery.select(root.join("issues").get("id"))
+                .where(root.get("id").in(containerId));
         return subquery;
     }
 

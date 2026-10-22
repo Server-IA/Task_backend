@@ -14,5 +14,7 @@ public enum ActivityField {
     DUE_DATE,
     ASSIGNEES,
     LABELS,
+    CYCLE,
+    MODULE,
     COMMENT
 }

@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -23,6 +24,8 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
     List<Issue> findAllByStateIdOrderBySortOrderAsc(UUID stateId);
 
     boolean existsByStateId(UUID stateId);
+
+    List<Issue> findAllByProjectIdAndIdIn(UUID projectId, Collection<UUID> ids);
 
     /** Mayor {@code sort_order} de la columna, o {@code null} si está vacía. */
     @Query("select max(i.sortOrder) from Issue i where i.state.id = :stateId")

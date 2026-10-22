@@ -24,6 +24,12 @@ public record IssueFilter(
         List<UUID> label,
 
         @Parameter(description = "Texto en el título o código del issue (ej. «login» o «WEB-12»)")
-        String search
+        String search,
+
+        @Parameter(description = "Id del ciclo")
+        UUID cycle,
+
+        @Parameter(description = "Id del módulo")
+        UUID module
 ) {
 }
