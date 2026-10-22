@@ -31,11 +31,10 @@ public class Project extends BaseEntity {
     @Column(columnDefinition = "text")
     private String description;
 
-    /** Último número de issue asignado en el proyecto. */
-    @Column(name = "issue_counter", nullable = false)
-    private int issueCounter = 0;
-
-    public int nextIssueNumber() {
-        return ++issueCounter;
-    }
+    /**
+     * Último número de issue asignado. Solo lo modifica {@code ProjectRepository.incrementIssueCounter}
+     * con un UPDATE atómico, por eso Hibernate nunca lo escribe.
+     */
+    @Column(name = "issue_counter", nullable = false, insertable = false, updatable = false)
+    private int issueCounter;
 }
