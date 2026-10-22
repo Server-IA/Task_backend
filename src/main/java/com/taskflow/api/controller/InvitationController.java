@@ -7,6 +7,7 @@ import com.taskflow.api.dto.response.WorkspaceResponse;
 import com.taskflow.api.security.UserPrincipal;
 import com.taskflow.api.service.InvitationService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -57,7 +58,8 @@ public class InvitationController {
         invitationService.revoke(slug, invitationId);
     }
 
-    @Operation(summary = "Ver una invitación con el token del correo")
+    @Operation(summary = "Ver una invitación con el token del correo", description = "Público: no requiere sesión.")
+    @SecurityRequirements
     @GetMapping("/invitations/{token}")
     public InvitationDetailsResponse getDetails(@PathVariable String token) {
         return invitationService.getDetails(token);
