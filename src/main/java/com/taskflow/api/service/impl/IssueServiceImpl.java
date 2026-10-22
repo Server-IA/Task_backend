@@ -11,6 +11,7 @@ import com.taskflow.api.entity.Label;
 import com.taskflow.api.entity.Project;
 import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.User;
+import com.taskflow.api.entity.enums.ActivityField;
 import com.taskflow.api.entity.enums.IssuePriority;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
@@ -23,7 +24,9 @@ import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.ProjectRepository;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.repository.UserRepository;
+import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.service.IssueService;
+import com.taskflow.api.service.NotificationService;
 import com.taskflow.api.util.SortOrderCalculator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -33,10 +36,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -51,6 +58,8 @@ public class IssueServiceImpl implements IssueService {
     private final StateRepository stateRepository;
     private final LabelRepository labelRepository;
     private final UserRepository userRepository;
+    private final ActivityService activityService;
+    private final NotificationService notificationService;
     private final ResourceLookup lookup;
     private final IssueMapper issueMapper;
 
@@ -85,10 +94,14 @@ public class IssueServiceImpl implements IssueService {
         issue.setDueDate(request.dueDate());
         issue.getAssignees().addAll(resolveAssignees(project, request.assigneeIds()));
         issue.getLabels().addAll(resolveLabels(project, request.labelIds()));
-        issue.setCreatedBy(lookup.user(userId));
+        User actor = lookup.user(userId);
+        issue.setCreatedBy(actor);
         issue.setSortOrder(SortOrderCalculator.endOfColumn(issueRepository.findMaxSortOrder(state.getId())));
         issue.setSequenceId(nextSequenceId(project));
         issueRepository.save(issue);
+
+        activityService.record(issue, actor, ActivityField.CREATED, null, issue.getTitle());
+        notificationService.notifyAssigned(issue, actor, issue.getAssignees());
         return issueMapper.toResponse(issue);
     }
 
@@ -104,50 +117,73 @@ public class IssueServiceImpl implements IssueService {
     public IssueResponse update(String slug, UUID projectId, UUID issueId, UUID userId, UpdateIssueRequest request) {
         Project project = lookup.project(slug, projectId);
         Issue issue = findIssue(project, issueId);
+        User actor = lookup.user(userId);
+        IssueChanges changes = new IssueChanges(issue, actor);
 
         if (request.title() != null) {
             if (request.title().isBlank()) {
                 throw new BadRequestException("El título no puede estar vacío");
             }
-            issue.setTitle(request.title().trim());
+            String title = request.title().trim();
+            changes.track(ActivityField.TITLE, issue.getTitle(), title);
+            issue.setTitle(title);
         }
         if (request.description() != null) {
-            issue.setDescription(blankToNull(request.description()));
+            String description = blankToNull(request.description());
+            // El historial solo indica que la descripción cambió; no guarda el texto completo.
+            if (!Objects.equals(issue.getDescription(), description)) {
+                changes.track(ActivityField.DESCRIPTION, null, null);
+            }
+            issue.setDescription(description);
         }
         if (request.stateId() != null && !request.stateId().equals(issue.getState().getId())) {
             State state = findState(project, request.stateId());
+            changes.track(ActivityField.STATE, issue.getState().getName(), state.getName());
             issue.setState(state);
             issue.setSortOrder(SortOrderCalculator.endOfColumn(issueRepository.findMaxSortOrder(state.getId())));
         }
         if (request.priority() != null) {
+            changes.track(ActivityField.PRIORITY, issue.getPriority().name(), request.priority().name());
             issue.setPriority(request.priority());
         }
         if (Boolean.TRUE.equals(request.clearParent())) {
+            changes.track(ActivityField.PARENT, codeOf(issue.getParent()), null);
             issue.setParent(null);
         } else if (request.parentId() != null) {
             Issue parent = findReferencedIssue(project, request.parentId(), "El issue padre no existe en este proyecto");
             ensureNoCycle(issue, parent);
+            changes.track(ActivityField.PARENT, codeOf(issue.getParent()), parent.getCode());
             issue.setParent(parent);
         }
         if (Boolean.TRUE.equals(request.clearStartDate())) {
+            changes.track(ActivityField.START_DATE, toText(issue.getStartDate()), null);
             issue.setStartDate(null);
         } else if (request.startDate() != null) {
+            changes.track(ActivityField.START_DATE, toText(issue.getStartDate()), toText(request.startDate()));
             issue.setStartDate(request.startDate());
         }
         if (Boolean.TRUE.equals(request.clearDueDate())) {
+            changes.track(ActivityField.DUE_DATE, toText(issue.getDueDate()), null);
             issue.setDueDate(null);
         } else if (request.dueDate() != null) {
+            changes.track(ActivityField.DUE_DATE, toText(issue.getDueDate()), toText(request.dueDate()));
             issue.setDueDate(request.dueDate());
         }
         validateDates(issue.getStartDate(), issue.getDueDate());
 
         if (request.assigneeIds() != null) {
             Set<User> assignees = resolveAssignees(project, request.assigneeIds());
+            Set<User> added = new HashSet<>(assignees);
+            added.removeAll(issue.getAssignees());
+            changes.track(ActivityField.ASSIGNEES, names(issue.getAssignees(), User::getFullName),
+                    names(assignees, User::getFullName));
             issue.getAssignees().clear();
             issue.getAssignees().addAll(assignees);
+            notificationService.notifyAssigned(issue, actor, added);
         }
         if (request.labelIds() != null) {
             Set<Label> labels = resolveLabels(project, request.labelIds());
+            changes.track(ActivityField.LABELS, names(issue.getLabels(), Label::getName), names(labels, Label::getName));
             issue.getLabels().clear();
             issue.getLabels().addAll(labels);
         }
@@ -161,6 +197,10 @@ public class IssueServiceImpl implements IssueService {
         Project project = lookup.project(slug, projectId);
         Issue issue = findIssue(project, issueId);
         State target = findState(project, request.stateId());
+        if (!target.getId().equals(issue.getState().getId())) {
+            activityService.record(issue, lookup.user(userId), ActivityField.STATE,
+                    issue.getState().getName(), target.getName());
+        }
 
         Issue above = request.afterIssueId() != null ? findNeighbor(project, target, issue, request.afterIssueId()) : null;
         Issue below = request.beforeIssueId() != null ? findNeighbor(project, target, issue, request.beforeIssueId()) : null;
@@ -277,6 +317,42 @@ public class IssueServiceImpl implements IssueService {
     private State findState(Project project, UUID stateId) {
         return stateRepository.findByIdAndProjectId(stateId, project.getId())
                 .orElseThrow(() -> new BadRequestException("El estado no pertenece al proyecto"));
+    }
+
+    /**
+     * Registra en el historial solo los campos cuyo valor realmente cambió.
+     */
+    private class IssueChanges {
+
+        private final Issue issue;
+        private final User actor;
+
+        IssueChanges(Issue issue, User actor) {
+            this.issue = issue;
+            this.actor = actor;
+        }
+
+        void track(ActivityField field, String oldValue, String newValue) {
+            if (field == ActivityField.DESCRIPTION || !Objects.equals(oldValue, newValue)) {
+                activityService.record(issue, actor, field, oldValue, newValue);
+            }
+        }
+    }
+
+    /** Nombres ordenados y separados por coma, o {@code null} si no hay ninguno. */
+    private static <T> String names(Collection<T> items, Function<T, String> name) {
+        if (items.isEmpty()) {
+            return null;
+        }
+        return items.stream().map(name).sorted(Comparator.naturalOrder()).collect(Collectors.joining(", "));
+    }
+
+    private static String codeOf(Issue issue) {
+        return issue == null ? null : issue.getCode();
+    }
+
+    private static String toText(LocalDate date) {
+        return date == null ? null : date.toString();
     }
 
     private static void validateDates(LocalDate startDate, LocalDate dueDate) {

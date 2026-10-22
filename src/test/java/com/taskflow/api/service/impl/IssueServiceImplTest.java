@@ -17,6 +17,8 @@ import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.ProjectRepository;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.repository.UserRepository;
+import com.taskflow.api.service.ActivityService;
+import com.taskflow.api.service.NotificationService;
 import com.taskflow.api.util.SortOrderCalculator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -62,6 +64,10 @@ class IssueServiceImplTest {
     private LabelRepository labelRepository;
     @Mock
     private UserRepository userRepository;
+    @Mock
+    private ActivityService activityService;
+    @Mock
+    private NotificationService notificationService;
     @Mock
     private ResourceLookup lookup;
     @Mock
