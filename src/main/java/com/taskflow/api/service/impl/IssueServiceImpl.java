@@ -96,8 +96,10 @@ public class IssueServiceImpl implements IssueService {
         issue.getLabels().addAll(resolveLabels(project, request.labelIds()));
         User actor = lookup.user(userId);
         issue.setCreatedBy(actor);
-        issue.setSortOrder(SortOrderCalculator.endOfColumn(issueRepository.findMaxSortOrder(state.getId())));
+        // Primero el contador: su UPDATE bloquea la fila del proyecto y así las creaciones simultáneas
+        // se ejecutan en fila y no leen el mismo «final de la columna».
         issue.setSequenceId(nextSequenceId(project));
+        issue.setSortOrder(SortOrderCalculator.endOfColumn(issueRepository.findMaxSortOrder(state.getId())));
         issueRepository.save(issue);
 
         activityService.record(issue, actor, ActivityField.CREATED, null, issue.getTitle());
