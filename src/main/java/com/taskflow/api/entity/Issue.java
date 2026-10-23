@@ -78,6 +78,14 @@ public class Issue extends BaseEntity {
             inverseJoinColumns = @JoinColumn(name = "label_id"))
     private Set<Label> labels = new HashSet<>();
 
+    /** Lado inverso de cycle_issues (lo gestiona Cycle). Como máximo tiene un ciclo. */
+    @ManyToMany(mappedBy = "issues")
+    private Set<Cycle> cycles = new HashSet<>();
+
+    /** Lado inverso de module_issues (lo gestiona ProjectModule). */
+    @ManyToMany(mappedBy = "issues")
+    private Set<ProjectModule> modules = new HashSet<>();
+
     /** Código legible, por ejemplo {@code WEB-12}. Se calcula para que siga al identificador del proyecto. */
     public String getCode() {
         return project.getIdentifier() + "-" + sequenceId;
