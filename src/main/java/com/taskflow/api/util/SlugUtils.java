@@ -2,6 +2,7 @@ package com.taskflow.api.util;
 
 import java.text.Normalizer;
 import java.util.Locale;
+import java.util.Set;
 
 public final class SlugUtils {
 
@@ -10,7 +11,16 @@ public final class SlugUtils {
 
     private static final int MAX_LENGTH = 48;
 
+    /** Slugs que chocan con rutas del frontend ({@code /login}, {@code /profile}…). */
+    private static final Set<String> RESERVED = Set.of(
+            "login", "register", "verify-email", "forgot-password", "reset-password", "invitations",
+            "onboarding", "profile", "notifications", "settings", "api", "admin", "assets", "new");
+
     private SlugUtils() {
+    }
+
+    public static boolean isReserved(String slug) {
+        return RESERVED.contains(slug);
     }
 
     /** Convierte un texto en slug: «Equipo Diseño» → «equipo-diseno». */
