@@ -49,6 +49,7 @@ public class WorkspaceServiceImpl implements WorkspaceService {
     public WorkspaceResponse create(UUID userId, CreateWorkspaceRequest request) {
         User owner = lookup.user(userId);
         String slug = request.slug() != null ? request.slug() : generateUniqueSlug(request.name());
+        ensureNotReserved(slug);
         if (workspaceRepository.existsBySlug(slug)) {
             throw new ConflictException("El slug '" + slug + "' ya está en uso");
         }
@@ -80,6 +81,7 @@ public class WorkspaceServiceImpl implements WorkspaceService {
             workspace.setName(request.name().trim());
         }
         if (request.slug() != null && !request.slug().equals(workspace.getSlug())) {
+            ensureNotReserved(request.slug());
             if (workspaceRepository.existsBySlug(request.slug())) {
                 throw new ConflictException("El slug '" + request.slug() + "' ya está en uso");
             }
@@ -143,6 +145,12 @@ public class WorkspaceServiceImpl implements WorkspaceService {
                 .orElseThrow(() -> new ResourceNotFoundException("El usuario no es miembro del workspace"));
     }
 
+    private static void ensureNotReserved(String slug) {
+        if (SlugUtils.isReserved(slug)) {
+            throw new BadRequestException("El slug '" + slug + "' está reservado, elige otro");
+        }
+    }
+
     /** «Mi Equipo» → «mi-equipo», o «mi-equipo-2», «mi-equipo-3»… si ya existe. */
     private String generateUniqueSlug(String name) {
         String base = SlugUtils.slugify(name);
@@ -151,7 +159,7 @@ public class WorkspaceServiceImpl implements WorkspaceService {
         }
         String candidate = base;
         int suffix = 2;
-        while (workspaceRepository.existsBySlug(candidate)) {
+        while (SlugUtils.isReserved(candidate) || workspaceRepository.existsBySlug(candidate)) {
             String tail = "-" + suffix++;
             candidate = base.substring(0, Math.min(base.length(), 48 - tail.length())) + tail;
         }
