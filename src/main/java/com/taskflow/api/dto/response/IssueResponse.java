@@ -22,6 +22,8 @@ public record IssueResponse(
         double sortOrder,
         List<UserSummaryResponse> assignees,
         List<LabelResponse> labels,
+        PlanningRefResponse cycle,
+        List<PlanningRefResponse> modules,
         UserSummaryResponse createdBy,
         Instant createdAt,
         Instant updatedAt
