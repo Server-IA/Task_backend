@@ -154,6 +154,8 @@ Todas las respuestas de error tienen la misma forma (`errors` solo aparece en va
 ### Workspaces e invitaciones
 
 Roles: `OWNER` (creador), `ADMIN`, `MEMBER`. Cada workspace se identifica por su **slug** en la URL.
+Algunos slugs están reservados porque chocan con rutas del frontend (`login`, `register`, `profile`,
+`notifications`, `onboarding`, `invitations`, `settings`…); el backend responde 400 si se usan.
 
 | Método | Ruta | Permiso |
 |---|---|---|
@@ -218,7 +220,8 @@ Base: `/workspaces/{slug}/projects/{projectId}/issues`.
 }
 ```
 
-El issue recibe un código legible (`code: "WEB-12"`) que sigue al identificador del proyecto.
+El issue recibe un código legible (`code: "WEB-12"`) que sigue al identificador del proyecto. La
+respuesta incluye también su ciclo (`cycle: { id, name }` o `null`) y sus módulos (`modules: [...]`).
 
 **Editar** (PATCH parcial): los campos `null` u omitidos no cambian; `assigneeIds`/`labelIds`
 reemplazan la lista completa (`[]` la vacía); `description: ""` la borra; para quitar padre o
