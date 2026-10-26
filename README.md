@@ -15,7 +15,7 @@ de cambios y notificaciones.
 | Build | Maven (con wrapper `./mvnw`) |
 | Base de datos | PostgreSQL 16 en Docker · Spring Data JPA · Flyway |
 | Seguridad | Spring Security + JWT (jjwt 0.13) · BCrypt · Bucket4j (rate limiting) |
-| Correos | Resend (SDK Java) + plantillas Thymeleaf, envío con `@Async` |
+| Correos | Resend (producción) o SMTP (Mailpit en local) + plantillas Thymeleaf, envío con `@Async` |
 | Otros | Bean Validation · MapStruct · Lombok · springdoc-openapi (Swagger UI) |
 | Pruebas | JUnit 5 + Mockito |
 
@@ -25,13 +25,16 @@ Requisitos: **Java 21+** y **Docker**.
 
 ```bash
 cp .env.example .env          # completar JWT_SECRET (mínimo 32 caracteres)
-docker compose up -d          # PostgreSQL 16 en localhost:5432
+docker compose up -d          # PostgreSQL 16 (5432) y Mailpit (bandeja de correo en http://localhost:8025)
 ./mvnw spring-boot:run        # API en http://localhost:8080
 ```
 
 - Swagger UI: http://localhost:8080/swagger-ui.html (botón **Authorize** → pegar el `accessToken`).
 - OpenAPI JSON: http://localhost:8080/v3/api-docs (útil para generar tipos en el front).
 - Las tablas las crea Flyway al arrancar (`src/main/resources/db/migration`).
+- **Correos en local:** con `MAIL_PROVIDER=smtp` todos los correos (verificación, recuperar contraseña,
+  invitaciones, aviso de login) llegan a **Mailpit**, en http://localhost:8025, sin importar a qué
+  dirección se envíen. Nada sale a internet, así que puedes registrar cualquier correo de prueba.
 
 ### Variables de entorno (`.env`)
 
@@ -39,8 +42,10 @@ docker compose up -d          # PostgreSQL 16 en localhost:5432
 |---|---|
 | `DB_URL`, `DB_USER`, `DB_PASSWORD` | Conexión a PostgreSQL |
 | `JWT_SECRET` | Clave para firmar los JWT (≥ 32 caracteres). Generar una con `openssl rand -base64 48` |
-| `RESEND_API_KEY` | API key de Resend. **Si está vacía**, los correos no se envían y los enlaces (verificación, reset, invitación) se imprimen en el log de la API para poder probar en local |
-| `MAIL_FROM` | Remitente. Sin dominio verificado en Resend solo funciona `onboarding@resend.dev` y únicamente hacia tu propio correo |
+| `MAIL_PROVIDER` | `smtp` (Mailpit en local, o Brevo/Gmail) o `resend` (producción). Por defecto `resend` |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_AUTH`, `SMTP_STARTTLS` | Servidor SMTP. Los valores de `.env.example` son los de Mailpit (`localhost:1025`, sin autenticación) |
+| `RESEND_API_KEY` | API key de Resend (solo con `MAIL_PROVIDER=resend`). **Si está vacía**, los correos no se envían y los enlaces se imprimen en el log de la API |
+| `MAIL_FROM` | Remitente. Con Resend debe ser de un **dominio verificado**; sin él, Resend solo permite `onboarding@resend.dev` y únicamente hacia el correo dueño de la cuenta |
 | `FRONTEND_URL` | Origen permitido por CORS y base de los enlaces de los correos (por defecto `http://localhost:5173`) |
 
 El archivo `.env` está en `.gitignore`; nunca se suben secretos.
