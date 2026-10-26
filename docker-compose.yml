@@ -16,5 +16,14 @@ services:
       timeout: 5s
       retries: 10
 
+  # Bandeja de correo falsa para desarrollo: todo lo que envía la API (con MAIL_PROVIDER=smtp)
+  # aparece en http://localhost:8025 sin salir a internet.
+  mailpit:
+    image: axllent/mailpit:v1.31.6
+    container_name: taskflow-mailpit
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # Bandeja web
+
 volumes:
   pgdata:

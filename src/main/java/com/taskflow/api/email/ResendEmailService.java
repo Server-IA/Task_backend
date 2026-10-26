@@ -7,12 +7,17 @@ import com.taskflow.api.config.AppProperties;
 import com.taskflow.api.config.AsyncConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+/**
+ * Envío con la API de Resend (producción). Es el proveedor por defecto ({@code MAIL_PROVIDER=resend}).
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@ConditionalOnProperty(name = "app.mail.provider", havingValue = "resend", matchIfMissing = true)
 public class ResendEmailService implements EmailService {
 
     private final Resend resend;

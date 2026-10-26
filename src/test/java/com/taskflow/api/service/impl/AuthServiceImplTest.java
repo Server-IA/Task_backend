@@ -69,7 +69,7 @@ class AuthServiceImplTest {
     void setUp() {
         AppProperties properties = new AppProperties(
                 new AppProperties.Jwt("secreto-de-pruebas-con-mas-de-32-caracteres", 15, 7),
-                new AppProperties.Mail("", "TaskFlow <test@test.com>"),
+                new AppProperties.Mail("resend", "", "TaskFlow <test@test.com>"),
                 "http://localhost:5173",
                 "America/Bogota",
                 new AppProperties.Tokens(24, 60, 7));

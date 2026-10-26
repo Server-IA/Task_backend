@@ -17,10 +17,23 @@ public record AppProperties(
     public record Jwt(String secret, long accessExpirationMinutes, long refreshExpirationDays) {
     }
 
-    public record Mail(String resendApiKey, String from) {
+    /**
+     * @param provider {@code resend} (producción, API de Resend) o {@code smtp} (Mailpit en local, Brevo, Gmail…)
+     */
+    public record Mail(String provider, String resendApiKey, String from) {
 
-        /** Si no hay API key real de Resend, los correos solo se registran en el log. */
+        public boolean usesSmtp() {
+            return "smtp".equalsIgnoreCase(provider);
+        }
+
+        /**
+         * Si los correos salen de verdad. Con SMTP siempre (el servidor lo define spring.mail.*);
+         * con Resend solo si hay una API key real. Si no, solo se registran en el log.
+         */
         public boolean enabled() {
+            if (usesSmtp()) {
+                return true;
+            }
             return resendApiKey != null && !resendApiKey.isBlank() && !resendApiKey.startsWith("re_xxx");
         }
     }

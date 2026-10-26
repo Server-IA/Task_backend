@@ -21,6 +21,17 @@ spring:
     enabled: true
   thymeleaf:
     check-template-location: false
+  # Solo se usa con MAIL_PROVIDER=smtp (Mailpit en local, o Brevo/Gmail)
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:1025}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${SMTP_STARTTLS:false}
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 10000
   data:
     web:
       pageable:
@@ -45,6 +56,8 @@ app:
     access-expiration-minutes: 15
     refresh-expiration-days: 7
   mail:
+    # resend (API de Resend, producción) | smtp (Mailpit en local, Brevo, Gmail…)
+    provider: ${MAIL_PROVIDER:resend}
     resend-api-key: ${RESEND_API_KEY:}
     from: ${MAIL_FROM:TaskFlow <onboarding@resend.dev>}
   frontend-url: ${FRONTEND_URL:http://localhost:5173}
