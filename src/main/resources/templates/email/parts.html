@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<!--/* Piezas que se repiten dentro de la tarjeta de los correos (ver layout.html) */-->
+<html xmlns:th="http://www.thymeleaf.org" lang="es">
+<body>
+
+<!--/*
+    Ícono de 64 px y título grande, como en las pantallas de estado de la app.
+    El ícono es un glifo en monoespaciada (@, >_, ✓…) porque los correos no muestran SVG.
+    tone: 'accent' (crema) u 'ok' (verde).
+*/-->
+<th:block th:fragment="heading(icon, tone, title)">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+            <td width="64" height="64" align="center" valign="middle"
+                th:class="${tone == 'ok'} ? 'tf-ok' : 'tf-soft'"
+                style="width:64px;height:64px;border-radius:18px;font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:22px;font-weight:600;line-height:1;"
+                th:styleappend="${tone == 'ok'} ? 'background-color:#E3F5EC;color:#1D6B47;' : 'background-color:#F3E8CF;color:#7A5C1E;'"
+                th:text="${icon}">@</td>
+        </tr>
+    </table>
+    <h1 class="tf-title tf-ink"
+        style="margin:22px 0 0;font-family:'Bricolage Grotesque','Geist','Segoe UI',Helvetica,Arial,sans-serif;font-size:32px;line-height:1.1;font-weight:800;letter-spacing:-0.02em;color:#23201B;"
+        th:text="${title}">Título</h1>
+</th:block>
+
+<!--/* Botón crema con flecha y, debajo, una nota en monoespaciada (vencimiento del enlace) */-->
+<th:block th:fragment="button(link, label, note)">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:26px;">
+        <tr>
+            <td class="tf-btn" style="background-color:#E4CF9C;border-radius:12px;">
+                <a th:href="${link}" href="#"
+                   style="display:inline-block;padding:13px 22px;font-family:'Geist','Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;line-height:1.2;color:#23201B;text-decoration:none;border-radius:12px;"><th:block th:text="${label}">Acción</th:block>&nbsp;→</a>
+            </td>
+        </tr>
+    </table>
+    <p class="tf-muted" th:if="${note != null}"
+       style="margin:12px 0 0;font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:#67615A;"
+       th:text="${note}">vence en 24 h</p>
+</th:block>
+
+<!--/* Cierre de la tarjeta: una línea, un texto aclaratorio y el enlace completo por si el botón no abre */-->
+<th:block th:fragment="footnote(text, link)">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:28px;">
+        <tr>
+            <td class="tf-line tf-muted" style="padding-top:20px;border-top:1px solid #E6E2DA;font-size:13px;line-height:1.6;color:#67615A;">
+                <p style="margin:0;" th:text="${text}">Si no pediste este correo, ignóralo.</p>
+                <th:block th:if="${link != null}">
+                    <p style="margin:12px 0 6px;">¿El botón no funciona? Copia este enlace en tu navegador:</p>
+                    <div class="tf-dash"
+                         style="padding:10px 12px;background-color:#F8F7F4;border:1px dashed #C4BDB0;border-radius:10px;font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.5;word-break:break-all;">
+                        <a class="tf-link" th:href="${link}" th:text="${link}" href="#"
+                           style="color:#7A5C1E;text-decoration:none;">https://taskflow.app/…</a>
+                    </div>
+                </th:block>
+            </td>
+        </tr>
+    </table>
+</th:block>
+
+<!--/* Aviso de seguridad: «¿No fuiste tú? <acción> cuanto antes.» */-->
+<th:block th:fragment="notYou(link, action)">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:22px;">
+        <tr>
+            <td class="tf-panel tf-muted"
+                style="padding:14px 16px;background-color:#F8F7F4;border:1px solid #E6E2DA;border-radius:12px;font-size:14px;line-height:1.55;color:#67615A;">
+                <strong class="tf-ink" style="color:#23201B;">¿No fuiste tú?</strong>
+                <a class="tf-link" th:href="${link}" th:text="${action}" href="#"
+                   style="color:#7A5C1E;font-weight:600;text-decoration:underline;">Cambia tu contraseña</a>
+                cuanto antes.
+            </td>
+        </tr>
+    </table>
+</th:block>
+
+</body>
+</html>

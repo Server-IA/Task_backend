@@ -81,6 +81,8 @@ public class EmailNotifier {
         }
         Context context = new Context(ES);
         context.setVariables(variables);
+        // La plantilla base enlaza al front y toma de ahí el logo (public/email/logo.png)
+        context.setVariable("appUrl", properties.frontendUrl());
         String html = templateEngine.process("email/" + template, context);
         emailService.send(to, subject, html);
     }
