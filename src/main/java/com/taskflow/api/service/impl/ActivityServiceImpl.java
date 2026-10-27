@@ -32,7 +32,7 @@ public class ActivityServiceImpl implements ActivityService {
     public List<ActivityResponse> getActivity(String slug, UUID projectId, UUID issueId) {
         Project project = lookup.project(slug, projectId);
         Issue issue = issueRepository.findByIdAndProjectId(issueId, project.getId())
-                .orElseThrow(() -> new ResourceNotFoundException("Issue no encontrado"));
+                .orElseThrow(() -> new ResourceNotFoundException("Tarea no encontrada"));
         return activityRepository.findAllByIssueIdWithActor(issue.getId()).stream()
                 .map(mapper::toActivityResponse)
                 .toList();

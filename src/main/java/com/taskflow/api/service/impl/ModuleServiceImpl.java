@@ -130,7 +130,7 @@ public class ModuleServiceImpl implements ModuleService {
         Issue issue = module.getIssues().stream()
                 .filter(candidate -> candidate.getId().equals(issueId))
                 .findFirst()
-                .orElseThrow(() -> new ResourceNotFoundException("El issue no está en este módulo"));
+                .orElseThrow(() -> new ResourceNotFoundException("La tarea no está en este módulo"));
         module.getIssues().remove(issue);
         activityService.record(issue, lookup.user(userId), ActivityField.MODULE, module.getName(), null);
         return toResponse(moduleRepository.saveAndFlush(module));

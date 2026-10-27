@@ -94,7 +94,7 @@ public class CommentServiceImpl implements CommentService {
     private Issue findIssue(String slug, UUID projectId, UUID issueId) {
         Project project = lookup.project(slug, projectId);
         return issueRepository.findByIdAndProjectId(issueId, project.getId())
-                .orElseThrow(() -> new ResourceNotFoundException("Issue no encontrado"));
+                .orElseThrow(() -> new ResourceNotFoundException("Tarea no encontrada"));
     }
 
     private Comment findComment(Issue issue, UUID commentId) {

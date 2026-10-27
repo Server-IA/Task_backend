@@ -88,7 +88,7 @@ public class IssueServiceImpl implements IssueService {
         issue.setState(state);
         issue.setPriority(request.priority() != null ? request.priority() : IssuePriority.NONE);
         if (request.parentId() != null) {
-            issue.setParent(findReferencedIssue(project, request.parentId(), "El issue padre no existe en este proyecto"));
+            issue.setParent(findReferencedIssue(project, request.parentId(), "La tarea padre no existe en este proyecto"));
         }
         issue.setStartDate(request.startDate());
         issue.setDueDate(request.dueDate());
@@ -152,7 +152,7 @@ public class IssueServiceImpl implements IssueService {
             changes.track(ActivityField.PARENT, codeOf(issue.getParent()), null);
             issue.setParent(null);
         } else if (request.parentId() != null) {
-            Issue parent = findReferencedIssue(project, request.parentId(), "El issue padre no existe en este proyecto");
+            Issue parent = findReferencedIssue(project, request.parentId(), "La tarea padre no existe en este proyecto");
             ensureNoCycle(issue, parent);
             changes.track(ActivityField.PARENT, codeOf(issue.getParent()), parent.getCode());
             issue.setParent(parent);
@@ -261,11 +261,11 @@ public class IssueServiceImpl implements IssueService {
 
     private Issue findNeighbor(Project project, State target, Issue moving, UUID neighborId) {
         if (neighborId.equals(moving.getId())) {
-            throw new BadRequestException("Un issue no puede ser vecino de sí mismo");
+            throw new BadRequestException("Una tarea no puede ser vecina de sí misma");
         }
-        Issue neighbor = findReferencedIssue(project, neighborId, "El issue vecino no existe en este proyecto");
+        Issue neighbor = findReferencedIssue(project, neighborId, "La tarea vecina no existe en este proyecto");
         if (!neighbor.getState().getId().equals(target.getId())) {
-            throw new BadRequestException("Los issues vecinos deben estar en el estado destino");
+            throw new BadRequestException("Las tareas vecinas deben estar en el estado destino");
         }
         return neighbor;
     }
@@ -274,7 +274,7 @@ public class IssueServiceImpl implements IssueService {
         Issue current = newParent;
         for (int depth = 0; current != null && depth < MAX_PARENT_DEPTH; depth++) {
             if (current.getId().equals(issue.getId())) {
-                throw new BadRequestException("Un issue no puede ser padre de sí mismo ni de sus ancestros");
+                throw new BadRequestException("Una tarea no puede ser padre de sí misma ni de sus ancestros");
             }
             current = current.getParent();
         }
@@ -307,7 +307,7 @@ public class IssueServiceImpl implements IssueService {
 
     private Issue findIssue(Project project, UUID issueId) {
         return issueRepository.findByIdAndProjectId(issueId, project.getId())
-                .orElseThrow(() -> new ResourceNotFoundException("Issue no encontrado"));
+                .orElseThrow(() -> new ResourceNotFoundException("Tarea no encontrada"));
     }
 
     /** Issue mencionado en el cuerpo de la petición: si no existe, es un dato inválido (400). */

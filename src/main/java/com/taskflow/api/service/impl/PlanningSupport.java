@@ -33,7 +33,7 @@ class PlanningSupport {
         Set<UUID> distinct = new HashSet<>(ids);
         List<Issue> issues = issueRepository.findAllByProjectIdAndIdIn(project.getId(), distinct);
         if (issues.size() != distinct.size()) {
-            throw new BadRequestException("Todos los issues deben pertenecer al proyecto");
+            throw new BadRequestException("Todas las tareas deben pertenecer al proyecto");
         }
         return issues;
     }

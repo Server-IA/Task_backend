@@ -88,7 +88,7 @@ public class StateServiceImpl implements StateService {
             throw new ConflictException("El proyecto debe tener al menos un estado");
         }
         if (issueRepository.existsByStateId(state.getId())) {
-            throw new ConflictException("El estado tiene issues; muévelos a otro estado antes de eliminarlo");
+            throw new ConflictException("El estado tiene tareas; muévelas a otro estado antes de eliminarlo");
         }
         stateRepository.delete(state);
     }

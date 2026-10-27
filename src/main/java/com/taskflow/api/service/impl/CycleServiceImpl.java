@@ -138,7 +138,7 @@ public class CycleServiceImpl implements CycleService {
         Issue issue = cycle.getIssues().stream()
                 .filter(candidate -> candidate.getId().equals(issueId))
                 .findFirst()
-                .orElseThrow(() -> new ResourceNotFoundException("El issue no está en este ciclo"));
+                .orElseThrow(() -> new ResourceNotFoundException("La tarea no está en este ciclo"));
         cycle.getIssues().remove(issue);
         activityService.record(issue, lookup.user(userId), ActivityField.CYCLE, cycle.getName(), null);
         return toResponse(cycleRepository.saveAndFlush(cycle));
