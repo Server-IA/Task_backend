@@ -11,6 +11,7 @@ public record ProjectResponse(
         String description,
         int issueCount,
         int openIssueCount,
+        int overdueIssueCount,
         Instant createdAt,
         Instant updatedAt
 ) {

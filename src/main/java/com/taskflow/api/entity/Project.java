@@ -47,4 +47,10 @@ public class Project extends BaseEntity {
     @Formula("(select count(*) from issues i join states st on st.id = i.state_id "
             + "where i.project_id = id and st.state_group not in ('COMPLETED', 'CANCELLED'))")
     private int openIssueCount;
+
+    /** Issues abiertos con la fecha límite ya pasada. */
+    @Formula("(select count(*) from issues i join states st on st.id = i.state_id "
+            + "where i.project_id = id and st.state_group not in ('COMPLETED', 'CANCELLED') "
+            + "and i.due_date < current_date)")
+    private int overdueIssueCount;
 }
