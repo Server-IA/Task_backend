@@ -14,6 +14,7 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.Formula;
 
 import java.time.LocalDate;
 import java.util.HashSet;
@@ -85,6 +86,15 @@ public class Issue extends BaseEntity {
     /** Lado inverso de module_issues (lo gestiona ProjectModule). */
     @ManyToMany(mappedBy = "issues")
     private Set<ProjectModule> modules = new HashSet<>();
+
+    /** Cantidad de sub-issues; se calcula con una subconsulta en el mismo SELECT (solo lectura). */
+    @Formula("(select count(*) from issues s where s.parent_id = id)")
+    private int subIssueCount;
+
+    /** Sub-issues cuyo estado está en el grupo COMPLETED. */
+    @Formula("(select count(*) from issues s join states st on st.id = s.state_id "
+            + "where s.parent_id = id and st.state_group = 'COMPLETED')")
+    private int completedSubIssueCount;
 
     /** Código legible, por ejemplo {@code WEB-12}. Se calcula para que siga al identificador del proyecto. */
     public String getCode() {

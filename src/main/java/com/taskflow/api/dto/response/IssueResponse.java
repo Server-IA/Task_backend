@@ -24,6 +24,8 @@ public record IssueResponse(
         List<LabelResponse> labels,
         PlanningRefResponse cycle,
         List<PlanningRefResponse> modules,
+        int subIssueCount,
+        int completedSubIssueCount,
         UserSummaryResponse createdBy,
         Instant createdAt,
         Instant updatedAt

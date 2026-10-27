@@ -9,6 +9,7 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.Formula;
 
 @Getter
 @Setter
@@ -37,4 +38,13 @@ public class Project extends BaseEntity {
      */
     @Column(name = "issue_counter", nullable = false, insertable = false, updatable = false)
     private int issueCounter;
+
+    /** Issues actuales del proyecto; se calcula con una subconsulta en el mismo SELECT (solo lectura). */
+    @Formula("(select count(*) from issues i where i.project_id = id)")
+    private int issueCount;
+
+    /** Issues que no están completados ni cancelados. */
+    @Formula("(select count(*) from issues i join states st on st.id = i.state_id "
+            + "where i.project_id = id and st.state_group not in ('COMPLETED', 'CANCELLED'))")
+    private int openIssueCount;
 }

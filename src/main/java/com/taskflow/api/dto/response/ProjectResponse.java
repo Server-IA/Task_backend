@@ -9,6 +9,8 @@ public record ProjectResponse(
         String name,
         String identifier,
         String description,
+        int issueCount,
+        int openIssueCount,
         Instant createdAt,
         Instant updatedAt
 ) {
