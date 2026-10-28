@@ -133,6 +133,18 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
     long countAssignedCompletedSince(@Param("projectIds") Collection<UUID> projectIds, @Param("userId") UUID userId,
                                      @Param("since") Instant since);
 
+    // ----- Daily -----
+
+    /** Tareas del proyecto que no están en los grupos excluidos y tienen algún asignado, con sus asignados. */
+    @EntityGraph(attributePaths = {"project", "state", "assignees"})
+    @Query("""
+            select i from Issue i
+            where i.project.id = :projectId and i.state.stateGroup not in :excludedGroups
+              and i.assignees is not empty
+            """)
+    List<Issue> findAssignedInProject(@Param("projectId") UUID projectId,
+                                      @Param("excludedGroups") Collection<StateGroup> excludedGroups);
+
     // ----- Resumen de actividad -----
 
     @Query("select count(i) from Issue i where i.project.id in :projectIds and i.completedAt >= :since")

@@ -61,6 +61,9 @@ class ControllerPermissionsTest {
                 arguments(CycleController.class, "delete", MANAGE),
                 arguments(CycleController.class, "addIssues", ACCESS),
                 arguments(CycleController.class, "removeIssue", ACCESS),
+                // Cerrar un ciclo es del project manager
+                arguments(CycleController.class, "closePreview", MANAGE),
+                arguments(CycleController.class, "close", MANAGE),
                 arguments(ModuleController.class, "getModules", ACCESS),
                 arguments(ModuleController.class, "get", ACCESS),
                 arguments(ModuleController.class, "create", MANAGE),
@@ -94,6 +97,20 @@ class ControllerPermissionsTest {
                 arguments(SavedViewController.class, "create", ACCESS),
                 arguments(SavedViewController.class, "update", ACCESS),
                 arguments(SavedViewController.class, "delete", ACCESS),
+                // Retrospectiva: notas y votos de cualquier miembro del proyecto (editar o borrar una nota ajena se
+                // valida en el servicio); abrirla, terminarla y convertir acciones en tareas, del project manager
+                arguments(RetroController.class, "getRetro", ACCESS),
+                arguments(RetroController.class, "start", MANAGE),
+                arguments(RetroController.class, "createNote", ACCESS),
+                arguments(RetroController.class, "updateNote", ACCESS),
+                arguments(RetroController.class, "deleteNote", ACCESS),
+                arguments(RetroController.class, "vote", ACCESS),
+                arguments(RetroController.class, "unvote", ACCESS),
+                arguments(RetroController.class, "convert", MANAGE),
+                arguments(RetroController.class, "finish", MANAGE),
+                // Daily: la ve y escribe su nota cualquier miembro del proyecto
+                arguments(DailyController.class, "getDaily", ACCESS),
+                arguments(DailyController.class, "saveNote", ACCESS),
                 // Endpoints nuevos
                 arguments(ProjectStatsController.class, "getStats", ACCESS),
                 arguments(MyWorkController.class, "getMyWork", MEMBER),

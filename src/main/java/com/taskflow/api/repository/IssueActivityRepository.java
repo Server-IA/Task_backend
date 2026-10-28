@@ -43,6 +43,22 @@ public interface IssueActivityRepository extends JpaRepository<IssueActivity, UU
                                  @Param("actorId") UUID actorId,
                                  Pageable pageable);
 
+    /**
+     * Historial del proyecto en {@code [from, to)} con autor (las entradas sin autor no se incluyen), de la más
+     * antigua a la más reciente, con la tarea, su estado y su proyecto cargados.
+     */
+    @Query("""
+            select a from IssueActivity a
+            join fetch a.actor
+            join fetch a.issue i
+            join fetch i.state
+            join fetch i.project
+            where i.project.id = :projectId and a.createdAt >= :from and a.createdAt < :to
+            order by a.createdAt asc, a.id asc
+            """)
+    List<IssueActivity> findAllInProjectBetween(@Param("projectId") UUID projectId, @Param("from") Instant from,
+                                                @Param("to") Instant to);
+
     /** Entradas del historial por proyecto desde la fecha indicada, de más a menos. */
     @Query("""
             select new com.taskflow.api.repository.ProjectActivityCount(p.id, p.name, p.identifier, count(a))

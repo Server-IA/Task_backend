@@ -43,6 +43,21 @@ public interface IssueRelationRepository extends JpaRepository<IssueRelation, UU
             """)
     List<Issue> findIssuesBlockedBy(@Param("blockerId") UUID blockerId);
 
+    /**
+     * Bloqueos abiertos (tarea origen fuera de {@code closedGroups}) de las tareas indicadas, con ambas tareas
+     * cargadas.
+     */
+    @Query("""
+            select r from IssueRelation r
+            join fetch r.source s join fetch s.project
+            join fetch r.target
+            where r.type = com.taskflow.api.entity.enums.IssueRelationType.BLOCKS
+              and r.target.id in :issueIds
+              and s.state.stateGroup not in :closedGroups
+            """)
+    List<IssueRelation> findOpenBlockersOf(@Param("issueIds") Collection<UUID> issueIds,
+                                           @Param("closedGroups") Collection<StateGroup> closedGroups);
+
     /** Bloqueos de la tarea que siguen abiertos (estado fuera de {@code closedGroups}), sin contar uno de ellos. */
     @Query("""
             select count(r) from IssueRelation r

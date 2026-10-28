@@ -3,12 +3,14 @@ package com.taskflow.api.service.impl;
 import com.taskflow.api.dto.response.ProgressResponse;
 import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.Project;
+import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.repository.IssueProgress;
 import com.taskflow.api.repository.IssueRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.HashSet;
@@ -25,6 +27,8 @@ import java.util.stream.Collectors;
 @Component
 @RequiredArgsConstructor
 class PlanningSupport {
+
+    private static final double MILLIS_PER_DAY = Duration.ofDays(1).toMillis();
 
     private final IssueRepository issueRepository;
 
@@ -51,6 +55,29 @@ class PlanningSupport {
         if (start != null && end != null && end.isBefore(start)) {
             throw new BadRequestException(message);
         }
+    }
+
+    /** En el grupo COMPLETED. */
+    static boolean isCompleted(Issue issue) {
+        return issue.getState().getStateGroup() == StateGroup.COMPLETED;
+    }
+
+    /** Sin terminar: ni completada ni cancelada. */
+    static boolean isOpen(Issue issue) {
+        return issue.getState().getStateGroup().isOpen();
+    }
+
+    /**
+     * Mediana de días entre la creación y el completado de las tareas completadas, redondeada a un decimal (igual
+     * que en las estadísticas del proyecto); {@code null} si no hay ninguna.
+     */
+    static Double cycleTimeDays(Collection<Issue> issues) {
+        List<Double> days = issues.stream()
+                .filter(issue -> isCompleted(issue) && issue.getCompletedAt() != null && issue.getCreatedAt() != null)
+                .map(issue -> Duration.between(issue.getCreatedAt(), issue.getCompletedAt()).toMillis() / MILLIS_PER_DAY)
+                .toList();
+        Double median = ProjectStatsCalculator.median(days);
+        return median == null ? null : Math.round(median * 10) / 10.0;
     }
 
     static String blankToNull(String value) {

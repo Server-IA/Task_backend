@@ -1,8 +1,11 @@
 package com.taskflow.api.controller;
 
+import com.taskflow.api.dto.request.CloseCycleRequest;
 import com.taskflow.api.dto.request.IssueIdsRequest;
 import com.taskflow.api.dto.request.CycleRequest;
 import com.taskflow.api.dto.request.UpdateCycleRequest;
+import com.taskflow.api.dto.response.CloseCyclePreviewResponse;
+import com.taskflow.api.dto.response.CloseCycleResponse;
 import com.taskflow.api.dto.response.CycleResponse;
 import com.taskflow.api.security.UserPrincipal;
 import com.taskflow.api.service.CycleService;
@@ -56,7 +59,9 @@ public class CycleController {
         return cycleService.get(slug, projectId, cycleId);
     }
 
-    @Operation(summary = "Editar ciclo (project manager)")
+    @Operation(summary = "Editar ciclo (project manager)",
+            description = "En un ciclo cerrado solo se puede cambiar la descripción: cambiar el nombre o las fechas "
+                    + "responde 409.")
     @PatchMapping("/{cycleId}")
     @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     public CycleResponse update(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID cycleId,
@@ -72,7 +77,8 @@ public class CycleController {
         cycleService.delete(slug, projectId, cycleId);
     }
 
-    @Operation(summary = "Agregar issues al ciclo (si estaban en otro ciclo, se mueven a este)")
+    @Operation(summary = "Agregar issues al ciclo (si estaban en otro ciclo, se mueven a este)",
+            description = "Un ciclo cerrado no recibe tareas (409).")
     @PostMapping("/{cycleId}/issues")
     public CycleResponse addIssues(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID cycleId,
                                  @AuthenticationPrincipal UserPrincipal me,
@@ -85,5 +91,31 @@ public class CycleController {
     public CycleResponse removeIssue(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID cycleId,
                                    @PathVariable UUID issueId, @AuthenticationPrincipal UserPrincipal me) {
         return cycleService.removeIssue(slug, projectId, cycleId, issueId, me.getId());
+    }
+
+    @Operation(summary = "Vista previa del cierre (project manager)",
+            description = "Tareas completadas (grupo COMPLETED) y sin terminar (ni completadas ni canceladas) del ciclo, "
+                    + "por número; cycleTimeDays = mediana de días de creación a completado de las completadas "
+                    + "(null si no hay); nextCycle = siguiente ciclo sin cerrar por fecha de inicio (destino por "
+                    + "defecto), o null.")
+    @GetMapping("/{cycleId}/close-preview")
+    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    public CloseCyclePreviewResponse closePreview(@PathVariable String slug, @PathVariable UUID projectId,
+                                                  @PathVariable UUID cycleId) {
+        return cycleService.closePreview(slug, projectId, cycleId);
+    }
+
+    @Operation(summary = "Cerrar ciclo (project manager)",
+            description = "Las tareas sin terminar van a moveTo (NEXT_CYCLE: al ciclo targetCycleId o, sin él, al "
+                    + "siguiente; BACKLOG: salen del ciclo sin cambiar de estado), salvo las de overrides. Sin ciclo "
+                    + "siguiente y con alguna tarea hacia NEXT_CYCLE responde 400. Si el ciclo terminaba después de "
+                    + "hoy, su fin pasa a hoy. startRetro abre la retrospectiva. Un ciclo ya cerrado, o que aún no "
+                    + "empezó, responde 409.")
+    @PostMapping("/{cycleId}/close")
+    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    public CloseCycleResponse close(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID cycleId,
+                                    @AuthenticationPrincipal UserPrincipal me,
+                                    @Valid @RequestBody CloseCycleRequest request) {
+        return cycleService.close(slug, projectId, cycleId, me.getId(), request);
     }
 }

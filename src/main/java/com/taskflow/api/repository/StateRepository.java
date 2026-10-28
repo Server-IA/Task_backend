@@ -1,6 +1,7 @@
 package com.taskflow.api.repository;
 
 import com.taskflow.api.entity.State;
+import com.taskflow.api.entity.enums.StateGroup;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -17,6 +18,9 @@ public interface StateRepository extends JpaRepository<State, UUID> {
 
     /** Estado por defecto para los issues nuevos: el primero del tablero. */
     Optional<State> findFirstByProjectIdOrderByPositionAsc(UUID projectId);
+
+    /** Primer estado del tablero dentro del grupo indicado (por ejemplo, el primero «sin empezar»). */
+    Optional<State> findFirstByProjectIdAndStateGroupOrderByPositionAsc(UUID projectId, StateGroup stateGroup);
 
     boolean existsByProjectIdAndNameIgnoreCase(UUID projectId, String name);
 

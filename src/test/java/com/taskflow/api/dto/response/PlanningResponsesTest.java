@@ -21,6 +21,14 @@ class PlanningResponsesTest {
     }
 
     @Test
+    void unCicloCerradoEstaCompletadoAunqueSusFechasNoHayanTerminado() {
+        assertThat(CycleStatus.of(START, END, true, START)).isEqualTo(CycleStatus.COMPLETED);
+        assertThat(CycleStatus.of(START, END, true, START.minusDays(1))).isEqualTo(CycleStatus.COMPLETED);
+        assertThat(CycleStatus.of(null, null, true, START)).isEqualTo(CycleStatus.COMPLETED);
+        assertThat(CycleStatus.of(START, END, false, START)).isEqualTo(CycleStatus.CURRENT);
+    }
+
+    @Test
     void porcentajeDeAvance() {
         assertThat(ProgressResponse.of(0, 0).percentage()).isZero();
         assertThat(ProgressResponse.of(3, 1).percentage()).isEqualTo(33);

@@ -2,7 +2,9 @@ package com.taskflow.api.repository;
 
 import com.taskflow.api.entity.Cycle;
 import com.taskflow.api.entity.enums.StateGroup;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -22,6 +24,14 @@ public interface CycleRepository extends JpaRepository<Cycle, UUID> {
     List<Cycle> findAllByProjectId(@Param("projectId") UUID projectId);
 
     Optional<Cycle> findByIdAndProjectId(UUID id, UUID projectId);
+
+    /**
+     * El ciclo con su fila bloqueada hasta el final de la transacción: los votos de la retrospectiva se registran
+     * de a uno, así nadie supera el máximo con dos votos simultáneos.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select c from Cycle c where c.id = :id and c.project.id = :projectId")
+    Optional<Cycle> findForUpdate(@Param("id") UUID id, @Param("projectId") UUID projectId);
 
     /** Avance de los ciclos indicados; un ciclo sin issues no aparece en el resultado. */
     @Query("""

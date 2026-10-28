@@ -1,12 +1,17 @@
 package com.taskflow.api.service.impl;
 
 import com.taskflow.api.config.AppProperties;
+import com.taskflow.api.dto.request.CloseCycleRequest;
+import com.taskflow.api.dto.request.CycleMoveTarget;
 import com.taskflow.api.dto.request.CycleRequest;
 import com.taskflow.api.dto.request.IssueIdsRequest;
 import com.taskflow.api.dto.request.UpdateCycleRequest;
+import com.taskflow.api.dto.response.CloseCyclePreviewResponse;
+import com.taskflow.api.dto.response.CloseCycleResponse;
 import com.taskflow.api.dto.response.CycleResponse;
 import com.taskflow.api.dto.response.CycleStatus;
 import com.taskflow.api.dto.response.ProgressResponse;
+import com.taskflow.api.dto.response.RelatedIssueResponse;
 import com.taskflow.api.entity.Cycle;
 import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.Project;
@@ -14,7 +19,9 @@ import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.enums.ActivityField;
 import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.exception.BadRequestException;
+import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ResourceNotFoundException;
+import com.taskflow.api.mapper.IssueMapper;
 import com.taskflow.api.mapper.PlanningMapper;
 import com.taskflow.api.repository.CycleRepository;
 import com.taskflow.api.service.ActivityService;
@@ -23,8 +30,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -35,11 +46,22 @@ public class CycleServiceImpl implements CycleService {
 
     private static final String INVALID_DATES = "La fecha de fin no puede ser anterior a la de inicio";
 
+    static final String CLOSED_EDIT_MESSAGE = "El ciclo está cerrado: ya no se pueden cambiar su nombre ni sus fechas";
+    static final String CLOSED_ADD_MESSAGE = "El ciclo está cerrado: ya no se le pueden agregar tareas";
+    static final String ALREADY_CLOSED_MESSAGE = "El ciclo ya está cerrado";
+    static final String NOT_STARTED_MESSAGE = "El ciclo todavía no ha empezado: no se puede cerrar";
+    static final String NO_NEXT_CYCLE_MESSAGE =
+            "No hay un ciclo siguiente sin cerrar: elige un ciclo destino o mueve las tareas al backlog";
+
+    /** Las tareas del cierre se listan por número. */
+    private static final Comparator<Issue> BY_NUMBER = Comparator.comparingInt(Issue::getSequenceId);
+
     private final CycleRepository cycleRepository;
     private final ActivityService activityService;
     private final PlanningSupport support;
     private final ResourceLookup lookup;
     private final PlanningMapper mapper;
+    private final IssueMapper issueMapper;
     private final AppProperties properties;
 
     @Override
@@ -83,6 +105,9 @@ public class CycleServiceImpl implements CycleService {
     @Transactional
     public CycleResponse update(String slug, UUID projectId, UUID cycleId, UpdateCycleRequest request) {
         Cycle cycle = findCycle(slug, projectId, cycleId);
+        if (cycle.isClosed() && changesNameOrDates(cycle, request)) {
+            throw new ConflictException(CLOSED_EDIT_MESSAGE);
+        }
         if (request.name() != null) {
             if (request.name().isBlank()) {
                 throw new BadRequestException("El nombre no puede estar vacío");
@@ -118,6 +143,9 @@ public class CycleServiceImpl implements CycleService {
     @Transactional
     public CycleResponse addIssues(String slug, UUID projectId, UUID cycleId, UUID userId, IssueIdsRequest request) {
         Cycle cycle = findCycle(slug, projectId, cycleId);
+        if (cycle.isClosed()) {
+            throw new ConflictException(CLOSED_ADD_MESSAGE);
+        }
         List<Issue> issues = support.findIssues(cycle.getProject(), request.issueIds());
         User actor = lookup.user(userId);
 
@@ -144,10 +172,156 @@ public class CycleServiceImpl implements CycleService {
         return toResponse(cycleRepository.saveAndFlush(cycle));
     }
 
-    private Cycle findCycle(String slug, UUID projectId, UUID cycleId) {
+    @Override
+    @Transactional(readOnly = true)
+    public CloseCyclePreviewResponse closePreview(String slug, UUID projectId, UUID cycleId) {
         Project project = lookup.project(slug, projectId);
+        Cycle cycle = findCycle(project, cycleId);
+        List<Issue> issues = cycle.getIssues().stream().sorted(BY_NUMBER).toList();
+        List<Issue> completed = issues.stream().filter(PlanningSupport::isCompleted).toList();
+        List<Issue> unfinished = issues.stream().filter(PlanningSupport::isOpen).toList();
+        Cycle next = nextCycle(cycle, cycleRepository.findAllByProjectId(project.getId()), today());
+        return new CloseCyclePreviewResponse(
+                toResponse(cycle),
+                toRefs(completed),
+                toRefs(unfinished),
+                completed.size(),
+                unfinished.size(),
+                PlanningSupport.cycleTimeDays(completed),
+                next == null ? null : toResponse(next));
+    }
+
+    @Override
+    @Transactional
+    public CloseCycleResponse close(String slug, UUID projectId, UUID cycleId, UUID userId, CloseCycleRequest request) {
+        Project project = lookup.project(slug, projectId);
+        Cycle cycle = findCycle(project, cycleId);
+        if (cycle.isClosed()) {
+            throw new ConflictException(ALREADY_CLOSED_MESSAGE);
+        }
+        LocalDate today = today();
+        if (cycle.getStartDate() != null && cycle.getStartDate().isAfter(today)) {
+            // Además, acortar su fin a hoy lo dejaría terminando antes de empezar.
+            throw new ConflictException(NOT_STARTED_MESSAGE);
+        }
+
+        // Destino de cada tarea sin terminar: su excepción o, si no tiene, el general.
+        Map<UUID, CycleMoveTarget> overrides = new HashMap<>();
+        if (request.overrides() != null) {
+            request.overrides().forEach(override -> overrides.put(override.issueId(), override.moveTo()));
+        }
+        List<Issue> toCycle = new ArrayList<>();
+        List<Issue> toBacklog = new ArrayList<>();
+        cycle.getIssues().stream()
+                .filter(PlanningSupport::isOpen)
+                .sorted(BY_NUMBER)
+                .forEach(issue -> {
+                    CycleMoveTarget target = overrides.getOrDefault(issue.getId(), request.moveTo());
+                    (target == CycleMoveTarget.NEXT_CYCLE ? toCycle : toBacklog).add(issue);
+                });
+        Cycle target = resolveTarget(project, cycle, request.targetCycleId(), !toCycle.isEmpty(), today);
+        User actor = lookup.user(userId);
+
+        // Primero se escriben las salidas: una tarea no puede estar en dos ciclos ni un instante (cycle_issues).
+        toCycle.forEach(cycle.getIssues()::remove);
+        toBacklog.forEach(cycle.getIssues()::remove);
+        cycleRepository.saveAndFlush(cycle);
+        if (!toCycle.isEmpty()) {
+            target.getIssues().addAll(toCycle);
+            cycleRepository.saveAndFlush(target);
+        }
+        for (Issue issue : toCycle) {
+            activityService.record(issue, actor, ActivityField.CYCLE, cycle.getName(), target.getName());
+        }
+        for (Issue issue : toBacklog) {
+            activityService.record(issue, actor, ActivityField.CYCLE, cycle.getName(), null);
+        }
+
+        if (cycle.getEndDate() == null ? cycle.getStartDate() != null : cycle.getEndDate().isAfter(today)) {
+            cycle.setEndDate(today);
+        }
+        Instant now = Instant.now();
+        cycle.setClosedAt(now);
+        cycle.setClosedBy(actor);
+        cycle.setCarriedToCycle(toCycle.size());
+        cycle.setCarriedToBacklog(toBacklog.size());
+        if (Boolean.TRUE.equals(request.startRetro()) && cycle.getRetroStartedAt() == null) {
+            cycle.setRetroStartedAt(now);
+        }
+        Cycle saved = cycleRepository.saveAndFlush(cycle);
+        return new CloseCycleResponse(toResponse(saved), toCycle.size(), toBacklog.size(),
+                saved.getRetroStartedAt() != null);
+    }
+
+    /**
+     * Siguiente ciclo sin cerrar, el destino por defecto al cerrar uno: el que empieza primero después del inicio de
+     * este. Para un ciclo sin fechas, el primero (por inicio) de los que no han terminado. Los borradores no cuentan.
+     */
+    static Cycle nextCycle(Cycle cycle, List<Cycle> cycles, LocalDate today) {
+        return cycles.stream()
+                .filter(other -> !other.getId().equals(cycle.getId()) && !other.isClosed()
+                        && other.getStartDate() != null)
+                .filter(other -> cycle.getStartDate() != null
+                        ? other.getStartDate().isAfter(cycle.getStartDate())
+                        : other.getEndDate() == null || !other.getEndDate().isBefore(today))
+                .min(Comparator.comparing(Cycle::getStartDate)
+                        .thenComparing(Cycle::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder())))
+                .orElse(null);
+    }
+
+    /** Si la edición cambia el nombre o alguna fecha (lo que un ciclo cerrado ya no permite). */
+    static boolean changesNameOrDates(Cycle cycle, UpdateCycleRequest request) {
+        if (request.name() != null && !request.name().trim().equals(cycle.getName())) {
+            return true;
+        }
+        if (Boolean.TRUE.equals(request.clearDates())) {
+            return cycle.getStartDate() != null || cycle.getEndDate() != null;
+        }
+        return request.startDate() != null && !request.startDate().equals(cycle.getStartDate())
+                || request.endDate() != null && !request.endDate().equals(cycle.getEndDate());
+    }
+
+    /**
+     * Ciclo al que van las tareas con NEXT_CYCLE: el indicado o, si no se indica, el siguiente. Un destino indicado se
+     * valida siempre; sin destino, solo falta el siguiente si alguna tarea lo necesita.
+     */
+    private Cycle resolveTarget(Project project, Cycle cycle, UUID targetCycleId, boolean needed, LocalDate today) {
+        if (targetCycleId != null) {
+            if (targetCycleId.equals(cycle.getId())) {
+                throw new BadRequestException("El ciclo destino debe ser otro ciclo");
+            }
+            Cycle target = cycleRepository.findByIdAndProjectId(targetCycleId, project.getId())
+                    .orElseThrow(() -> new BadRequestException("El ciclo destino no existe en este proyecto"));
+            if (target.isClosed()) {
+                throw new ConflictException("El ciclo destino está cerrado");
+            }
+            return target;
+        }
+        if (!needed) {
+            return null;
+        }
+        Cycle next = nextCycle(cycle, cycleRepository.findAllByProjectId(project.getId()), today);
+        if (next == null) {
+            throw new BadRequestException(NO_NEXT_CYCLE_MESSAGE);
+        }
+        return next;
+    }
+
+    private List<RelatedIssueResponse> toRefs(List<Issue> issues) {
+        return issues.stream().map(issueMapper::toRelated).toList();
+    }
+
+    private Cycle findCycle(String slug, UUID projectId, UUID cycleId) {
+        return findCycle(lookup.project(slug, projectId), cycleId);
+    }
+
+    private Cycle findCycle(Project project, UUID cycleId) {
         return cycleRepository.findByIdAndProjectId(cycleId, project.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Ciclo no encontrado"));
+    }
+
+    private LocalDate today() {
+        return LocalDate.now(ZoneId.of(properties.timezone()));
     }
 
     private CycleResponse toResponse(Cycle cycle) {
@@ -156,7 +330,7 @@ public class CycleServiceImpl implements CycleService {
     }
 
     private CycleResponse toResponse(Cycle cycle, ProgressResponse progress) {
-        LocalDate today = LocalDate.now(ZoneId.of(properties.timezone()));
-        return mapper.toCycleResponse(cycle, CycleStatus.of(cycle.getStartDate(), cycle.getEndDate(), today), progress);
+        CycleStatus status = CycleStatus.of(cycle.getStartDate(), cycle.getEndDate(), cycle.isClosed(), today());
+        return mapper.toCycleResponse(cycle, status, progress);
     }
 }

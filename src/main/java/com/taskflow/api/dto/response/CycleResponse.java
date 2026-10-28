@@ -11,6 +11,8 @@ public record CycleResponse(
         LocalDate startDate,
         LocalDate endDate,
         CycleStatus status,
+        /** Cuándo se cerró; {@code null} mientras siga abierto. Un ciclo cerrado siempre está COMPLETED. */
+        Instant closedAt,
         ProgressResponse progress,
         Instant createdAt,
         Instant updatedAt

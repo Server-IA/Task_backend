@@ -1,0 +1,439 @@
+package com.taskflow.api.service.impl;
+
+import com.taskflow.api.config.AppProperties;
+import com.taskflow.api.dto.request.CloseCycleRequest;
+import com.taskflow.api.dto.request.CloseCycleRequest.IssueMove;
+import com.taskflow.api.dto.request.CycleMoveTarget;
+import com.taskflow.api.dto.request.IssueIdsRequest;
+import com.taskflow.api.dto.request.UpdateCycleRequest;
+import com.taskflow.api.dto.response.CloseCyclePreviewResponse;
+import com.taskflow.api.dto.response.CloseCycleResponse;
+import com.taskflow.api.dto.response.CycleResponse;
+import com.taskflow.api.dto.response.CycleStatus;
+import com.taskflow.api.dto.response.ProgressResponse;
+import com.taskflow.api.dto.response.RelatedIssueResponse;
+import com.taskflow.api.entity.Cycle;
+import com.taskflow.api.entity.Issue;
+import com.taskflow.api.entity.Project;
+import com.taskflow.api.entity.State;
+import com.taskflow.api.entity.User;
+import com.taskflow.api.entity.enums.ActivityField;
+import com.taskflow.api.entity.enums.StateGroup;
+import com.taskflow.api.exception.BadRequestException;
+import com.taskflow.api.exception.ConflictException;
+import com.taskflow.api.mapper.IssueMapper;
+import com.taskflow.api.mapper.PlanningMapper;
+import com.taskflow.api.repository.CycleRepository;
+import com.taskflow.api.service.ActivityService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class CycleServiceImplTest {
+
+    private static final String SLUG = "mi-equipo";
+    private static final ZoneId ZONE = ZoneId.of("America/Bogota");
+
+    @Mock
+    private CycleRepository cycleRepository;
+    @Mock
+    private ActivityService activityService;
+    @Mock
+    private PlanningSupport support;
+    @Mock
+    private ResourceLookup lookup;
+    @Mock
+    private PlanningMapper mapper;
+    @Mock
+    private IssueMapper issueMapper;
+
+    private CycleServiceImpl cycleService;
+
+    private final LocalDate today = LocalDate.now(ZONE);
+    private final Instant now = Instant.now();
+    private Project project;
+    private User pm;
+    private State todo;
+    private State inProgress;
+    private State done;
+    private State cancelled;
+    private int nextSequence = 1;
+
+    @BeforeEach
+    void setUp() {
+        AppProperties properties = new AppProperties(null, null, "http://localhost:5173", "America/Bogota", null);
+        cycleService = new CycleServiceImpl(cycleRepository, activityService, support, lookup, mapper, issueMapper,
+                properties);
+        project = new Project();
+        project.setId(UUID.randomUUID());
+        project.setIdentifier("WEB");
+        pm = new User();
+        pm.setId(UUID.randomUUID());
+        todo = state("Todo", StateGroup.UNSTARTED);
+        inProgress = state("En curso", StateGroup.STARTED);
+        done = state("Hecho", StateGroup.COMPLETED);
+        cancelled = state("Cancelada", StateGroup.CANCELLED);
+
+        lenient().when(lookup.project(SLUG, project.getId())).thenReturn(project);
+        lenient().when(lookup.user(pm.getId())).thenReturn(pm);
+        lenient().when(cycleRepository.findProgress(anyCollection(), eq(StateGroup.COMPLETED))).thenReturn(List.of());
+        lenient().when(cycleRepository.saveAndFlush(any(Cycle.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(mapper.toCycleResponse(any(Cycle.class), any(CycleStatus.class), any(ProgressResponse.class)))
+                .thenAnswer(invocation -> {
+                    Cycle cycle = invocation.getArgument(0);
+                    return new CycleResponse(cycle.getId(), cycle.getName(), cycle.getDescription(),
+                            cycle.getStartDate(), cycle.getEndDate(), invocation.getArgument(1), cycle.getClosedAt(),
+                            invocation.getArgument(2), null, null);
+                });
+        lenient().when(issueMapper.toRelated(any(Issue.class))).thenAnswer(invocation -> {
+            Issue issue = invocation.getArgument(0);
+            return new RelatedIssueResponse(issue.getId(), issue.getCode(), issue.getTitle(), null, List.of());
+        });
+    }
+
+    private State state(String name, StateGroup group) {
+        State state = new State(project, name, "#000000", group, 0);
+        state.setId(UUID.randomUUID());
+        return state;
+    }
+
+    private Issue issue(State state) {
+        Issue issue = new Issue();
+        issue.setId(UUID.randomUUID());
+        issue.setProject(project);
+        issue.setSequenceId(nextSequence++);
+        issue.setTitle("Tarea " + issue.getSequenceId());
+        issue.setState(state);
+        issue.setCreatedAt(now.minus(Duration.ofDays(10)));
+        return issue;
+    }
+
+    private Issue completedIssue(Duration createdAgo, Duration completedAgo) {
+        Issue issue = issue(done);
+        issue.setCreatedAt(now.minus(createdAgo));
+        issue.setCompletedAt(now.minus(completedAgo));
+        return issue;
+    }
+
+    private Cycle cycle(String name, LocalDate start, LocalDate end, Issue... issues) {
+        Cycle cycle = new Cycle();
+        cycle.setId(UUID.randomUUID());
+        cycle.setProject(project);
+        cycle.setName(name);
+        cycle.setStartDate(start);
+        cycle.setEndDate(end);
+        cycle.setCreatedAt(now);
+        cycle.getIssues().addAll(Arrays.asList(issues));
+        lenient().when(cycleRepository.findByIdAndProjectId(cycle.getId(), project.getId()))
+                .thenReturn(Optional.of(cycle));
+        return cycle;
+    }
+
+    private Cycle closed(Cycle cycle) {
+        cycle.setClosedAt(now.minus(Duration.ofDays(1)));
+        return cycle;
+    }
+
+    private void projectCycles(Cycle... cycles) {
+        lenient().when(cycleRepository.findAllByProjectId(project.getId())).thenReturn(Arrays.asList(cycles));
+    }
+
+    private static CloseCycleRequest closeRequest(CycleMoveTarget moveTo, UUID targetCycleId, boolean startRetro,
+                                                  IssueMove... overrides) {
+        return new CloseCycleRequest(moveTo, targetCycleId, List.of(overrides), startRetro);
+    }
+
+    @Nested
+    class ClosePreview {
+
+        @Test
+        void separaCompletadasYSinTerminarConSuCycleTimeYElSiguienteCiclo() {
+            Issue slow = completedIssue(Duration.ofDays(4), Duration.ofDays(1));
+            Issue fast = completedIssue(Duration.ofDays(2), Duration.ofDays(1));
+            Issue started = issue(inProgress);
+            Issue pending = issue(todo);
+            Issue dropped = issue(cancelled);
+            Cycle sprint = cycle("Sprint 3", today.minusDays(7), today.plusDays(7),
+                    pending, dropped, started, fast, slow);
+            Cycle next = cycle("Sprint 4", today.plusDays(8), today.plusDays(21));
+            Cycle later = cycle("Sprint 5", today.plusDays(22), today.plusDays(35));
+            Cycle closedOne = closed(cycle("Sprint 2", today.plusDays(1), today.plusDays(2)));
+            Cycle draft = cycle("Ideas", null, null);
+            projectCycles(later, next, closedOne, draft, sprint);
+
+            CloseCyclePreviewResponse preview = cycleService.closePreview(SLUG, project.getId(), sprint.getId());
+
+            assertThat(preview.cycle().id()).isEqualTo(sprint.getId());
+            assertThat(preview.completed()).extracting(RelatedIssueResponse::id)
+                    .containsExactly(slow.getId(), fast.getId());
+            // Las canceladas no son «completadas» ni «sin terminar»: se quedan en el ciclo.
+            assertThat(preview.unfinished()).extracting(RelatedIssueResponse::id)
+                    .containsExactly(started.getId(), pending.getId());
+            assertThat(preview.completedCount()).isEqualTo(2);
+            assertThat(preview.unfinishedCount()).isEqualTo(2);
+            assertThat(preview.cycleTimeDays()).isEqualTo(2.0);
+            assertThat(preview.nextCycle().id()).isEqualTo(next.getId());
+        }
+
+        @Test
+        void sinCompletadasNiCicloSiguiente() {
+            Cycle sprint = cycle("Sprint 3", today.minusDays(7), today.plusDays(7), issue(todo));
+            projectCycles(sprint);
+
+            CloseCyclePreviewResponse preview = cycleService.closePreview(SLUG, project.getId(), sprint.getId());
+
+            assertThat(preview.completed()).isEmpty();
+            assertThat(preview.cycleTimeDays()).isNull();
+            assertThat(preview.nextCycle()).isNull();
+        }
+
+        @Test
+        void paraUnCicloSinFechasElSiguienteEsElPrimeroQueNoHaTerminado() {
+            Cycle draft = cycle("Ideas", null, null);
+            Cycle ended = cycle("Sprint 1", today.minusDays(20), today.minusDays(6));
+            Cycle current = cycle("Sprint 2", today.minusDays(5), today.plusDays(9));
+            Cycle upcoming = cycle("Sprint 3", today.plusDays(10), today.plusDays(24));
+
+            assertThat(CycleServiceImpl.nextCycle(draft, List.of(upcoming, current, ended, draft), today))
+                    .isSameAs(current);
+        }
+    }
+
+    @Nested
+    class Close {
+
+        private Issue finished;
+        private Issue dropped;
+        private Issue started;
+        private Issue pending;
+        private Cycle sprint;
+        private Cycle next;
+
+        @BeforeEach
+        void cycles() {
+            finished = completedIssue(Duration.ofDays(3), Duration.ofDays(1));
+            dropped = issue(cancelled);
+            started = issue(inProgress);
+            pending = issue(todo);
+            sprint = cycle("Sprint 3", today.minusDays(7), today.plusDays(7), finished, dropped, started, pending);
+            next = cycle("Sprint 4", today.plusDays(8), today.plusDays(21));
+        }
+
+        @Test
+        void porDefectoPasaLasSinTerminarAlSiguienteCicloYLoCierra() {
+            projectCycles(next, sprint);
+
+            CloseCycleResponse response = cycleService.close(SLUG, project.getId(), sprint.getId(), pm.getId(),
+                    closeRequest(CycleMoveTarget.NEXT_CYCLE, null, false));
+
+            assertThat(sprint.getIssues()).containsExactlyInAnyOrder(finished, dropped);
+            assertThat(next.getIssues()).containsExactlyInAnyOrder(started, pending);
+            verify(activityService).record(started, pm, ActivityField.CYCLE, "Sprint 3", "Sprint 4");
+            verify(activityService).record(pending, pm, ActivityField.CYCLE, "Sprint 3", "Sprint 4");
+            assertThat(sprint.getClosedAt()).isNotNull();
+            assertThat(sprint.getClosedBy()).isSameAs(pm);
+            assertThat(sprint.getCarriedToCycle()).isEqualTo(2);
+            assertThat(sprint.getCarriedToBacklog()).isZero();
+            // Terminaba después de hoy: su fin pasa a hoy.
+            assertThat(sprint.getEndDate()).isEqualTo(today);
+            assertThat(sprint.getRetroStartedAt()).isNull();
+            // El estado de las tareas no cambia.
+            assertThat(started.getState()).isSameAs(inProgress);
+
+            assertThat(response.movedToCycle()).isEqualTo(2);
+            assertThat(response.movedToBacklog()).isZero();
+            assertThat(response.retroStarted()).isFalse();
+            assertThat(response.cycle().status()).isEqualTo(CycleStatus.COMPLETED);
+            assertThat(response.cycle().closedAt()).isEqualTo(sprint.getClosedAt());
+        }
+
+        @Test
+        void lasExcepcionesMandanTareasAlBacklogSinCambiarSuEstado() {
+            projectCycles(next, sprint);
+
+            CloseCycleResponse response = cycleService.close(SLUG, project.getId(), sprint.getId(), pm.getId(),
+                    closeRequest(CycleMoveTarget.NEXT_CYCLE, null, false,
+                            new IssueMove(pending.getId(), CycleMoveTarget.BACKLOG),
+                            // Una excepción sobre una tarea ya terminada no la mueve.
+                            new IssueMove(finished.getId(), CycleMoveTarget.BACKLOG)));
+
+            assertThat(sprint.getIssues()).containsExactlyInAnyOrder(finished, dropped);
+            assertThat(next.getIssues()).containsExactly(started);
+            verify(activityService).record(started, pm, ActivityField.CYCLE, "Sprint 3", "Sprint 4");
+            verify(activityService).record(pending, pm, ActivityField.CYCLE, "Sprint 3", null);
+            assertThat(pending.getState()).isSameAs(todo);
+            assertThat(sprint.getCarriedToCycle()).isEqualTo(1);
+            assertThat(sprint.getCarriedToBacklog()).isEqualTo(1);
+            assertThat(response.movedToCycle()).isEqualTo(1);
+            assertThat(response.movedToBacklog()).isEqualTo(1);
+        }
+
+        @Test
+        void alBacklogNoHaceFaltaCicloSiguienteYPuedeAbrirLaRetro() {
+            CloseCycleResponse response = cycleService.close(SLUG, project.getId(), sprint.getId(), pm.getId(),
+                    closeRequest(CycleMoveTarget.BACKLOG, null, true));
+
+            assertThat(sprint.getIssues()).containsExactlyInAnyOrder(finished, dropped);
+            verify(cycleRepository, never()).findAllByProjectId(any());
+            assertThat(sprint.getCarriedToBacklog()).isEqualTo(2);
+            assertThat(sprint.getRetroStartedAt()).isNotNull();
+            assertThat(response.retroStarted()).isTrue();
+        }
+
+        @Test
+        void conCicloDestinoIndicadoLasMueveAEse() {
+            Cycle later = cycle("Sprint 6", today.plusDays(30), today.plusDays(44));
+
+            cycleService.close(SLUG, project.getId(), sprint.getId(), pm.getId(),
+                    closeRequest(CycleMoveTarget.NEXT_CYCLE, later.getId(), false));
+
+            assertThat(later.getIssues()).containsExactlyInAnyOrder(started, pending);
+            assertThat(next.getIssues()).isEmpty();
+            verify(activityService).record(started, pm, ActivityField.CYCLE, "Sprint 3", "Sprint 6");
+        }
+
+        @Test
+        void sinCicloSiguienteYConTareasHaciaNextCycleResponde400() {
+            projectCycles(sprint);
+
+            assertThatThrownBy(() -> cycleService.close(SLUG, project.getId(), sprint.getId(), pm.getId(),
+                    closeRequest(CycleMoveTarget.NEXT_CYCLE, null, false)))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessage(CycleServiceImpl.NO_NEXT_CYCLE_MESSAGE);
+            assertThat(sprint.getClosedAt()).isNull();
+            assertThat(sprint.getIssues()).hasSize(4);
+            verifyNoInteractions(activityService);
+        }
+
+        @Test
+        void sinTareasSinTerminarNoHaceFaltaCicloSiguiente() {
+            Cycle allDone = cycle("Sprint 9", today.minusDays(7), today.minusDays(1), finished);
+            projectCycles(allDone);
+
+            CloseCycleResponse response = cycleService.close(SLUG, project.getId(), allDone.getId(), pm.getId(),
+                    closeRequest(CycleMoveTarget.NEXT_CYCLE, null, false));
+
+            assertThat(response.movedToCycle()).isZero();
+            assertThat(allDone.getClosedAt()).isNotNull();
+            // Ya había terminado: conserva su fecha de fin.
+            assertThat(allDone.getEndDate()).isEqualTo(today.minusDays(1));
+        }
+
+        @Test
+        void elCicloDestinoNoPuedeSerElMismoNiEstarCerrado() {
+            Cycle closedTarget = closed(cycle("Sprint 2", today.minusDays(21), today.minusDays(8)));
+
+            assertThatThrownBy(() -> cycleService.close(SLUG, project.getId(), sprint.getId(), pm.getId(),
+                    closeRequest(CycleMoveTarget.NEXT_CYCLE, sprint.getId(), false)))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessage("El ciclo destino debe ser otro ciclo");
+            assertThatThrownBy(() -> cycleService.close(SLUG, project.getId(), sprint.getId(), pm.getId(),
+                    closeRequest(CycleMoveTarget.NEXT_CYCLE, closedTarget.getId(), false)))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessage("El ciclo destino está cerrado");
+            UUID unknown = UUID.randomUUID();
+            when(cycleRepository.findByIdAndProjectId(unknown, project.getId())).thenReturn(Optional.empty());
+            assertThatThrownBy(() -> cycleService.close(SLUG, project.getId(), sprint.getId(), pm.getId(),
+                    closeRequest(CycleMoveTarget.BACKLOG, unknown, false)))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessage("El ciclo destino no existe en este proyecto");
+            assertThat(sprint.getClosedAt()).isNull();
+        }
+
+        @Test
+        void cerrarUnCicloYaCerradoResponde409() {
+            closed(sprint);
+
+            assertThatThrownBy(() -> cycleService.close(SLUG, project.getId(), sprint.getId(), pm.getId(),
+                    closeRequest(CycleMoveTarget.BACKLOG, null, false)))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessage(CycleServiceImpl.ALREADY_CLOSED_MESSAGE);
+            verify(cycleRepository, never()).saveAndFlush(any());
+        }
+
+        @Test
+        void unCicloQueNoHaEmpezadoNoSePuedeCerrar() {
+            assertThatThrownBy(() -> cycleService.close(SLUG, project.getId(), next.getId(), pm.getId(),
+                    closeRequest(CycleMoveTarget.BACKLOG, null, false)))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessage(CycleServiceImpl.NOT_STARTED_MESSAGE);
+        }
+    }
+
+    @Nested
+    class ClosedCycle {
+
+        private Cycle sprint;
+
+        @BeforeEach
+        void closedCycle() {
+            sprint = closed(cycle("Sprint 3", today.minusDays(7), today.plusDays(7)));
+            sprint.setDescription("Objetivo: pagos");
+        }
+
+        @Test
+        void noCambiaDeNombreNiDeFechas() {
+            List<UpdateCycleRequest> requests = List.of(
+                    new UpdateCycleRequest("Sprint 3b", null, null, null, null),
+                    new UpdateCycleRequest(null, null, today.minusDays(6), null, null),
+                    new UpdateCycleRequest(null, null, null, today.plusDays(1), null),
+                    new UpdateCycleRequest(null, null, null, null, true));
+            for (UpdateCycleRequest request : requests) {
+                assertThatThrownBy(() -> cycleService.update(SLUG, project.getId(), sprint.getId(), request))
+                        .isInstanceOf(ConflictException.class)
+                        .hasMessage(CycleServiceImpl.CLOSED_EDIT_MESSAGE);
+            }
+            assertThat(sprint.getName()).isEqualTo("Sprint 3");
+            verify(cycleRepository, never()).saveAndFlush(any());
+        }
+
+        @Test
+        void siSePuedeCambiarSuDescripcionAunqueLleguenElMismoNombreYFechas() {
+            cycleService.update(SLUG, project.getId(), sprint.getId(), new UpdateCycleRequest(" Sprint 3 ",
+                    "Objetivo: pagos y facturas", sprint.getStartDate(), sprint.getEndDate(), false));
+
+            assertThat(sprint.getDescription()).isEqualTo("Objetivo: pagos y facturas");
+        }
+
+        @Test
+        void noRecibeTareas() {
+            assertThatThrownBy(() -> cycleService.addIssues(SLUG, project.getId(), sprint.getId(), pm.getId(),
+                    new IssueIdsRequest(List.of(UUID.randomUUID()))))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessage(CycleServiceImpl.CLOSED_ADD_MESSAGE);
+            verifyNoInteractions(support, activityService);
+        }
+
+        @Test
+        void suEstadoEsCompletedAunqueSusFechasNoHayanTerminado() {
+            CycleResponse response = cycleService.get(SLUG, project.getId(), sprint.getId());
+
+            assertThat(response.status()).isEqualTo(CycleStatus.COMPLETED);
+            assertThat(response.closedAt()).isEqualTo(sprint.getClosedAt());
+        }
+    }
+}

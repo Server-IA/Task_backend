@@ -72,10 +72,11 @@ public class ProjectStatsServiceImpl implements ProjectStatsService {
                 cycleIssueIds);
     }
 
-    /** Ciclo en curso (hoy entre sus fechas). Si se solapan varios, el que empezó más tarde. */
+    /** Ciclo en curso (hoy entre sus fechas y sin cerrar). Si se solapan varios, el que empezó más tarde. */
     private Cycle findCurrentCycle(Project project, LocalDate today) {
         return cycleRepository.findAllByProjectId(project.getId()).stream()
-                .filter(cycle -> CycleStatus.of(cycle.getStartDate(), cycle.getEndDate(), today) == CycleStatus.CURRENT)
+                .filter(cycle -> CycleStatus.of(cycle.getStartDate(), cycle.getEndDate(), cycle.isClosed(), today)
+                        == CycleStatus.CURRENT)
                 .findFirst()
                 .orElse(null);
     }

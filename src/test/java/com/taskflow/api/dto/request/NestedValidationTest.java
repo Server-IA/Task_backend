@@ -2,6 +2,7 @@ package com.taskflow.api.dto.request;
 
 import com.taskflow.api.entity.SavedViewFilters;
 import com.taskflow.api.entity.enums.ChecklistItemKind;
+import com.taskflow.api.entity.enums.RetroColumn;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -10,13 +11,16 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Los elementos de la checklist y los filtros de las vistas se validan dentro del cuerpo de la petición.
+ * Los elementos de la checklist, los filtros de las vistas y las excepciones del cierre de un ciclo se validan
+ * dentro del cuerpo de la petición.
  */
 class NestedValidationTest {
 
@@ -59,6 +63,26 @@ class NestedValidationTest {
                 List.of(new ChecklistItemRequest(ChecklistItemKind.CHECK, "")));
 
         assertThat(paths(validator.validate(request))).containsExactly("checklist[0].text");
+    }
+
+    @Test
+    void validaCadaExcepcionAlCerrarUnCiclo() {
+        CloseCycleRequest request = new CloseCycleRequest(null, null, Arrays.asList(
+                new CloseCycleRequest.IssueMove(UUID.randomUUID(), CycleMoveTarget.BACKLOG),
+                new CloseCycleRequest.IssueMove(null, null),
+                null), false);
+
+        assertThat(paths(validator.validate(request)))
+                .containsExactly("moveTo", "overrides[1].issueId", "overrides[1].moveTo", "overrides[2].<list element>");
+    }
+
+    @Test
+    void elTextoDeUnaNotaDeLaRetroVaDe1A500() {
+        assertThat(paths(validator.validate(new RetroNoteRequest(null, " ")))).containsExactly("column", "text");
+        assertThat(paths(validator.validate(new UpdateRetroNoteRequest("x".repeat(501))))).containsExactly("text");
+        assertThat(validator.validate(new RetroNoteRequest(RetroColumn.ACTION, "x".repeat(500)))).isEmpty();
+        assertThat(paths(validator.validate(new DailyNoteRequest("x".repeat(5001))))).containsExactly("text");
+        assertThat(validator.validate(new DailyNoteRequest(null))).isEmpty();
     }
 
     @Test

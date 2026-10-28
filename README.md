@@ -62,7 +62,9 @@ quién puede borrar, checklist al crear y aviso de desbloqueo), `WorkspaceSecuri
 las estadísticas del proyecto (mediana, throughput, burndown), «Mi trabajo», el feed de actividad, la
 búsqueda, `SortOrderCalculator`, el avance de ciclos, las dependencias (duplicados, ciclos y
 desbloqueo), la checklist (orden y conteos), las plantillas (por defecto y validaciones), las
-menciones y las vistas guardadas (visibilidad y permisos).
+menciones, las vistas guardadas (visibilidad y permisos), el cierre de ciclos (a dónde va cada tarea,
+409 y ciclo cerrado inmutable), la retrospectiva (votos, permisos, convertir acciones, terminar) y la
+daily (día hábil anterior y agregación por persona).
 
 ## Arquitectura
 
@@ -318,6 +320,8 @@ Base: `/workspaces/{slug}/projects/{projectId}`.
 | GET / PATCH / DELETE | `/cycles/{cycleId}` | Ver / editar (PM; `clearDates: true` lo vuelve borrador) / eliminar (PM) |
 | POST | `/cycles/{cycleId}/issues` | Agregar `{ issueIds: [...] }` (un issue está en un solo ciclo: se mueve) |
 | DELETE | `/cycles/{cycleId}/issues/{issueId}` | Quitar |
+| GET | `/cycles/{cycleId}/close-preview` | Vista previa del cierre (PM) |
+| POST | `/cycles/{cycleId}/close` | Cerrar el ciclo (PM) |
 | GET / POST | `/modules` | Listar / crear (PM) `{ name, description?, startDate?, targetDate? }` |
 | GET / PATCH / DELETE | `/modules/{moduleId}` | Ver / editar (PM) / eliminar (PM) |
 | POST | `/modules/{moduleId}/issues` | Agregar `{ issueIds: [...] }` (un issue puede estar en varios módulos) |
@@ -325,8 +329,73 @@ Base: `/workspaces/{slug}/projects/{projectId}`.
 
 Cada ciclo y módulo trae `progress: { totalIssues, completedIssues, percentage }` (completados =
 issues en estados del grupo `COMPLETED`). Los ciclos traen además `status`:
-`DRAFT | UPCOMING | CURRENT | COMPLETED`. Para listar los issues de un ciclo o módulo se usa el
-filtro `?cycle=` o `?module=` del listado de issues.
+`DRAFT | UPCOMING | CURRENT | COMPLETED` y `closedAt` (`null` mientras siga abierto; un ciclo cerrado
+siempre está `COMPLETED`). Para listar los issues de un ciclo o módulo se usa el filtro `?cycle=` o
+`?module=` del listado de issues.
+
+**Cerrar un ciclo** (solo el PM). `close-preview` responde:
+
+```json
+{ "cycle": CycleResponse, "completed": [IssueRef], "unfinished": [IssueRef], "completedCount": 8,
+  "unfinishedCount": 3, "cycleTimeDays": 2.5, "nextCycle": CycleResponse | null }
+```
+
+`IssueRef = { id, code, title, state: StateResponse, assignees: [UserSummary] }`. `completed` = grupo
+`COMPLETED`; `unfinished` = ni completadas ni canceladas (las canceladas no salen en ninguna lista y se
+quedan en el ciclo); ambas por número. `cycleTimeDays` = mediana de días de `createdAt` a `completedAt`
+de las completadas (1 decimal, `null` si no hay). `nextCycle` = el siguiente ciclo sin cerrar por
+fecha de inicio (para un ciclo sin fechas, el primero que no ha terminado).
+
+```http
+POST /cycles/{cycleId}/close
+{ "moveTo": "NEXT_CYCLE | BACKLOG", "targetCycleId": "uuid?",
+  "overrides": [ { "issueId": "uuid", "moveTo": "BACKLOG" } ], "startRetro": true }
+→ { "cycle": CycleResponse, "movedToCycle": 2, "movedToBacklog": 1, "retroStarted": true }
+```
+
+Las sin terminar van a `targetCycleId` (o, sin él, al siguiente ciclo) o salen del ciclo (`BACKLOG`,
+sin cambiar de estado); `overrides` cambia el destino de tareas puntuales (las que no estén sin
+terminar se ignoran). Sin ciclo siguiente y con alguna tarea hacia `NEXT_CYCLE` → 400; un
+`targetCycleId` que no es del proyecto o es el mismo ciclo → 400, cerrado → 409. Si el ciclo terminaba
+después de hoy, su `endDate` pasa a hoy. Cerrar un ciclo ya cerrado, o que aún no empieza, → 409. Cada
+tarea movida registra `CYCLE` en su historial. Un ciclo cerrado no acepta cambios de nombre ni de
+fechas (la descripción sí) ni tareas nuevas → 409.
+
+### Retrospectiva
+
+Base: `/workspaces/{slug}/projects/{projectId}/cycles/{cycleId}/retro`.
+
+| Método | Ruta | Permiso | Descripción |
+|---|---|---|---|
+| GET | (base) | Acceso al proyecto | Ver la retro (sin empezar: `started: false` y sin notas) |
+| POST | `/start` | PM | Abrirla (también con `startRetro` al cerrar); si ya estaba abierta, no cambia |
+| POST | `/notes` | Acceso | `{ column: WENT_WELL \| IMPROVE \| ACTION, text }` (1 a 500) → `201` nota |
+| PATCH / DELETE | `/notes/{noteId}` | Autor o PM (403) | Editar `{ text }` / eliminar (`204`) |
+| POST / DELETE | `/notes/{noteId}/vote` | Acceso | Votar / quitar mi voto → `{ note, myVotesLeft }` |
+| POST | `/notes/{noteId}/convert` | PM | Acción → tarea (`201` `IssueResponse`) |
+| POST | `/finish` | PM | Terminarla: notas y votos quedan de solo lectura |
+
+```json
+{ "started": true, "finishedAt": null,
+  "summary": { "completedCount": 8, "totalCount": 12, "carriedToCycle": 3, "carriedToBacklog": 1,
+               "cycleTimeDays": 2.5 },
+  "notes": [ { "id": "…", "column": "ACTION", "text": "Automatizar el deploy", "author": UserSummary,
+               "createdAt": "…", "votes": 2, "votedByMe": true, "issue": IssueRef | null } ],
+  "myVotesLeft": 3,
+  "previousActions": [ nota ACTION de la retro del ciclo cerrado anterior, con su issue si se convirtió ] }
+```
+
+- Columnas: `WENT_WELL` «Qué salió bien», `IMPROVE` «Qué mejorar», `ACTION` «Acciones». Notas en orden
+  de creación.
+- `summary`: `totalCount` = tareas que siguen en el ciclo + las que movió el cierre; `carriedTo*`
+  salen de lo que hizo el cierre.
+- Votos: uno por nota y 5 por persona en cada retro (409 si ya votaste o no te quedan). Quitar un voto
+  que no existe no cambia nada.
+- Crear, editar, borrar y votar solo con la retro abierta y sin terminar (409).
+- Convertir: solo `ACTION` (400) y una vez (409). La tarea se crea en el primer estado `UNSTARTED` (o
+  el estado por defecto), con el texto como título (cortado a 255 con «…»; entonces el texto completo
+  va en la descripción) y la descripción «Acción acordada en la retrospectiva del ciclo «Sprint 3».».
+  Se puede convertir también con la retro terminada.
 
 ### Plantillas de tarea y vistas guardadas
 
@@ -437,6 +506,31 @@ entradas por proyecto, de más a menos (solo proyectos con actividad):
   "byProject": [ { "projectId": "…", "name": "…", "identifier": "WEB", "count": 29 } ] }
 ```
 
+### Daily
+
+| Método | Ruta | Permiso | Descripción |
+|---|---|---|---|
+| GET | `/workspaces/{slug}/projects/{projectId}/daily?date=2026-10-28` | Acceso al proyecto | Daily del día (`date` por defecto = hoy en Bogotá) |
+| PUT | `/workspaces/{slug}/projects/{projectId}/daily/note?date=…` | Acceso al proyecto | Nota del día `{ text }` (máx. 5000) → `200` nota; vacío la borra → `204` |
+
+```json
+{ "date": "2026-10-28", "previousDate": "2026-10-27",
+  "people": [ { "user": UserSummary,
+                "yesterday": [ { "issue": IssueRef, "change": "movió a En revisión" } ],
+                "today": [ IssueRef ],
+                "blockers": [ { "issue": IssueRef, "blockedBy": [ { "id": "…", "code": "WEB-3", "title": "…" } ] } ] } ],
+  "note": { "text": "…", "updatedBy": UserSummary | null, "updatedAt": "…" } | null }
+```
+
+- `previousDate`: el día anterior; si `date` es lunes, sábado o domingo, el viernes.
+- `people`: miembros del proyecto y asignados a tareas abiertas, por nombre, aunque no tengan nada.
+- `yesterday`: lo que hizo la persona desde el inicio de `previousDate` hasta el inicio de `date` (el
+  lunes incluye el fin de semana), una entrada por tarea con el cambio más importante: `completó` >
+  `movió a {estado}` > `creó` > `comentó` > `actualizó` (cualquier otro campo). Máximo 8.
+- `today`: sus tareas abiertas en un estado `STARTED` o con `dueDate` ≤ `date`, por fecha límite (sin
+  fecha al final), prioridad y número. Máximo 8.
+- `blockers`: sus tareas abiertas con bloqueos abiertos (`blockedBy` por número).
+
 **Búsqueda** (`search`): título (sin importar mayúsculas) o código. `WEB-12` busca esa tarea exacta
 (y va primera); `12` busca el número en todos los proyectos. Después, las actualizadas más
 recientemente.
@@ -468,17 +562,20 @@ Nunca se avisa a quien hizo la acción. Cada notificación trae
 
 ## Modelo de datos
 
-Migraciones en `src/main/resources/db/migration` (`V1__users.sql` … `V13__notification_types.sql`).
+Migraciones en `src/main/resources/db/migration` (`V1__users.sql` … `V15__daily_notes.sql`).
 `V7` elimina el rol `ADMIN` (los admins e invitaciones con ese rol pasan a `MEMBER`) y `V8` agrega
 `issues.completed_at` (rellenado con la fecha del último cambio de estado hacia el estado actual, o
 `updated_at`). `V9` crea `issue_relations` (un índice único sobre el par de tareas sin importar la
 dirección y el tipo evita duplicados y bloqueos mutuos), `V10` `issue_checklist_items`, `V11`
 `issue_templates` (+ `issue_template_labels` e `issue_template_items`) con las tres plantillas por
-defecto para los proyectos existentes, `V12` `saved_views` (filtros en `jsonb`) y `V13` agrega los
-tipos de notificación `ISSUE_UNBLOCKED` e `ISSUE_MENTIONED`.
+defecto para los proyectos existentes, `V12` `saved_views` (filtros en `jsonb`), `V13` agrega los
+tipos de notificación `ISSUE_UNBLOCKED` e `ISSUE_MENTIONED`, `V14` el cierre de ciclos
+(`cycles.closed_at`, `closed_by_id`, `carried_to_cycle`, `carried_to_backlog`, `retro_started_at`,
+`retro_finished_at`) y la retrospectiva (`retro_notes`, cuya columna se llama `retro_column`, y
+`retro_note_votes`), y `V15` `daily_notes` (una nota por proyecto y día).
 Las entidades usan **UUID** y `created_at`/`updated_at`. Las tablas intermedias puras
-(`issue_assignees`, `issue_labels`, `cycle_issues`, `module_issues`, `issue_template_labels`) usan
-clave compuesta.
+(`issue_assignees`, `issue_labels`, `cycle_issues`, `module_issues`, `issue_template_labels`,
+`retro_note_votes`) usan clave compuesta.
 
 Detalles a tener en cuenta:
 
