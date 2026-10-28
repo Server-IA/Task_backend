@@ -13,7 +13,7 @@ import java.util.UUID;
 /**
  * Filtros de una vista guardada (se guardan como jsonb). Usan los mismos nombres que los parámetros del listado de
  * tareas; {@code view} indica si se muestra como lista o tablero, {@code sort} el orden (por ejemplo
- * {@code "priority"} o {@code "dueDate,asc"}) y {@code groupBy} cómo se agrupa la lista.
+ * {@code "priorityRank,asc"} o {@code "dueDate,asc"}) y {@code groupBy} cómo se agrupa la lista.
  */
 public record SavedViewFilters(
         @Size(max = 50, message = "Máximo 50 estados")

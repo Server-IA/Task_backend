@@ -46,7 +46,8 @@ public class IssueController {
     @Operation(summary = "Listar issues con filtros y paginación",
             description = "Orden por defecto: sortOrder (el del Kanban). Ej.: ?state=…&priority=HIGH&search=login&page=0"
                     + "&size=20. blocked=true deja solo las bloqueadas (su totalElements es el «N bloqueadas» del "
-                    + "encabezado).")
+                    + "encabezado). sort=priorityRank,asc ordena por prioridad (urgente, alta, media, baja, sin "
+                    + "prioridad) y luego por fecha límite y número.")
     @GetMapping
     public PageResponse<IssueResponse> getIssues(@PathVariable String slug, @PathVariable UUID projectId,
                                                  @ParameterObject IssueFilter filter,

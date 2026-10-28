@@ -52,6 +52,15 @@ public class Issue extends BaseEntity {
     @Column(nullable = false, length = 10)
     private IssuePriority priority = IssuePriority.NONE;
 
+    /**
+     * Posición de la prioridad para ordenar con {@code sort=priorityRank,asc}: 0 urgente, 1 alta, 2 media, 3 baja y
+     * 4 sin prioridad (el orden de {@link IssuePriority}). La prioridad se guarda como texto, así que
+     * {@code sort=priority} la ordenaría alfabéticamente. Solo lectura.
+     */
+    @Formula("(case priority when 'URGENT' then 0 when 'HIGH' then 1 when 'MEDIUM' then 2 when 'LOW' then 3 "
+            + "else 4 end)")
+    private int priorityRank;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_id")
     private Issue parent;

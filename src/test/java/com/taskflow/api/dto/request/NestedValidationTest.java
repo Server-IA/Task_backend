@@ -103,6 +103,9 @@ class NestedValidationTest {
                 .isEmpty();
         assertThat(validator.validate(new CreateSavedViewRequest("Vista", false, filters("list", "priority"))))
                 .isEmpty();
+        assertThat(validator.validate(new CreateSavedViewRequest("Vista", false,
+                filters("list", "priorityRank,asc"))))
+                .isEmpty();
         assertThat(paths(validator.validate(new CreateSavedViewRequest("Vista", false,
                 filters("list", null, "estado")))))
                 .containsExactly("filters.groupBy");

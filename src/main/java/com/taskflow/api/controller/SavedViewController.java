@@ -49,7 +49,7 @@ public class SavedViewController {
     @Operation(summary = "Guardar vista",
             description = "Personal por defecto; shared: true solo lo puede usar el project manager (403). filters: "
                     + "{ state, priority, assignee, label, search, cycle, module, blocked, view: list|board, sort, "
-                    + "groupBy: state|priority|assignee|label } (ej. sort \"dueDate,asc\").")
+                    + "groupBy: state|priority|assignee|label } (ej. sort \"dueDate,asc\" o \"priorityRank,asc\").")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public SavedViewResponse create(@PathVariable String slug, @PathVariable UUID projectId,

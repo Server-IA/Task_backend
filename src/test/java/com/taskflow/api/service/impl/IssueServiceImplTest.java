@@ -2,6 +2,7 @@ package com.taskflow.api.service.impl;
 
 import com.taskflow.api.dto.request.ChecklistItemRequest;
 import com.taskflow.api.dto.request.CreateIssueRequest;
+import com.taskflow.api.dto.request.IssueFilter;
 import com.taskflow.api.dto.request.MoveIssueRequest;
 import com.taskflow.api.dto.request.UpdateIssueRequest;
 import com.taskflow.api.entity.Issue;
@@ -38,6 +39,12 @@ import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -598,6 +605,37 @@ class IssueServiceImplTest {
 
             assertThatThrownBy(() -> issueService.delete(SLUG, project.getId(), issue.getId(), memberId))
                     .isInstanceOf(ForbiddenException.class);
+        }
+    }
+
+    @Nested
+    class Listado {
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void porPrioridadDesempataPorFechaLimiteYNumero() {
+            ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+            when(issueRepository.findAll(any(Specification.class), pageable.capture()))
+                    .thenReturn(Page.empty());
+
+            issueService.getIssues(SLUG, project.getId(), new IssueFilter(null, null, null, null, null, null, null, null),
+                    PageRequest.of(1, 50, Sort.by(Sort.Direction.ASC, "priorityRank")));
+
+            assertThat(pageable.getValue().getPageNumber()).isEqualTo(1);
+            assertThat(pageable.getValue().getSort().stream().map(Sort.Order::getProperty))
+                    .containsExactly("priorityRank", "dueDate", "sequenceId");
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void otrosOrdenesQuedanIgual() {
+            Pageable requested = PageRequest.of(0, 20, Sort.by(Sort.Direction.ASC, "dueDate"));
+            when(issueRepository.findAll(any(Specification.class), eq(requested)))
+                    .thenReturn(new PageImpl<>(List.of(), requested, 0));
+
+            issueService.getIssues(SLUG, project.getId(), new IssueFilter(null, null, null, null, null, null, null, null), requested);
+
+            verify(issueRepository).findAll(any(Specification.class), eq(requested));
         }
     }
 

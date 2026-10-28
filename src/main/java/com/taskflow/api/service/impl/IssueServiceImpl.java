@@ -36,6 +36,7 @@ import com.taskflow.api.service.IssueChecklistService;
 import com.taskflow.api.service.IssueRelationService;
 import com.taskflow.api.service.IssueService;
 import com.taskflow.api.service.NotificationService;
+import com.taskflow.api.util.IssueListSort;
 import com.taskflow.api.util.SortOrderCalculator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -83,7 +84,8 @@ public class IssueServiceImpl implements IssueService {
     @Transactional(readOnly = true)
     public PageResponse<IssueResponse> getIssues(String slug, UUID projectId, IssueFilter filter, Pageable pageable) {
         Project project = lookup.project(slug, projectId);
-        Page<Issue> page = issueRepository.findAll(IssueSpecifications.matching(project.getId(), filter), pageable);
+        Page<Issue> page = issueRepository.findAll(IssueSpecifications.matching(project.getId(), filter),
+                IssueListSort.withTieBreakers(pageable));
         return PageResponse.from(page, issueMapper::toResponse);
     }
 
