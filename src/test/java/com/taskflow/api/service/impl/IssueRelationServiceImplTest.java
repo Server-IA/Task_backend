@@ -4,12 +4,14 @@ import com.taskflow.api.dto.request.CreateIssueRelationRequest;
 import com.taskflow.api.dto.request.IssueRelationKind;
 import com.taskflow.api.dto.response.IssueRelationResponse;
 import com.taskflow.api.dto.response.IssueRelationsResponse;
+import com.taskflow.api.dto.response.ProjectRefResponse;
 import com.taskflow.api.dto.response.RelatedIssueResponse;
 import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.IssueRelation;
 import com.taskflow.api.entity.Project;
 import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.User;
+import com.taskflow.api.entity.Workspace;
 import com.taskflow.api.entity.enums.ActivityField;
 import com.taskflow.api.entity.enums.IssueRelationType;
 import com.taskflow.api.entity.enums.StateGroup;
@@ -58,6 +60,8 @@ class IssueRelationServiceImplTest {
     @Mock
     private NotificationService notificationService;
     @Mock
+    private ProjectAccess projectAccess;
+    @Mock
     private ResourceLookup lookup;
     @Mock
     private IssueMapper issueMapper;
@@ -65,6 +69,7 @@ class IssueRelationServiceImplTest {
     @InjectMocks
     private IssueRelationServiceImpl relationService;
 
+    private Workspace workspace;
     private Project project;
     private State todo;
     private State done;
@@ -74,21 +79,37 @@ class IssueRelationServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        project = new Project();
-        project.setId(UUID.randomUUID());
-        project.setIdentifier("WEB");
+        workspace = new Workspace();
+        workspace.setId(UUID.randomUUID());
+        workspace.setSlug(SLUG);
+        project = project("WEB");
         todo = state(StateGroup.UNSTARTED);
         done = state(StateGroup.COMPLETED);
         actor = new User();
         actor.setId(UUID.randomUUID());
         lenient().when(lookup.project(SLUG, project.getId())).thenReturn(project);
         lenient().when(lookup.user(actor.getId())).thenReturn(actor);
-        lenient().when(issueMapper.toRelated(any(Issue.class))).thenAnswer(invocation -> {
-            Issue issue = invocation.getArgument(0);
-            return new RelatedIssueResponse(issue.getId(), issue.getCode(), issue.getTitle(), null, List.of());
-        });
+        lenient().when(issueMapper.toRelated(any(Issue.class)))
+                .thenAnswer(invocation -> related(invocation.getArgument(0), true));
+        lenient().when(issueMapper.toRestrictedRelated(any(Issue.class)))
+                .thenAnswer(invocation -> related(invocation.getArgument(0), false));
         web1 = issue(1, todo);
         web2 = issue(2, todo);
+    }
+
+    private Project project(String identifier) {
+        Project created = new Project();
+        created.setId(UUID.randomUUID());
+        created.setIdentifier(identifier);
+        created.setWorkspace(workspace);
+        return created;
+    }
+
+    private static RelatedIssueResponse related(Issue issue, boolean full) {
+        Project project = issue.getProject();
+        return new RelatedIssueResponse(issue.getId(), issue.getCode(), full ? issue.getTitle() : null, null,
+                List.of(), new ProjectRefResponse(project.getId(), project.getName(), project.getIdentifier()),
+                issue.getDueDate(), 0, 0, 0, 0, 0);
     }
 
     private State state(StateGroup group) {
@@ -98,13 +119,19 @@ class IssueRelationServiceImplTest {
     }
 
     private Issue issue(int sequenceId, State state) {
+        return issue(project, sequenceId, state);
+    }
+
+    private Issue issue(Project owner, int sequenceId, State state) {
         Issue issue = new Issue();
         issue.setId(UUID.randomUUID());
-        issue.setProject(project);
+        issue.setProject(owner);
         issue.setSequenceId(sequenceId);
         issue.setTitle("Tarea " + sequenceId);
         issue.setState(state);
-        lenient().when(issueRepository.findByIdAndProjectId(issue.getId(), project.getId()))
+        lenient().when(issueRepository.findByIdAndProjectId(issue.getId(), owner.getId()))
+                .thenReturn(Optional.of(issue));
+        lenient().when(issueRepository.findByIdAndProjectWorkspaceId(issue.getId(), workspace.getId()))
                 .thenReturn(Optional.of(issue));
         return issue;
     }
@@ -229,14 +256,53 @@ class IssueRelationServiceImplTest {
         }
 
         @Test
-        void laOtraTareaDebeSerDelMismoProyecto() {
-            UUID otherProjectIssue = UUID.randomUUID();
-            when(issueRepository.findByIdAndProjectId(otherProjectIssue, project.getId())).thenReturn(Optional.empty());
+        void laOtraTareaDebeSerDelWorkspace() {
+            UUID elsewhere = UUID.randomUUID();
+            when(issueRepository.findByIdAndProjectWorkspaceId(elsewhere, workspace.getId()))
+                    .thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> relationService.create(SLUG, project.getId(), web1.getId(), actor.getId(),
-                    new CreateIssueRelationRequest(IssueRelationKind.BLOCKS, otherProjectIssue)))
+                    new CreateIssueRelationRequest(IssueRelationKind.BLOCKS, elsewhere)))
                     .isInstanceOf(BadRequestException.class)
-                    .hasMessage("La tarea relacionada no existe en este proyecto");
+                    .hasMessage(IssueRelationServiceImpl.OTHER_NOT_FOUND_MESSAGE);
+            verify(relationRepository, never()).save(any());
+        }
+
+        @Test
+        void permiteBloquearConUnaTareaDeOtroProyectoAlQueTieneAcceso() {
+            Project app = project("AMC");
+            Issue amc4 = issue(app, 4, todo);
+            when(projectAccess.canAccess(app, actor.getId())).thenReturn(true);
+
+            IssueRelationResponse response = create(web1, IssueRelationKind.BLOCKED_BY, amc4);
+
+            IssueRelation saved = savedRelation();
+            assertThat(saved.getSource()).isSameAs(amc4);
+            assertThat(saved.getTarget()).isSameAs(web1);
+            assertThat(response.accessible()).isTrue();
+            assertThat(response.issue().code()).isEqualTo("AMC-4");
+            assertThat(response.issue().project().identifier()).isEqualTo("AMC");
+            verify(activityService).record(amc4, actor, ActivityField.RELATION, null, "bloquea WEB-1");
+            verify(activityService).record(web1, actor, ActivityField.RELATION, null, "bloqueada por AMC-4");
+        }
+
+        @Test
+        void rechazaUnaTareaDeOtroProyectoSinAcceso() {
+            Project app = project("AMC");
+            Issue amc4 = issue(app, 4, todo);
+            when(projectAccess.canAccess(app, actor.getId())).thenReturn(false);
+
+            assertThatThrownBy(() -> create(web1, IssueRelationKind.RELATES, amc4))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessage(IssueRelationServiceImpl.OTHER_NOT_FOUND_MESSAGE);
+            verify(relationRepository, never()).save(any());
+        }
+
+        @Test
+        void enElMismoProyectoNoConsultaElAcceso() {
+            create(web1, IssueRelationKind.BLOCKS, web2);
+
+            verifyNoInteractions(projectAccess);
         }
     }
 
@@ -253,12 +319,43 @@ class IssueRelationServiceImplTest {
                 relation(web9, web1, IssueRelationType.RELATES),
                 relation(web1, web2, IssueRelationType.RELATES)));
 
-        IssueRelationsResponse response = relationService.getRelations(SLUG, project.getId(), web1.getId());
+        IssueRelationsResponse response = relationService.getRelations(SLUG, project.getId(), web1.getId(),
+                actor.getId());
 
         assertThat(response.blocks()).extracting(rel -> rel.issue().code()).containsExactly("WEB-3", "WEB-5");
         assertThat(response.blockedBy()).extracting(rel -> rel.issue().code()).containsExactly("WEB-4");
         assertThat(response.related()).extracting(rel -> rel.issue().code()).containsExactly("WEB-2", "WEB-9");
-        assertThat(response.blocks()).allSatisfy(rel -> assertThat(rel.relationId()).isNotNull());
+        assertThat(response.blocks()).allSatisfy(rel -> {
+            assertThat(rel.relationId()).isNotNull();
+            assertThat(rel.accessible()).isTrue();
+        });
+        // Sin dependencias con otros proyectos no hace falta consultar a cuáles tiene acceso
+        verifyNoInteractions(projectAccess);
+    }
+
+    @Test
+    void lasDeOtrosProyectosVanDespuesYSinAccesoNoMuestranTituloNiAsignados() {
+        Project app = project("AMC");
+        Project api = project("API");
+        Issue amc2 = issue(app, 2, todo);
+        Issue api7 = issue(api, 7, todo);
+        Issue web8 = issue(8, todo);
+        when(relationRepository.findAllByIssueId(web1.getId())).thenReturn(List.of(
+                relation(api7, web1, IssueRelationType.BLOCKS),
+                relation(amc2, web1, IssueRelationType.BLOCKS),
+                relation(web8, web1, IssueRelationType.BLOCKS)));
+        // Tiene acceso a WEB y AMC, no a API
+        when(projectAccess.projectIds(workspace, actor.getId())).thenReturn(List.of(project.getId(), app.getId()));
+
+        IssueRelationsResponse response = relationService.getRelations(SLUG, project.getId(), web1.getId(),
+                actor.getId());
+
+        assertThat(response.blockedBy()).extracting(rel -> rel.issue().code())
+                .containsExactly("WEB-8", "AMC-2", "API-7");
+        assertThat(response.blockedBy()).extracting(IssueRelationResponse::accessible)
+                .containsExactly(true, true, false);
+        assertThat(response.blockedBy().get(1).issue().title()).isEqualTo("Tarea 2");
+        assertThat(response.blockedBy().get(2).issue().title()).isNull();
     }
 
     @Nested

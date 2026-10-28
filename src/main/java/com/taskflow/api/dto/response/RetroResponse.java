@@ -28,8 +28,9 @@ public record RetroResponse(
      * @param totalCount       tareas del ciclo más las que el cierre movió a otro ciclo o al backlog
      * @param carriedToCycle   tareas sin terminar que el cierre pasó a otro ciclo
      * @param carriedToBacklog tareas sin terminar que el cierre sacó del ciclo
-     * @param cycleTimeDays    mediana de días entre la creación y el completado de las completadas (1 decimal);
-     *                         {@code null} si no hay ninguna
+     * @param cycleTimeDays    mediana de días «de En curso a Hecho» ({@code startedAt} a {@code completedAt}) de
+     *                         las completadas, 1 decimal; las que nunca pasaron por un estado STARTED no cuentan;
+     *                         {@code null} si no queda ninguna
      */
     public record RetroSummary(
             int completedCount,

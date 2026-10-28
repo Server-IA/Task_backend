@@ -3,7 +3,10 @@ package com.taskflow.api.repository;
 import com.taskflow.api.dto.request.IssueFilter;
 import com.taskflow.api.entity.Cycle;
 import com.taskflow.api.entity.Issue;
+import com.taskflow.api.entity.IssueRelation;
 import com.taskflow.api.entity.ProjectModule;
+import com.taskflow.api.entity.enums.IssueRelationType;
+import com.taskflow.api.entity.enums.StateGroup;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Predicate;
@@ -52,6 +55,10 @@ public final class IssueSpecifications {
             if (filter.module() != null) {
                 predicates.add(root.get("id").in(issuesOf(query, ProjectModule.class, filter.module())));
             }
+            if (filter.blocked() != null) {
+                Predicate blocked = root.get("id").in(openlyBlockedIssues(query, cb));
+                predicates.add(filter.blocked() ? blocked : cb.not(blocked));
+            }
             if (filter.search() != null && !filter.search().isBlank()) {
                 predicates.add(searchPredicate(root, cb, filter.search().trim(), false));
             }
@@ -89,6 +96,19 @@ public final class IssueSpecifications {
         Root<Issue> issue = subquery.from(Issue.class);
         subquery.select(issue.get("id"))
                 .where(issue.join(relation).get("id").in(ids));
+        return subquery;
+    }
+
+    /**
+     * Ids de las tareas con al menos un bloqueo abierto (la tarea que bloquea no está completada ni cancelada), de
+     * cualquier proyecto. Es la misma regla que {@code Issue.blockedByCount}.
+     */
+    private static Subquery<UUID> openlyBlockedIssues(CriteriaQuery<?> query, CriteriaBuilder cb) {
+        Subquery<UUID> subquery = query.subquery(UUID.class);
+        Root<IssueRelation> relation = subquery.from(IssueRelation.class);
+        subquery.select(relation.get("target").get("id"))
+                .where(cb.equal(relation.get("type"), IssueRelationType.BLOCKS),
+                        cb.not(relation.get("source").get("state").get("stateGroup").in(StateGroup.CLOSED)));
         return subquery;
     }
 

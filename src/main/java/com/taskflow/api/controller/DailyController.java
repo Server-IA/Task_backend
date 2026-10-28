@@ -41,13 +41,18 @@ public class DailyController {
                     + "yesterday = lo que hizo desde previousDate hasta antes de date, una entrada por tarea con el "
                     + "cambio más importante (completó > movió a {estado} > creó > comentó > actualizó), máximo 8; "
                     + "today = sus tareas abiertas en curso (STARTED) o con fecha límite hasta date, por fecha límite, "
-                    + "máximo 8; blockers = sus tareas abiertas con bloqueos abiertos. note = nota del día o null.")
+                    + "máximo 8; blockers = sus tareas abiertas con bloqueos abiertos (blockedBy con estado y "
+                    + "asignados de cada tarea que bloquea; de un proyecto al que no tengo acceso, sin título ni "
+                    + "asignados); openCount = sus abiertas; cycleAssignedCount y "
+                    + "cycleCompletedCount = sus tareas del ciclo en curso (sin canceladas) y cuántas completó. cycle = "
+                    + "ciclo en curso ese día o null. summary = tareas movidas, empezadas y completadas, comentarios y "
+                    + "bloqueadas en el periodo. note = nota del día o null.")
     @GetMapping
     public DailyResponse getDaily(
-            @PathVariable String slug, @PathVariable UUID projectId,
+            @PathVariable String slug, @PathVariable UUID projectId, @AuthenticationPrincipal UserPrincipal me,
             @Parameter(description = "Día de la reunión (YYYY-MM-DD); por defecto, hoy en America/Bogota")
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        return dailyService.getDaily(slug, projectId, date);
+        return dailyService.getDaily(slug, projectId, me.getId(), date);
     }
 
     @Operation(summary = "Guardar la nota del día",

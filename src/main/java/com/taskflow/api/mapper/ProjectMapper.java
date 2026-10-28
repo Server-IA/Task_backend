@@ -35,6 +35,6 @@ public interface ProjectMapper {
 
     TemplateChecklistItemResponse toTemplateItemResponse(TemplateChecklistItem item);
 
-    /** {@code mine}: la vista es del usuario que la pide. */
-    SavedViewResponse toSavedViewResponse(SavedView view, boolean mine);
+    /** {@code mine}: la vista es del usuario que la pide; {@code issueCount}: tareas que cumplen sus filtros. */
+    SavedViewResponse toSavedViewResponse(SavedView view, boolean mine, long issueCount);
 }

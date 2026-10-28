@@ -60,20 +60,27 @@ class ProjectStatsCalculatorTest {
 
     private IssueStatsRow open(State state, LocalDate dueDate, Instant updatedAt) {
         return new IssueStatsRow(UUID.randomUUID(), ++sequence, "Tarea " + sequence, state.getId(),
-                state.getStateGroup(), dueDate, at("2026-09-01T09:00"), updatedAt, null);
+                state.getStateGroup(), dueDate, at("2026-09-01T09:00"), updatedAt, null, null);
     }
 
     private IssueStatsRow open(State state) {
         return open(state, null, NOW);
     }
 
-    private IssueStatsRow completed(Instant createdAt, Instant completedAt) {
-        return new IssueStatsRow(UUID.randomUUID(), ++sequence, "Tarea " + sequence, done.getId(),
-                StateGroup.COMPLETED, null, createdAt, completedAt, completedAt);
+    /** Completada; se creó 10 días antes de empezar (el tiempo de ciclo se mide desde que empezó). */
+    private IssueStatsRow completed(Instant startedAt, Instant completedAt) {
+        return completed(startedAt.minus(Duration.ofDays(10)), startedAt, completedAt);
     }
 
+    private IssueStatsRow completed(Instant createdAt, Instant startedAt, Instant completedAt) {
+        return new IssueStatsRow(UUID.randomUUID(), ++sequence, "Tarea " + sequence, done.getId(),
+                StateGroup.COMPLETED, null, createdAt, completedAt, startedAt, completedAt);
+    }
+
+    /** Creada y empezada el día antes de completarse. */
     private IssueStatsRow completedAt(Instant completedAt) {
-        return completed(completedAt.minus(Duration.ofDays(1)), completedAt);
+        Instant dayBefore = completedAt.minus(Duration.ofDays(1));
+        return completed(dayBefore, dayBefore, completedAt);
     }
 
     @Nested
@@ -129,7 +136,7 @@ class ProjectStatsCalculatorTest {
         @Test
         void contadoresDeLaSemana() {
             IssueStatsRow createdMonday = new IssueStatsRow(UUID.randomUUID(), 99, "Nueva", todo.getId(),
-                    StateGroup.UNSTARTED, null, at("2026-10-26T00:30"), NOW, null);
+                    StateGroup.UNSTARTED, null, at("2026-10-26T00:30"), NOW, null, null);
             List<IssueStatsRow> issues = List.of(
                     createdMonday,
                     completedAt(at("2026-10-27T08:00")),
@@ -175,6 +182,31 @@ class ProjectStatsCalculatorTest {
             assertThat(stats.cycleTimeDays()).isEqualTo(3.4);
             assertThat(stats.previousCycleTimeDays()).isNull();
         }
+
+        @Test
+        void seMideDesdeQueEmpezoYNoCuentanLasQueNuncaEmpezaron() {
+            IssueStatsRow skipped = new IssueStatsRow(UUID.randomUUID(), ++sequence, "Sin pasar por En curso",
+                    done.getId(), StateGroup.COMPLETED, null, at("2026-10-01T10:00"), NOW, null,
+                    at("2026-10-27T10:00"));
+            List<IssueStatsRow> issues = List.of(
+                    completed(at("2026-10-26T10:00"), at("2026-10-27T10:00")),   // 1 día (creada 10 días antes)
+                    skipped);
+
+            ProjectStatsResponse stats = calculate(issues, 8);
+
+            assertThat(stats.cycleTimeDays()).isEqualTo(1.0);
+        }
+
+        @Test
+        void soloConCompletadasQueNuncaEmpezaronEsNula() {
+            IssueStatsRow skipped = new IssueStatsRow(UUID.randomUUID(), ++sequence, "Sin pasar por En curso",
+                    done.getId(), StateGroup.COMPLETED, null, at("2026-10-01T10:00"), NOW, null,
+                    at("2026-10-27T10:00"));
+
+            assertThat(calculate(List.of(skipped), 8).cycleTimeDays()).isNull();
+            assertThat(ProjectStatsCalculator.cycleTime(null, NOW)).isNull();
+            assertThat(ProjectStatsCalculator.cycleTime(NOW, NOW.minus(Duration.ofDays(1)))).isNull();
+        }
     }
 
     @Nested
@@ -197,7 +229,7 @@ class ProjectStatsCalculatorTest {
             IssueStatsRow doneBeforeStart = completedAt(at("2026-10-20T09:00"));
             IssueStatsRow stillOpen = open(inProgress);
             IssueStatsRow dropped = new IssueStatsRow(UUID.randomUUID(), 50, "Cancelada", cancelled.getId(),
-                    StateGroup.CANCELLED, null, NOW, NOW, null);
+                    StateGroup.CANCELLED, null, NOW, NOW, null, null);
             IssueStatsRow notInCycle = open(todo);
             List<IssueStatsRow> issues = List.of(doneSaturday, doneToday, doneBeforeStart, stillOpen, dropped,
                     notInCycle);
@@ -251,7 +283,7 @@ class ProjectStatsCalculatorTest {
             }
             issues.add(open(todo, TODAY, NOW));                       // vence hoy: todavía no está vencida
             issues.add(new IssueStatsRow(UUID.randomUUID(), 77, "Hecha", done.getId(), StateGroup.COMPLETED,
-                    TODAY.minusDays(30), NOW, NOW, NOW));              // cerrada: no cuenta
+                    TODAY.minusDays(30), NOW, NOW, null, NOW));              // cerrada: no cuenta
 
             List<IssueSummaryResponse> overdue = calculator.overdue(issues, "WEB");
 
@@ -287,7 +319,7 @@ class ProjectStatsCalculatorTest {
             IssueStatsRow forty = open(todo, null, NOW.minus(Duration.ofDays(40)));
             IssueStatsRow closedOld = new IssueStatsRow(UUID.randomUUID(), 90, "Vieja", done.getId(),
                     StateGroup.COMPLETED, null, NOW.minus(Duration.ofDays(60)), NOW.minus(Duration.ofDays(60)),
-                    NOW.minus(Duration.ofDays(60)));
+                    null, NOW.minus(Duration.ofDays(60)));
 
             List<StaleIssue> stale = calculator.stale(List.of(fourteen, fifteen, forty, closedOld), "WEB");
 

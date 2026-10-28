@@ -83,13 +83,26 @@ class StateServiceImplTest {
 
         verify(issueRepository).clearCompletedInState(done.getId());
         verify(issueRepository, never()).markCompletedInState(any(), any());
+        // Vuelve a STARTED: sus tareas ya habían empezado; las que no, empiezan ahora
+        verify(issueRepository).markStartedInState(eq(done.getId()), any());
     }
 
     @Test
-    void cambiarEntreGruposAbiertosNoTocaLasTareas() {
+    void pasarAlGrupoEnCursoEmpiezaLasTareasQueNuncaHabianEmpezado() {
         State qa = state(StateGroup.UNSTARTED);
 
         changeGroup(qa, StateGroup.STARTED);
+
+        verify(issueRepository).markStartedInState(eq(qa.getId()), any());
+        verify(issueRepository, never()).markCompletedInState(any(), any());
+        verify(issueRepository, never()).clearCompletedInState(any());
+    }
+
+    @Test
+    void cambiarEntreGruposSinEmpezarNoTocaLasTareas() {
+        State qa = state(StateGroup.BACKLOG);
+
+        changeGroup(qa, StateGroup.UNSTARTED);
 
         verifyNoInteractions(issueRepository);
     }

@@ -13,6 +13,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.time.Instant;
+
 /**
  * Criterio de aceptación o paso de la checklist de una tarea. {@code position} ordena los elementos de cada
  * tipo dentro de la tarea (0, 1, 2…).
@@ -40,6 +42,15 @@ public class IssueChecklistItem extends BaseEntity {
 
     @Column(nullable = false)
     private int position;
+
+    /** Quien lo marcó como hecho; {@code null} si no está marcado (o si se marcó antes de guardarse este dato). */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "checked_by_id")
+    private User checkedBy;
+
+    /** Cuándo se marcó como hecho; {@code null} si no está marcado. */
+    @Column(name = "checked_at")
+    private Instant checkedAt;
 
     public IssueChecklistItem(Issue issue, ChecklistItemKind kind, String text, int position) {
         this.issue = issue;

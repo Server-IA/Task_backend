@@ -3,6 +3,7 @@ package com.taskflow.api.controller;
 import com.taskflow.api.dto.request.ChecklistItemRequest;
 import com.taskflow.api.dto.request.UpdateChecklistItemRequest;
 import com.taskflow.api.dto.response.ChecklistItemResponse;
+import com.taskflow.api.security.UserPrincipal;
 import com.taskflow.api.service.IssueChecklistService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -10,6 +11,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -52,12 +54,14 @@ public class IssueChecklistController {
 
     @Operation(summary = "Editar, marcar o reordenar",
             description = "Edición parcial. position = nuevo índice (desde 0) entre los elementos del mismo tipo; los "
-                    + "demás se renumeran.")
+                    + "demás se renumeran. Al marcarlo (done: true) guarda checkedBy (yo) y checkedAt; al desmarcarlo "
+                    + "los borra. Cualquier cambio de la checklist actualiza checklistUpdatedAt de la tarea.")
     @PatchMapping("/{itemId}")
     public ChecklistItemResponse update(@PathVariable String slug, @PathVariable UUID projectId,
                                         @PathVariable UUID issueId, @PathVariable UUID itemId,
+                                        @AuthenticationPrincipal UserPrincipal me,
                                         @Valid @RequestBody UpdateChecklistItemRequest request) {
-        return checklistService.update(slug, projectId, issueId, itemId, request);
+        return checklistService.update(slug, projectId, issueId, itemId, me.getId(), request);
     }
 
     @Operation(summary = "Eliminar criterio o paso")

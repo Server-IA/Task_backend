@@ -51,6 +51,11 @@ public class RetroNote extends BaseEntity {
     @JoinColumn(name = "issue_id")
     private Issue issue;
 
+    /** Responsable de una acción ({@code ACTION}); al convertirla en tarea, la tarea se le asigna. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "owner_id")
+    private User owner;
+
     @ManyToMany
     @JoinTable(name = "retro_note_votes",
             joinColumns = @JoinColumn(name = "note_id"),

@@ -13,8 +13,11 @@ import java.util.UUID;
  */
 public interface DailyService {
 
-    /** Qué hizo cada persona desde el día hábil anterior, en qué está hoy, qué la bloquea y la nota del día. */
-    DailyResponse getDaily(String slug, UUID projectId, LocalDate date);
+    /**
+     * Qué hizo cada persona desde el día hábil anterior, en qué está hoy, qué la bloquea y la nota del día. Las tareas
+     * que bloquean y son de un proyecto al que {@code userId} no tiene acceso van sin título ni asignados.
+     */
+    DailyResponse getDaily(String slug, UUID projectId, UUID userId, LocalDate date);
 
     /** Guarda la nota del día; con texto vacío la borra y devuelve vacío. */
     Optional<DailyNoteResponse> saveNote(String slug, UUID projectId, UUID userId, LocalDate date,

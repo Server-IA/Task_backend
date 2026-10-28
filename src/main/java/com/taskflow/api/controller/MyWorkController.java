@@ -29,7 +29,10 @@ public class MyWorkController {
             description = "Tareas abiertas (ni completadas ni canceladas) de los proyectos a los que tengo acceso: "
                     + "asignadas a mí (assigned), creadas por mí (created) o en las que comenté (commented). "
                     + "Orden: fecha límite (sin fecha al final), prioridad (URGENT primero) y número. Incluye los "
-                    + "contadores de las tres vistas, las asignadas completadas esta semana y las que están en curso.")
+                    + "contadores de las tres vistas y, de las asignadas (sea cual sea la vista): completadas esta "
+                    + "semana, en curso, vencidas, proyectos distintos, cantidad por estado (byState: name, color, "
+                    + "group, count; los estados con el mismo nombre y grupo en varios proyectos se suman) y la "
+                    + "próxima fecha límite después de hoy (nextDue).")
     @GetMapping
     @PreAuthorize("@workspaceSecurity.isMember(#slug)")
     public MyWorkResponse getMyWork(

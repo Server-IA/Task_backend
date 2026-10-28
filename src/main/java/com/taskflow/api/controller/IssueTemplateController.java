@@ -34,7 +34,8 @@ public class IssueTemplateController {
 
     @Operation(summary = "Listar plantillas (en su orden)",
             description = "Al crear una tarea desde una plantilla, el frontend antepone titlePrefix al título, usa "
-                    + "description, priority y labels, y envía checklist en el campo checklist de la tarea.")
+                    + "description, priority y labels, envía checklist en el campo checklist de la tarea y el id de "
+                    + "la plantilla en templateId. usageCount = tareas creadas con la plantilla.")
     @GetMapping
     public List<IssueTemplateResponse> getTemplates(@PathVariable String slug, @PathVariable UUID projectId) {
         return templateService.getTemplates(slug, projectId);

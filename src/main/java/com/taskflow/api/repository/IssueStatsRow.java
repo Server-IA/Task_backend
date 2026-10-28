@@ -18,6 +18,7 @@ public record IssueStatsRow(
         LocalDate dueDate,
         Instant createdAt,
         Instant updatedAt,
+        Instant startedAt,
         Instant completedAt
 ) {
 }

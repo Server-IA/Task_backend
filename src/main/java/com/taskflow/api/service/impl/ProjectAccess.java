@@ -3,6 +3,7 @@ package com.taskflow.api.service.impl;
 import com.taskflow.api.entity.Project;
 import com.taskflow.api.entity.Workspace;
 import com.taskflow.api.entity.enums.WorkspaceRole;
+import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.ProjectRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
 import lombok.RequiredArgsConstructor;
@@ -13,13 +14,15 @@ import java.util.UUID;
 
 /**
  * Qué proyectos de un workspace puede ver un usuario: todos si es project manager; si no, solo aquellos
- * de los que es miembro. Lo usan los listados que cruzan proyectos (mi trabajo, actividad, búsqueda).
+ * de los que es miembro. Lo usan los listados que cruzan proyectos (mi trabajo, actividad, búsqueda) y las
+ * dependencias entre tareas de distintos proyectos.
  */
 @Component
 @RequiredArgsConstructor
 class ProjectAccess {
 
     private final ProjectRepository projectRepository;
+    private final ProjectMemberRepository projectMemberRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
 
     List<Project> projects(Workspace workspace, UUID userId) {
@@ -32,6 +35,12 @@ class ProjectAccess {
         return isManager(workspace, userId)
                 ? projectRepository.findIdsByWorkspaceId(workspace.getId())
                 : projectRepository.findIdsByWorkspaceIdAndMember(workspace.getId(), userId);
+    }
+
+    /** El mismo criterio que {@code WorkspaceSecurity.canAccessProject}: project manager o miembro del proyecto. */
+    boolean canAccess(Project project, UUID userId) {
+        return isManager(project.getWorkspace(), userId)
+                || projectMemberRepository.existsByProjectIdAndUserId(project.getId(), userId);
     }
 
     boolean isManager(Workspace workspace, UUID userId) {

@@ -25,31 +25,43 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class IssueRelationServiceImpl implements IssueRelationService {
 
+    static final String OTHER_NOT_FOUND_MESSAGE =
+            "La tarea relacionada no existe en este workspace o no tienes acceso a su proyecto";
+
     private final IssueRelationRepository relationRepository;
     private final IssueRepository issueRepository;
     private final ActivityService activityService;
     private final NotificationService notificationService;
+    private final ProjectAccess projectAccess;
     private final ResourceLookup lookup;
     private final IssueMapper issueMapper;
 
     @Override
     @Transactional(readOnly = true)
-    public IssueRelationsResponse getRelations(String slug, UUID projectId, UUID issueId) {
-        Issue issue = findIssue(lookup.project(slug, projectId), issueId);
+    public IssueRelationsResponse getRelations(String slug, UUID projectId, UUID issueId, UUID userId) {
+        Project project = lookup.project(slug, projectId);
+        Issue issue = findIssue(project, issueId);
+        List<IssueRelation> relations = relationRepository.findAllByIssueId(issue.getId());
+        Set<UUID> accessible = accessibleProjects(project, relations, issue, userId);
+
         List<IssueRelationResponse> blocks = new ArrayList<>();
         List<IssueRelationResponse> blockedBy = new ArrayList<>();
         List<IssueRelationResponse> related = new ArrayList<>();
-        relationRepository.findAllByIssueId(issue.getId()).stream()
-                .sorted(Comparator.comparingInt(relation -> relation.otherThan(issue.getId()).getSequenceId()))
+        relations.stream()
+                .sorted(Comparator.comparing(relation -> relation.otherThan(issue.getId()), byCode(project)))
                 .forEach(relation -> {
-                    IssueRelationResponse response = toResponse(relation, issue);
+                    Issue other = relation.otherThan(issue.getId());
+                    IssueRelationResponse response = toResponse(relation, other,
+                            accessible.contains(other.getProject().getId()));
                     if (relation.getType() == IssueRelationType.RELATES) {
                         related.add(response);
                     } else if (relation.getSource().getId().equals(issue.getId())) {
@@ -67,8 +79,11 @@ public class IssueRelationServiceImpl implements IssueRelationService {
                                         CreateIssueRelationRequest request) {
         Project project = lookup.project(slug, projectId);
         Issue issue = findIssue(project, issueId);
-        Issue other = issueRepository.findByIdAndProjectId(request.issueId(), project.getId())
-                .orElseThrow(() -> new BadRequestException("La tarea relacionada no existe en este proyecto"));
+        // La otra tarea puede ser de cualquier proyecto del workspace al que el usuario tenga acceso.
+        Issue other = issueRepository.findByIdAndProjectWorkspaceId(request.issueId(), project.getWorkspace().getId())
+                .filter(candidate -> candidate.getProject().getId().equals(project.getId())
+                        || projectAccess.canAccess(candidate.getProject(), userId))
+                .orElseThrow(() -> new BadRequestException(OTHER_NOT_FOUND_MESSAGE));
         if (other.getId().equals(issue.getId())) {
             throw new ConflictException("Una tarea no puede relacionarse consigo misma");
         }
@@ -82,7 +97,7 @@ public class IssueRelationServiceImpl implements IssueRelationService {
         relationRepository.save(relation);
 
         recordActivity(relation, lookup.user(userId), true);
-        return toResponse(relation, issue);
+        return toResponse(relation, other, true);
     }
 
     @Override
@@ -106,6 +121,31 @@ public class IssueRelationServiceImpl implements IssueRelationService {
                 notificationService.notifyUnblocked(blocked, completedBlocker, actor);
             }
         }
+    }
+
+    /**
+     * Las tareas del proyecto de la URL primero (por número) y luego las de otros proyectos, por identificador y
+     * número.
+     */
+    private static Comparator<Issue> byCode(Project project) {
+        return Comparator.<Issue, Boolean>comparing(other -> !other.getProject().getId().equals(project.getId()))
+                .thenComparing(other -> other.getProject().getIdentifier())
+                .thenComparingInt(Issue::getSequenceId);
+    }
+
+    /**
+     * Proyectos de las otras tareas que el usuario puede ver. El de la URL siempre (lo validó {@code @PreAuthorize});
+     * los demás solo se consultan si alguna dependencia cruza de proyecto.
+     */
+    private Set<UUID> accessibleProjects(Project project, List<IssueRelation> relations, Issue issue, UUID userId) {
+        Set<UUID> accessible = new HashSet<>();
+        accessible.add(project.getId());
+        boolean crossesProjects = relations.stream()
+                .anyMatch(relation -> !relation.otherThan(issue.getId()).getProject().getId().equals(project.getId()));
+        if (crossesProjects) {
+            accessible.addAll(projectAccess.projectIds(project.getWorkspace(), userId));
+        }
+        return accessible;
     }
 
     /** Sin duplicados (RELATES en cualquier dirección) y sin dos tareas bloqueándose mutuamente. */
@@ -146,8 +186,9 @@ public class IssueRelationServiceImpl implements IssueRelationService {
                 added ? null : fromTarget, added ? fromTarget : null);
     }
 
-    private IssueRelationResponse toResponse(IssueRelation relation, Issue seenFrom) {
-        return new IssueRelationResponse(relation.getId(), issueMapper.toRelated(relation.otherThan(seenFrom.getId())));
+    private IssueRelationResponse toResponse(IssueRelation relation, Issue other, boolean accessible) {
+        return new IssueRelationResponse(relation.getId(),
+                accessible ? issueMapper.toRelated(other) : issueMapper.toRestrictedRelated(other), accessible);
     }
 
     private Issue findIssue(Project project, UUID issueId) {

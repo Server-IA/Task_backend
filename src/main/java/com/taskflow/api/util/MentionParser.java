@@ -22,6 +22,20 @@ public final class MentionParser {
     private MentionParser() {
     }
 
+    /**
+     * El texto en una línea, con cada mención como {@code @Nombre} y los espacios seguidos reducidos a uno, cortado
+     * con «…» si supera {@code maxLength} caracteres; {@code null} si el texto es {@code null}.
+     */
+    public static String excerpt(String body, int maxLength) {
+        if (body == null) {
+            return null;
+        }
+        String text = MENTION.matcher(body).replaceAll(match -> Matcher.quoteReplacement("@" + match.group(1)))
+                .replaceAll("\\s+", " ")
+                .strip();
+        return text.length() <= maxLength ? text : text.substring(0, maxLength).stripTrailing() + "…";
+    }
+
     /** Ids mencionados, sin repetir y en orden de aparición (como máximo {@link #MAX_MENTIONS}). */
     public static Set<UUID> userIds(String body) {
         if (body == null || body.isEmpty()) {

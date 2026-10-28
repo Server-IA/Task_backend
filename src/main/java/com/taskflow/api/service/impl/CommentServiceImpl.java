@@ -68,7 +68,7 @@ public class CommentServiceImpl implements CommentService {
 
         activityService.record(issue, author, ActivityField.COMMENT, null, excerpt(comment.getBody()));
         List<User> mentioned = mentionable(project, author, MentionParser.userIds(comment.getBody()));
-        notificationService.notifyCommented(issue, author, mentioned);
+        notificationService.notifyCommented(issue, author, comment, mentioned);
         return mapper.toCommentResponse(comment);
     }
 
@@ -88,7 +88,7 @@ public class CommentServiceImpl implements CommentService {
 
         comment.setBody(request.body().trim());
         CommentResponse response = mapper.toCommentResponse(commentRepository.saveAndFlush(comment));
-        notificationService.notifyMentioned(issue, comment.getAuthor(),
+        notificationService.notifyMentioned(issue, comment.getAuthor(), comment,
                 mentionable(project, comment.getAuthor(), newMentions));
         return response;
     }

@@ -6,6 +6,7 @@ import com.taskflow.api.dto.response.ChecklistItemResponse;
 import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.IssueChecklistItem;
 import com.taskflow.api.entity.Project;
+import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.enums.ChecklistItemKind;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
@@ -20,6 +21,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -32,6 +34,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -56,6 +59,7 @@ class IssueChecklistServiceImplTest {
 
     private Project project;
     private Issue issue;
+    private User user;
 
     @BeforeEach
     void setUp() {
@@ -64,13 +68,16 @@ class IssueChecklistServiceImplTest {
         issue = new Issue();
         issue.setId(UUID.randomUUID());
         issue.setProject(project);
+        user = new User();
+        user.setId(UUID.randomUUID());
+        lenient().when(lookup.user(user.getId())).thenReturn(user);
         lenient().when(lookup.project(SLUG, project.getId())).thenReturn(project);
         lenient().when(issueRepository.findByIdAndProjectId(issue.getId(), project.getId()))
                 .thenReturn(Optional.of(issue));
         lenient().when(issueMapper.toChecklistItemResponse(any(IssueChecklistItem.class))).thenAnswer(invocation -> {
             IssueChecklistItem item = invocation.getArgument(0);
             return new ChecklistItemResponse(item.getId(), item.getKind(), item.getText(), item.isDone(),
-                    item.getPosition());
+                    item.getPosition(), null, item.getCheckedAt());
         });
         lenient().when(itemRepository.saveAndFlush(any(IssueChecklistItem.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -115,6 +122,7 @@ class IssueChecklistServiceImplTest {
         assertThat(created.position()).isEqualTo(2);
         assertThat(created.text()).isEqualTo("Probar en otro navegador");
         assertThat(created.done()).isFalse();
+        verify(issueRepository).touchChecklist(eq(issue.getId()), any(Instant.class));
     }
 
     @Test
@@ -146,7 +154,7 @@ class IssueChecklistServiceImplTest {
         IssueChecklistItem c = item(CHECK, "C", 2);
         siblings(CHECK, a, b, c);
 
-        checklistService.update(SLUG, project.getId(), issue.getId(), c.getId(),
+        checklistService.update(SLUG, project.getId(), issue.getId(), c.getId(), user.getId(),
                 new UpdateChecklistItemRequest(null, null, 0));
 
         assertThat(List.of(c.getPosition(), a.getPosition(), b.getPosition())).containsExactly(0, 1, 2);
@@ -159,7 +167,7 @@ class IssueChecklistServiceImplTest {
         siblings(CRITERION, a, b);
 
         ChecklistItemResponse moved = checklistService.update(SLUG, project.getId(), issue.getId(), a.getId(),
-                new UpdateChecklistItemRequest(null, null, 99));
+                user.getId(), new UpdateChecklistItemRequest(null, null, 99));
 
         assertThat(moved.position()).isEqualTo(1);
         assertThat(b.getPosition()).isZero();
@@ -170,11 +178,43 @@ class IssueChecklistServiceImplTest {
         IssueChecklistItem a = item(CHECK, "A", 0);
 
         ChecklistItemResponse updated = checklistService.update(SLUG, project.getId(), issue.getId(), a.getId(),
-                new UpdateChecklistItemRequest("  Escribir la prueba ", true, null));
+                user.getId(), new UpdateChecklistItemRequest("  Escribir la prueba ", true, null));
 
         assertThat(updated.done()).isTrue();
         assertThat(updated.text()).isEqualTo("Escribir la prueba");
         assertThat(updated.position()).isZero();
+        // Guarda quién lo marcó y cuándo, y la checklist de la tarea queda actualizada
+        assertThat(a.getCheckedBy()).isSameAs(user);
+        assertThat(a.getCheckedAt()).isNotNull();
+        verify(issueRepository).touchChecklist(eq(issue.getId()), any(Instant.class));
+    }
+
+    @Test
+    void alDesmarcarloBorraQuienYCuandoLoMarco() {
+        IssueChecklistItem a = item(CHECK, "A", 0);
+        IssueChecklistServiceImpl.markDone(a, true, user, Instant.now());
+
+        checklistService.update(SLUG, project.getId(), issue.getId(), a.getId(), user.getId(),
+                new UpdateChecklistItemRequest(null, false, null));
+
+        assertThat(a.isDone()).isFalse();
+        assertThat(a.getCheckedBy()).isNull();
+        assertThat(a.getCheckedAt()).isNull();
+    }
+
+    @Test
+    void volverAMarcarUnoYaMarcadoConservaQuienLoMarco() {
+        User other = new User();
+        other.setId(UUID.randomUUID());
+        Instant checkedAt = Instant.now().minusSeconds(3600);
+        IssueChecklistItem a = item(CHECK, "A", 0);
+        IssueChecklistServiceImpl.markDone(a, true, other, checkedAt);
+
+        checklistService.update(SLUG, project.getId(), issue.getId(), a.getId(), user.getId(),
+                new UpdateChecklistItemRequest(null, true, null));
+
+        assertThat(a.getCheckedBy()).isSameAs(other);
+        assertThat(a.getCheckedAt()).isEqualTo(checkedAt);
     }
 
     @Test
@@ -182,7 +222,7 @@ class IssueChecklistServiceImplTest {
         IssueChecklistItem a = item(CHECK, "A", 0);
 
         assertThatThrownBy(() -> checklistService.update(SLUG, project.getId(), issue.getId(), a.getId(),
-                new UpdateChecklistItemRequest("   ", null, null)))
+                user.getId(), new UpdateChecklistItemRequest("   ", null, null)))
                 .isInstanceOf(BadRequestException.class);
     }
 
@@ -197,6 +237,7 @@ class IssueChecklistServiceImplTest {
 
         verify(itemRepository).delete(a);
         assertThat(List.of(b.getPosition(), c.getPosition())).containsExactly(0, 1);
+        verify(issueRepository).touchChecklist(eq(issue.getId()), any(Instant.class));
     }
 
     @Test

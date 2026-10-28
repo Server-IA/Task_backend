@@ -6,7 +6,10 @@ import com.taskflow.api.dto.response.DailyNoteResponse;
 import com.taskflow.api.dto.response.DailyResponse;
 import com.taskflow.api.dto.response.DailyResponse.DailyBlocker;
 import com.taskflow.api.dto.response.DailyResponse.DailyChange;
+import com.taskflow.api.dto.response.DailyResponse.DailyCycle;
 import com.taskflow.api.dto.response.DailyResponse.DailyPerson;
+import com.taskflow.api.dto.response.DailyResponse.DailySummary;
+import com.taskflow.api.entity.Cycle;
 import com.taskflow.api.entity.DailyNote;
 import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.IssueActivity;
@@ -15,10 +18,12 @@ import com.taskflow.api.entity.Project;
 import com.taskflow.api.entity.ProjectMember;
 import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.User;
+import com.taskflow.api.entity.enums.ActivityField;
 import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.mapper.CollaborationMapper;
 import com.taskflow.api.mapper.IssueMapper;
 import com.taskflow.api.mapper.UserMapper;
+import com.taskflow.api.repository.CycleRepository;
 import com.taskflow.api.repository.DailyNoteRepository;
 import com.taskflow.api.repository.IssueActivityRepository;
 import com.taskflow.api.repository.IssueRelationRepository;
@@ -36,17 +41,20 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
  * Arma la daily con pocas consultas fijas (tareas abiertas asignadas, sus bloqueos, la actividad del periodo,
- * los miembros, los estados y la nota) y agrupa en memoria por persona.
+ * los miembros, los estados, el ciclo en curso y sus tareas, los contadores del resumen y la nota) y agrupa en
+ * memoria por persona.
  */
 @Service
 @RequiredArgsConstructor
@@ -66,12 +74,19 @@ public class DailyServiceImpl implements DailyService {
             .comparing(User::getFullName, String.CASE_INSENSITIVE_ORDER)
             .thenComparing(User::getEmail);
 
+    /** Por código: identificador del proyecto y número (los bloqueos pueden ser de otro proyecto). */
+    private static final Comparator<Issue> BY_CODE = Comparator
+            .comparing((Issue issue) -> issue.getProject().getIdentifier())
+            .thenComparingInt(Issue::getSequenceId);
+
     private final IssueRepository issueRepository;
+    private final CycleRepository cycleRepository;
     private final IssueActivityRepository activityRepository;
     private final IssueRelationRepository relationRepository;
     private final ProjectMemberRepository projectMemberRepository;
     private final StateRepository stateRepository;
     private final DailyNoteRepository noteRepository;
+    private final ProjectAccess projectAccess;
     private final ResourceLookup lookup;
     private final IssueMapper issueMapper;
     private final UserMapper userMapper;
@@ -80,7 +95,7 @@ public class DailyServiceImpl implements DailyService {
 
     @Override
     @Transactional(readOnly = true)
-    public DailyResponse getDaily(String slug, UUID projectId, LocalDate date) {
+    public DailyResponse getDaily(String slug, UUID projectId, UUID userId, LocalDate date) {
         Project project = lookup.project(slug, projectId);
         ZoneId zone = ZoneId.of(properties.timezone());
         LocalDate day = date != null ? date : LocalDate.now(zone);
@@ -100,32 +115,56 @@ public class DailyServiceImpl implements DailyService {
             }
         }
         Map<UUID, List<Issue>> blockersByIssue = openBlockers(openIssues);
+        Set<UUID> visibleProjects = visibleBlockerProjects(project, blockersByIssue, userId);
 
         // Lo hecho desde el día hábil anterior hasta antes del día de la reunión (el lunes incluye el fin de semana).
         Instant from = previous.atStartOfDay(zone).toInstant();
         Instant to = day.atStartOfDay(zone).toInstant();
-        Map<UUID, List<IssueActivity>> activityByPerson = activityRepository
-                .findAllInProjectBetween(project.getId(), from, to).stream()
+        List<IssueActivity> activities = activityRepository.findAllInProjectBetween(project.getId(), from, to);
+        Map<UUID, List<IssueActivity>> activityByPerson = activities.stream()
                 .collect(Collectors.groupingBy(activity -> activity.getActor().getId()));
         Map<String, StateGroup> groupByStateName = stateRepository.findAllByProjectIdOrderByPositionAsc(project.getId())
                 .stream()
                 .collect(Collectors.toMap(state -> key(state.getName()), State::getStateGroup, (a, b) -> a));
 
+        // Ciclo en curso ese día: lo que cada persona tiene asignado en él y cuánto completó.
+        Cycle cycle = PlanningSupport.currentCycle(cycleRepository.findAllByProjectId(project.getId()), day);
+        List<Issue> cycleIssues = cycle == null ? List.of() : issueRepository.findAllInCycle(cycle.getId()).stream()
+                .filter(issue -> issue.getState().getStateGroup() != StateGroup.CANCELLED)
+                .toList();
+
         List<DailyPerson> result = people.values().stream()
                 .sorted(BY_NAME)
                 .map(user -> {
                     List<Issue> assigned = issuesByPerson.getOrDefault(user.getId(), List.of());
+                    List<Issue> inCycle = cycleIssues.stream().filter(issue -> isAssignedTo(issue, user)).toList();
                     return new DailyPerson(
                             userMapper.toSummary(user),
                             yesterday(activityByPerson.getOrDefault(user.getId(), List.of()), groupByStateName),
                             todayIssues(assigned, day).stream().map(issueMapper::toRelated).toList(),
-                            blockers(assigned, blockersByIssue));
+                            blockers(assigned, blockersByIssue, visibleProjects),
+                            assigned.size(),
+                            inCycle.size(),
+                            (int) inCycle.stream().filter(PlanningSupport::isCompleted).count());
                 })
                 .toList();
+        DailySummary summary = new DailySummary(
+                (int) activities.stream()
+                        .filter(activity -> activity.getField() == ActivityField.STATE)
+                        .map(activity -> activity.getIssue().getId())
+                        .distinct()
+                        .count(),
+                (int) issueRepository.countStartedBetween(project.getId(), from, to),
+                (int) issueRepository.countCompletedBetween(project.getId(), from, to),
+                (int) activities.stream().filter(activity -> activity.getField() == ActivityField.COMMENT).count(),
+                blockersByIssue.size());
         DailyNoteResponse note = noteRepository.findByProjectIdAndDate(project.getId(), day)
                 .map(collaborationMapper::toDailyNoteResponse)
                 .orElse(null);
-        return new DailyResponse(day, previous, result, note);
+        return new DailyResponse(day, previous,
+                cycle == null ? null : new DailyCycle(cycle.getId(), cycle.getName(), cycle.getStartDate(),
+                        cycle.getEndDate()),
+                summary, result, note);
     }
 
     @Override
@@ -169,7 +208,8 @@ public class DailyServiceImpl implements DailyService {
         return best.values().stream()
                 .sorted(Comparator.comparingInt(Change::rank).thenComparing(Change::at, Comparator.reverseOrder()))
                 .limit(MAX_ITEMS)
-                .map(change -> new DailyChange(issueMapper.toRelated(change.issue()), change.label()))
+                .map(change -> new DailyChange(issueMapper.toRelated(change.issue()), change.label(),
+                        change.fromState(), change.toState()))
                 .toList();
     }
 
@@ -183,16 +223,43 @@ public class DailyServiceImpl implements DailyService {
                 .toList();
     }
 
-    private List<DailyBlocker> blockers(List<Issue> assigned, Map<UUID, List<Issue>> blockersByIssue) {
+    /**
+     * @param visibleProjects proyectos que el usuario puede ver: una tarea que bloquea y es de otro proyecto va sin
+     *                        título ni asignados (igual que en las dependencias de la tarea)
+     */
+    private List<DailyBlocker> blockers(List<Issue> assigned, Map<UUID, List<Issue>> blockersByIssue,
+                                        Set<UUID> visibleProjects) {
         return assigned.stream()
                 .filter(issue -> blockersByIssue.containsKey(issue.getId()))
                 .sorted(MyWorkServiceImpl.MY_WORK_ORDER)
                 .map(issue -> new DailyBlocker(issueMapper.toRelated(issue),
                         blockersByIssue.get(issue.getId()).stream()
-                                .sorted(Comparator.comparingInt(Issue::getSequenceId))
-                                .map(issueMapper::toSummary)
+                                .sorted(BY_CODE)
+                                .map(blocker -> visibleProjects.contains(blocker.getProject().getId())
+                                        ? issueMapper.toRelated(blocker)
+                                        : issueMapper.toRestrictedRelated(blocker))
                                 .toList()))
                 .toList();
+    }
+
+    /**
+     * Proyectos de las tareas que bloquean que el usuario puede ver. El de la daily siempre (lo validó
+     * {@code @PreAuthorize}); los demás solo se consultan si algún bloqueo viene de otro proyecto.
+     */
+    private Set<UUID> visibleBlockerProjects(Project project, Map<UUID, List<Issue>> blockersByIssue, UUID userId) {
+        Set<UUID> visible = new HashSet<>();
+        visible.add(project.getId());
+        boolean crossesProjects = blockersByIssue.values().stream()
+                .flatMap(List::stream)
+                .anyMatch(blocker -> !blocker.getProject().getId().equals(project.getId()));
+        if (crossesProjects) {
+            visible.addAll(projectAccess.projectIds(project.getWorkspace(), userId));
+        }
+        return visible;
+    }
+
+    private static boolean isAssignedTo(Issue issue, User user) {
+        return issue.getAssignees().stream().anyMatch(assignee -> assignee.getId().equals(user.getId()));
     }
 
     /** Bloqueos abiertos de las tareas que los tienen ({@code blockedByCount > 0}), por tarea bloqueada. */
@@ -216,9 +283,13 @@ public class DailyServiceImpl implements DailyService {
 
     /**
      * Un cambio de la persona en una tarea. {@code rank}: 0 completó, 1 movió de estado, 2 creó, 3 comentó,
-     * 4 cualquier otro.
+     * 4 cualquier otro. {@code fromState} y {@code toState} solo en los cambios de estado.
      */
-    record Change(Issue issue, String label, int rank, Instant at) {
+    record Change(Issue issue, String label, int rank, Instant at, String fromState, String toState) {
+
+        Change(Issue issue, String label, int rank, Instant at) {
+            this(issue, label, rank, at, null, null);
+        }
 
         static Change of(IssueActivity activity, Map<String, StateGroup> groupByStateName) {
             Issue issue = activity.getIssue();
@@ -230,8 +301,8 @@ public class DailyServiceImpl implements DailyService {
                         yield new Change(issue, UPDATED, 4, at);
                     }
                     yield groupByStateName.get(key(state)) == StateGroup.COMPLETED
-                            ? new Change(issue, COMPLETED, 0, at)
-                            : new Change(issue, MOVED_TO + state, 1, at);
+                            ? new Change(issue, COMPLETED, 0, at, activity.getOldValue(), state)
+                            : new Change(issue, MOVED_TO + state, 1, at, activity.getOldValue(), state);
                 }
                 case CREATED -> new Change(issue, CREATED, 2, at);
                 case COMMENT -> new Change(issue, COMMENTED, 3, at);

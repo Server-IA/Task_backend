@@ -13,6 +13,8 @@ public record CycleResponse(
         CycleStatus status,
         /** Cuándo se cerró; {@code null} mientras siga abierto. Un ciclo cerrado siempre está COMPLETED. */
         Instant closedAt,
+        /** Quién lo cerró («cerrado por …»); {@code null} si sigue abierto o si esa persona ya no existe. */
+        UserSummaryResponse closedBy,
         ProgressResponse progress,
         Instant createdAt,
         Instant updatedAt

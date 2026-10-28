@@ -1,7 +1,6 @@
 package com.taskflow.api.service.impl;
 
 import com.taskflow.api.config.AppProperties;
-import com.taskflow.api.dto.response.CycleStatus;
 import com.taskflow.api.dto.response.ProjectStatsResponse;
 import com.taskflow.api.dto.response.UserSummaryResponse;
 import com.taskflow.api.entity.Cycle;
@@ -12,6 +11,7 @@ import com.taskflow.api.mapper.UserMapper;
 import com.taskflow.api.repository.CycleRepository;
 import com.taskflow.api.repository.IssueAssigneeRow;
 import com.taskflow.api.repository.IssueRepository;
+import com.taskflow.api.repository.IssueStatsRow;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.service.ProjectStatsService;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -46,38 +47,39 @@ public class ProjectStatsServiceImpl implements ProjectStatsService {
 
     @Override
     @Transactional(readOnly = true)
-    public ProjectStatsResponse getStats(String slug, UUID projectId, int weeks) {
+    public ProjectStatsResponse getStats(String slug, UUID projectId, int weeks, Collection<UUID> assignees) {
         if (!ALLOWED_WEEKS.contains(weeks)) {
             throw new BadRequestException("El parámetro weeks debe ser 4, 8 o 12");
         }
         Project project = lookup.project(slug, projectId);
         ZoneId zone = ZoneId.of(properties.timezone());
         Instant now = Instant.now();
+        Set<UUID> people = assignees == null ? Set.of() : new HashSet<>(assignees);
 
+        List<IssueStatsRow> issues = issueRepository.findStatsRows(project.getId());
         List<IssueAssigneeRow> assigneeRows = issueRepository.findAssignees(project.getId(), StateGroup.CLOSED);
+        if (!people.isEmpty()) {
+            // Filtro por persona: solo sus tareas, y en la carga solo esas personas (no sus compañeros de tarea).
+            Set<UUID> theirIssues = new HashSet<>(issueRepository.findIdsAssignedToAny(project.getId(), people));
+            issues = issues.stream().filter(issue -> theirIssues.contains(issue.id())).toList();
+            assigneeRows = assigneeRows.stream().filter(row -> people.contains(row.user().getId())).toList();
+        }
         Map<UUID, List<UserSummaryResponse>> assigneesByIssue = ProjectStatsCalculator.groupBy(
                 assigneeRows, IssueAssigneeRow::issueId, row -> userMapper.toSummary(row.user()));
-        Cycle currentCycle = findCurrentCycle(project, LocalDate.ofInstant(now, zone));
+        Cycle currentCycle = PlanningSupport.currentCycle(cycleRepository.findAllByProjectId(project.getId()),
+                LocalDate.ofInstant(now, zone));
         Set<UUID> cycleIssueIds = currentCycle == null
                 ? Set.of()
                 : new HashSet<>(cycleRepository.findIssueIds(currentCycle.getId()));
 
+        // Con el filtro, cada tarea tiene a alguna de esas personas: la carga no tiene fila «sin asignar».
         return new ProjectStatsCalculator(now, zone).calculate(
                 project.getIdentifier(),
                 weeks,
-                issueRepository.findStatsRows(project.getId()),
+                issues,
                 stateRepository.findAllByProjectIdOrderByPositionAsc(project.getId()),
                 assigneesByIssue,
                 currentCycle,
                 cycleIssueIds);
-    }
-
-    /** Ciclo en curso (hoy entre sus fechas y sin cerrar). Si se solapan varios, el que empezó más tarde. */
-    private Cycle findCurrentCycle(Project project, LocalDate today) {
-        return cycleRepository.findAllByProjectId(project.getId()).stream()
-                .filter(cycle -> CycleStatus.of(cycle.getStartDate(), cycle.getEndDate(), cycle.isClosed(), today)
-                        == CycleStatus.CURRENT)
-                .findFirst()
-                .orElse(null);
     }
 }

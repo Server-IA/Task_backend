@@ -17,8 +17,11 @@ public interface IssueChecklistService {
     /** Agrega el elemento al final de los de su tipo. */
     ChecklistItemResponse create(String slug, UUID projectId, UUID issueId, ChecklistItemRequest request);
 
-    /** Edita el texto, lo marca o desmarca, o lo mueve a otra posición dentro de los de su tipo. */
-    ChecklistItemResponse update(String slug, UUID projectId, UUID issueId, UUID itemId,
+    /**
+     * Edita el texto, lo marca o desmarca, o lo mueve a otra posición dentro de los de su tipo. Al marcarlo guarda
+     * quién ({@code userId}) y cuándo; al desmarcarlo los borra.
+     */
+    ChecklistItemResponse update(String slug, UUID projectId, UUID issueId, UUID itemId, UUID userId,
                                  UpdateChecklistItemRequest request);
 
     void delete(String slug, UUID projectId, UUID issueId, UUID itemId);

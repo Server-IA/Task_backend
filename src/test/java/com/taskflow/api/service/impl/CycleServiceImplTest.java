@@ -25,6 +25,7 @@ import com.taskflow.api.mapper.IssueMapper;
 import com.taskflow.api.mapper.PlanningMapper;
 import com.taskflow.api.repository.CycleRepository;
 import com.taskflow.api.service.ActivityService;
+import com.taskflow.api.service.NotificationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -63,6 +64,8 @@ class CycleServiceImplTest {
     @Mock
     private ActivityService activityService;
     @Mock
+    private NotificationService notificationService;
+    @Mock
     private PlanningSupport support;
     @Mock
     private ResourceLookup lookup;
@@ -86,8 +89,8 @@ class CycleServiceImplTest {
     @BeforeEach
     void setUp() {
         AppProperties properties = new AppProperties(null, null, "http://localhost:5173", "America/Bogota", null);
-        cycleService = new CycleServiceImpl(cycleRepository, activityService, support, lookup, mapper, issueMapper,
-                properties);
+        cycleService = new CycleServiceImpl(cycleRepository, activityService, notificationService, support, lookup,
+                mapper, issueMapper, properties);
         project = new Project();
         project.setId(UUID.randomUUID());
         project.setIdentifier("WEB");
@@ -107,11 +110,12 @@ class CycleServiceImplTest {
                     Cycle cycle = invocation.getArgument(0);
                     return new CycleResponse(cycle.getId(), cycle.getName(), cycle.getDescription(),
                             cycle.getStartDate(), cycle.getEndDate(), invocation.getArgument(1), cycle.getClosedAt(),
-                            invocation.getArgument(2), null, null);
+                            null, invocation.getArgument(2), null, null);
                 });
         lenient().when(issueMapper.toRelated(any(Issue.class))).thenAnswer(invocation -> {
             Issue issue = invocation.getArgument(0);
-            return new RelatedIssueResponse(issue.getId(), issue.getCode(), issue.getTitle(), null, List.of());
+            return new RelatedIssueResponse(issue.getId(), issue.getCode(), issue.getTitle(), null, List.of(), null,
+                    issue.getDueDate(), 0, 0, 0, 0, 0);
         });
     }
 
@@ -132,9 +136,10 @@ class CycleServiceImplTest {
         return issue;
     }
 
-    private Issue completedIssue(Duration createdAgo, Duration completedAgo) {
+    /** Completada; el tiempo de ciclo se mide desde que empezó (pasó a un estado STARTED). */
+    private Issue completedIssue(Duration startedAgo, Duration completedAgo) {
         Issue issue = issue(done);
-        issue.setCreatedAt(now.minus(createdAgo));
+        issue.setStartedAt(now.minus(startedAgo));
         issue.setCompletedAt(now.minus(completedAgo));
         return issue;
     }
@@ -174,11 +179,14 @@ class CycleServiceImplTest {
         void separaCompletadasYSinTerminarConSuCycleTimeYElSiguienteCiclo() {
             Issue slow = completedIssue(Duration.ofDays(4), Duration.ofDays(1));
             Issue fast = completedIssue(Duration.ofDays(2), Duration.ofDays(1));
+            // Nunca pasó por un estado STARTED: no cuenta para el tiempo de ciclo.
+            Issue skipped = issue(done);
+            skipped.setCompletedAt(now.minus(Duration.ofDays(1)));
             Issue started = issue(inProgress);
             Issue pending = issue(todo);
             Issue dropped = issue(cancelled);
             Cycle sprint = cycle("Sprint 3", today.minusDays(7), today.plusDays(7),
-                    pending, dropped, started, fast, slow);
+                    pending, dropped, started, fast, slow, skipped);
             Cycle next = cycle("Sprint 4", today.plusDays(8), today.plusDays(21));
             Cycle later = cycle("Sprint 5", today.plusDays(22), today.plusDays(35));
             Cycle closedOne = closed(cycle("Sprint 2", today.plusDays(1), today.plusDays(2)));
@@ -189,12 +197,13 @@ class CycleServiceImplTest {
 
             assertThat(preview.cycle().id()).isEqualTo(sprint.getId());
             assertThat(preview.completed()).extracting(RelatedIssueResponse::id)
-                    .containsExactly(slow.getId(), fast.getId());
+                    .containsExactly(slow.getId(), fast.getId(), skipped.getId());
             // Las canceladas no son «completadas» ni «sin terminar»: se quedan en el ciclo.
             assertThat(preview.unfinished()).extracting(RelatedIssueResponse::id)
                     .containsExactly(started.getId(), pending.getId());
-            assertThat(preview.completedCount()).isEqualTo(2);
+            assertThat(preview.completedCount()).isEqualTo(3);
             assertThat(preview.unfinishedCount()).isEqualTo(2);
+            // Mediana de 3 y 1 días de En curso a Hecho (la que no empezó no cuenta)
             assertThat(preview.cycleTimeDays()).isEqualTo(2.0);
             assertThat(preview.nextCycle().id()).isEqualTo(next.getId());
         }
@@ -267,6 +276,7 @@ class CycleServiceImplTest {
             assertThat(response.movedToCycle()).isEqualTo(2);
             assertThat(response.movedToBacklog()).isZero();
             assertThat(response.retroStarted()).isFalse();
+            verifyNoInteractions(notificationService);
             assertThat(response.cycle().status()).isEqualTo(CycleStatus.COMPLETED);
             assertThat(response.cycle().closedAt()).isEqualTo(sprint.getClosedAt());
         }
@@ -302,6 +312,21 @@ class CycleServiceImplTest {
             assertThat(sprint.getCarriedToBacklog()).isEqualTo(2);
             assertThat(sprint.getRetroStartedAt()).isNotNull();
             assertThat(response.retroStarted()).isTrue();
+            // Abrir la retro avisa al equipo
+            verify(notificationService).notifyRetroStarted(sprint, pm);
+        }
+
+        @Test
+        void siLaRetroYaEstabaAbiertaNoVuelveAAvisar() {
+            Instant opened = now.minus(Duration.ofHours(1));
+            sprint.setRetroStartedAt(opened);
+
+            CloseCycleResponse response = cycleService.close(SLUG, project.getId(), sprint.getId(), pm.getId(),
+                    closeRequest(CycleMoveTarget.BACKLOG, null, true));
+
+            assertThat(sprint.getRetroStartedAt()).isEqualTo(opened);
+            assertThat(response.retroStarted()).isTrue();
+            verifyNoInteractions(notificationService);
         }
 
         @Test

@@ -22,9 +22,11 @@ import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.mapper.PlanningMapper;
 import com.taskflow.api.repository.CycleRepository;
 import com.taskflow.api.repository.IssueRepository;
+import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.RetroNoteRepository;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.service.IssueService;
+import com.taskflow.api.service.NotificationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -67,7 +69,11 @@ class RetroServiceImplTest {
     @Mock
     private IssueRepository issueRepository;
     @Mock
+    private ProjectMemberRepository projectMemberRepository;
+    @Mock
     private IssueService issueService;
+    @Mock
+    private NotificationService notificationService;
     @Mock
     private ProjectAccess projectAccess;
     @Mock
@@ -111,7 +117,7 @@ class RetroServiceImplTest {
         lenient().when(mapper.toRetroNoteResponse(any(RetroNote.class), anyInt(), anyBoolean()))
                 .thenAnswer(invocation -> {
                     RetroNote note = invocation.getArgument(0);
-                    return new RetroNoteResponse(note.getId(), note.getColumn(), note.getText(), null, null,
+                    return new RetroNoteResponse(note.getId(), note.getColumn(), note.getText(), null, null, null,
                             invocation.getArgument(1), invocation.getArgument(2), null);
                 });
     }
@@ -156,6 +162,7 @@ class RetroServiceImplTest {
         issue.setProject(project);
         issue.setState(done);
         issue.setCreatedAt(now.minus(createdAgo));
+        issue.setStartedAt(now.minus(createdAgo));
         issue.setCompletedAt(now.minus(completedAgo));
         return issue;
     }
@@ -231,7 +238,7 @@ class RetroServiceImplTest {
         @Test
         void cualquieraAgregaUnaNotaConElTextoRecortado() {
             RetroNoteResponse response = retroService.createNote(SLUG, project.getId(), cycle.getId(), member.getId(),
-                    new RetroNoteRequest(RetroColumn.IMPROVE, "  Revisar PRs antes  "));
+                    new RetroNoteRequest(RetroColumn.IMPROVE, "  Revisar PRs antes  ", null));
 
             ArgumentCaptor<RetroNote> saved = ArgumentCaptor.forClass(RetroNote.class);
             verify(noteRepository).save(saved.capture());
@@ -246,14 +253,14 @@ class RetroServiceImplTest {
         void sinEmpezarOTerminadaNoAdmiteNotas() {
             cycle.setRetroStartedAt(null);
             assertThatThrownBy(() -> retroService.createNote(SLUG, project.getId(), cycle.getId(), member.getId(),
-                    new RetroNoteRequest(RetroColumn.WENT_WELL, "Buen ritmo")))
+                    new RetroNoteRequest(RetroColumn.WENT_WELL, "Buen ritmo", null)))
                     .isInstanceOf(ConflictException.class)
                     .hasMessage(RetroServiceImpl.NOT_STARTED_MESSAGE);
 
             cycle.setRetroStartedAt(now.minus(Duration.ofHours(1)));
             cycle.setRetroFinishedAt(now);
             assertThatThrownBy(() -> retroService.createNote(SLUG, project.getId(), cycle.getId(), member.getId(),
-                    new RetroNoteRequest(RetroColumn.WENT_WELL, "Buen ritmo")))
+                    new RetroNoteRequest(RetroColumn.WENT_WELL, "Buen ritmo", null)))
                     .isInstanceOf(ConflictException.class)
                     .hasMessage(RetroServiceImpl.FINISHED_MESSAGE);
             verify(noteRepository, never()).save(any());
@@ -264,9 +271,62 @@ class RetroServiceImplTest {
             RetroNote mine = note(RetroColumn.WENT_WELL, member);
 
             retroService.updateNote(SLUG, project.getId(), cycle.getId(), mine.getId(), member.getId(),
-                    new UpdateRetroNoteRequest(" Deploys sin sustos "));
+                    new UpdateRetroNoteRequest(" Deploys sin sustos ", null, null));
 
             assertThat(mine.getText()).isEqualTo("Deploys sin sustos");
+        }
+
+        @Test
+        void unaAccionPuedeTenerResponsableQueSeaMiembroDelProyecto() {
+            when(projectMemberRepository.existsByProjectIdAndUserId(project.getId(), otherMember.getId()))
+                    .thenReturn(true);
+
+            retroService.createNote(SLUG, project.getId(), cycle.getId(), member.getId(),
+                    new RetroNoteRequest(RetroColumn.ACTION, "Dividir WEB-2", otherMember.getId()));
+
+            ArgumentCaptor<RetroNote> saved = ArgumentCaptor.forClass(RetroNote.class);
+            verify(noteRepository).save(saved.capture());
+            assertThat(saved.getValue().getOwner()).isSameAs(otherMember);
+        }
+
+        @Test
+        void elResponsableDebeSerMiembroYSoloLasAccionesLoTienen() {
+            when(projectMemberRepository.existsByProjectIdAndUserId(project.getId(), pm.getId())).thenReturn(false);
+
+            assertThatThrownBy(() -> retroService.createNote(SLUG, project.getId(), cycle.getId(), member.getId(),
+                    new RetroNoteRequest(RetroColumn.ACTION, "Dividir WEB-2", pm.getId())))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessage(RetroServiceImpl.OWNER_NOT_MEMBER_MESSAGE);
+            assertThatThrownBy(() -> retroService.createNote(SLUG, project.getId(), cycle.getId(), member.getId(),
+                    new RetroNoteRequest(RetroColumn.IMPROVE, "Menos reuniones", otherMember.getId())))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessage(RetroServiceImpl.ONLY_ACTIONS_OWNER_MESSAGE);
+            verify(noteRepository, never()).save(any());
+        }
+
+        @Test
+        void editarElResponsableSinTocarElTextoYQuitarlo() {
+            RetroNote action = note(RetroColumn.ACTION, member);
+            when(projectMemberRepository.existsByProjectIdAndUserId(project.getId(), otherMember.getId()))
+                    .thenReturn(true);
+
+            retroService.updateNote(SLUG, project.getId(), cycle.getId(), action.getId(), member.getId(),
+                    new UpdateRetroNoteRequest(null, otherMember.getId(), null));
+            assertThat(action.getOwner()).isSameAs(otherMember);
+            assertThat(action.getText()).isEqualTo("Nota ACTION");
+
+            retroService.updateNote(SLUG, project.getId(), cycle.getId(), action.getId(), member.getId(),
+                    new UpdateRetroNoteRequest(null, null, true));
+            assertThat(action.getOwner()).isNull();
+        }
+
+        @Test
+        void rechazaUnTextoEnBlancoAlEditar() {
+            RetroNote mine = note(RetroColumn.WENT_WELL, member);
+
+            assertThatThrownBy(() -> retroService.updateNote(SLUG, project.getId(), cycle.getId(), mine.getId(),
+                    member.getId(), new UpdateRetroNoteRequest("   ", null, null)))
+                    .isInstanceOf(BadRequestException.class);
         }
 
         @Test
@@ -274,7 +334,7 @@ class RetroServiceImplTest {
             RetroNote mine = note(RetroColumn.WENT_WELL, member);
 
             assertThatThrownBy(() -> retroService.updateNote(SLUG, project.getId(), cycle.getId(), mine.getId(),
-                    otherMember.getId(), new UpdateRetroNoteRequest("Otra cosa")))
+                    otherMember.getId(), new UpdateRetroNoteRequest("Otra cosa", null, null)))
                     .isInstanceOf(ForbiddenException.class)
                     .hasMessage("Solo el autor de la nota o el project manager pueden editarla");
             assertThatThrownBy(() -> retroService.deleteNote(SLUG, project.getId(), cycle.getId(), mine.getId(),
@@ -290,7 +350,7 @@ class RetroServiceImplTest {
             RetroNote mine = note(RetroColumn.IMPROVE, member);
 
             retroService.updateNote(SLUG, project.getId(), cycle.getId(), mine.getId(), pm.getId(),
-                    new UpdateRetroNoteRequest("Texto moderado"));
+                    new UpdateRetroNoteRequest("Texto moderado", null, null));
             retroService.deleteNote(SLUG, project.getId(), cycle.getId(), mine.getId(), pm.getId());
 
             assertThat(mine.getText()).isEqualTo("Texto moderado");
@@ -303,7 +363,7 @@ class RetroServiceImplTest {
             cycle.setRetroFinishedAt(now);
 
             assertThatThrownBy(() -> retroService.updateNote(SLUG, project.getId(), cycle.getId(), mine.getId(),
-                    member.getId(), new UpdateRetroNoteRequest("Otra cosa")))
+                    member.getId(), new UpdateRetroNoteRequest("Otra cosa", null, null)))
                     .isInstanceOf(ConflictException.class)
                     .hasMessage(RetroServiceImpl.FINISHED_MESSAGE);
             assertThatThrownBy(() -> retroService.deleteNote(SLUG, project.getId(), cycle.getId(), mine.getId(),
@@ -420,8 +480,8 @@ class RetroServiceImplTest {
 
         private IssueResponse issueResponse() {
             return new IssueResponse(issueId, "WEB-42", 42, project.getId(), "Automatizar el deploy", null, null,
-                    null, null, null, null, 0, List.of(), List.of(), null, List.of(), 0, 0, 0, 0, 0, 0, 0, null, null,
-                    null, null);
+                    null, null, null, null, 0, List.of(), List.of(), null, List.of(), 0, 0, 0, List.of(), List.of(), 0, 0,
+                    0, 0, null, null, null, null, null, null);
         }
 
         @Test
@@ -441,6 +501,34 @@ class RetroServiceImplTest {
             assertThat(action.getIssue()).isSameAs(created);
             verify(noteRepository).save(action);
             assertThat(issue.code()).isEqualTo("WEB-42");
+        }
+
+        @Test
+        void laTareaSeAsignaAlResponsableDeLaAccion() {
+            RetroNote action = note(RetroColumn.ACTION, member);
+            action.setOwner(otherMember);
+            when(projectMemberRepository.existsByProjectIdAndUserId(project.getId(), otherMember.getId()))
+                    .thenReturn(true);
+
+            retroService.convert(SLUG, project.getId(), cycle.getId(), action.getId(), pm.getId());
+
+            ArgumentCaptor<CreateIssueRequest> request = ArgumentCaptor.forClass(CreateIssueRequest.class);
+            verify(issueService).create(eq(SLUG), eq(project.getId()), eq(pm.getId()), request.capture());
+            assertThat(request.getValue().assigneeIds()).containsExactly(otherMember.getId());
+        }
+
+        @Test
+        void siElResponsableYaNoEsMiembroLaTareaQuedaSinAsignar() {
+            RetroNote action = note(RetroColumn.ACTION, member);
+            action.setOwner(otherMember);
+            when(projectMemberRepository.existsByProjectIdAndUserId(project.getId(), otherMember.getId()))
+                    .thenReturn(false);
+
+            retroService.convert(SLUG, project.getId(), cycle.getId(), action.getId(), pm.getId());
+
+            ArgumentCaptor<CreateIssueRequest> request = ArgumentCaptor.forClass(CreateIssueRequest.class);
+            verify(issueService).create(eq(SLUG), eq(project.getId()), eq(pm.getId()), request.capture());
+            assertThat(request.getValue().assigneeIds()).isNull();
         }
 
         @Test
@@ -508,6 +596,8 @@ class RetroServiceImplTest {
             assertThat(retro.started()).isTrue();
             assertThat(startedAt).isNotNull();
             assertThat(cycle.getRetroStartedAt()).isEqualTo(startedAt);
+            // Avisa al equipo solo la primera vez
+            verify(notificationService).notifyRetroStarted(cycle, pm);
         }
 
         @Test

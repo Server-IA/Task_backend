@@ -24,6 +24,7 @@ import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.IssueMapper;
 import com.taskflow.api.repository.IssueRepository;
 import com.taskflow.api.repository.IssueSpecifications;
+import com.taskflow.api.repository.IssueTemplateRepository;
 import com.taskflow.api.repository.LabelRepository;
 import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.ProjectRepository;
@@ -64,6 +65,7 @@ public class IssueServiceImpl implements IssueService {
     static final String DELETE_FORBIDDEN_MESSAGE = "Solo el project manager o quien creó la tarea puede eliminarla";
 
     private final IssueRepository issueRepository;
+    private final IssueTemplateRepository templateRepository;
     private final ProjectRepository projectRepository;
     private final ProjectMemberRepository projectMemberRepository;
     private final StateRepository stateRepository;
@@ -94,13 +96,22 @@ public class IssueServiceImpl implements IssueService {
                 : stateRepository.findFirstByProjectIdOrderByPositionAsc(project.getId())
                         .orElseThrow(() -> new ConflictException("El proyecto no tiene estados"));
         validateDates(request.startDate(), request.dueDate());
+        if (request.templateId() != null
+                && templateRepository.incrementUsage(request.templateId(), project.getId()) == 0) {
+            throw new BadRequestException("La plantilla no existe en este proyecto");
+        }
 
+        Instant now = Instant.now();
         Issue issue = new Issue();
         issue.setProject(project);
         issue.setTitle(request.title().trim());
         issue.setDescription(blankToNull(request.description()));
         issue.setState(state);
-        updateCompletedAt(issue, null, Instant.now());
+        updateCompletedAt(issue, null, now);
+        updateStartedAt(issue, now);
+        if (request.checklist() != null && !request.checklist().isEmpty()) {
+            issue.setChecklistUpdatedAt(now);
+        }
         issue.setPriority(request.priority() != null ? request.priority() : IssuePriority.NONE);
         if (request.parentId() != null) {
             issue.setParent(findReferencedIssue(project, request.parentId(), "La tarea padre no existe en este proyecto"));
@@ -160,7 +171,9 @@ public class IssueServiceImpl implements IssueService {
             changes.track(ActivityField.STATE, issue.getState().getName(), state.getName());
             StateGroup previousGroup = issue.getState().getStateGroup();
             issue.setState(state);
-            updateCompletedAt(issue, previousGroup, Instant.now());
+            Instant now = Instant.now();
+            updateCompletedAt(issue, previousGroup, now);
+            updateStartedAt(issue, now);
             completed = becameCompleted(previousGroup, state.getStateGroup());
             issue.setSortOrder(SortOrderCalculator.endOfColumn(issueRepository.findMaxSortOrder(state.getId())));
         }
@@ -248,7 +261,9 @@ public class IssueServiceImpl implements IssueService {
                 maxInColumn));
         StateGroup previousGroup = issue.getState().getStateGroup();
         issue.setState(target);
-        updateCompletedAt(issue, previousGroup, Instant.now());
+        Instant now = Instant.now();
+        updateCompletedAt(issue, previousGroup, now);
+        updateStartedAt(issue, now);
         Issue saved = issueRepository.saveAndFlush(issue);
         // Pasar de un grupo abierto a COMPLETED implica cambiar de estado, así que actor ya está cargado.
         if (becameCompleted(previousGroup, target.getStateGroup())) {
@@ -291,6 +306,16 @@ public class IssueServiceImpl implements IssueService {
             issue.setCompletedAt(null);
         } else if (previousGroup != StateGroup.COMPLETED || issue.getCompletedAt() == null) {
             issue.setCompletedAt(now);
+        }
+    }
+
+    /**
+     * Fija {@code startedAt} la primera vez que la tarea entra al grupo STARTED (también si se crea en él). No se
+     * borra al salir: el tiempo de ciclo se mide desde la primera vez que empezó.
+     */
+    static void updateStartedAt(Issue issue, Instant now) {
+        if (issue.getState().getStateGroup() == StateGroup.STARTED && issue.getStartedAt() == null) {
+            issue.setStartedAt(now);
         }
     }
 

@@ -15,11 +15,14 @@ import java.util.UUID;
 
 public interface IssueRelationRepository extends JpaRepository<IssueRelation, UUID> {
 
-    /** Relaciones en las que participa la tarea (en cualquier lado), con ambas tareas y sus estados cargados. */
+    /**
+     * Relaciones en las que participa la tarea (en cualquier lado), con ambas tareas, sus estados y sus proyectos
+     * cargados (la otra tarea puede ser de otro proyecto del workspace).
+     */
     @Query("""
             select r from IssueRelation r
-            join fetch r.source s join fetch s.state
-            join fetch r.target t join fetch t.state
+            join fetch r.source s join fetch s.state join fetch s.project
+            join fetch r.target t join fetch t.state join fetch t.project
             where s.id = :issueId or t.id = :issueId
             """)
     List<IssueRelation> findAllByIssueId(@Param("issueId") UUID issueId);
@@ -45,11 +48,11 @@ public interface IssueRelationRepository extends JpaRepository<IssueRelation, UU
 
     /**
      * Bloqueos abiertos (tarea origen fuera de {@code closedGroups}) de las tareas indicadas, con ambas tareas
-     * cargadas.
+     * cargadas (la que bloquea, con su estado y su proyecto).
      */
     @Query("""
             select r from IssueRelation r
-            join fetch r.source s join fetch s.project
+            join fetch r.source s join fetch s.project join fetch s.state
             join fetch r.target
             where r.type = com.taskflow.api.entity.enums.IssueRelationType.BLOCKS
               and r.target.id in :issueIds

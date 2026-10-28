@@ -44,7 +44,9 @@ public class IssueController {
     private final ActivityService activityService;
 
     @Operation(summary = "Listar issues con filtros y paginación",
-            description = "Orden por defecto: sortOrder (el del Kanban). Ej.: ?state=…&priority=HIGH&search=login&page=0&size=20")
+            description = "Orden por defecto: sortOrder (el del Kanban). Ej.: ?state=…&priority=HIGH&search=login&page=0"
+                    + "&size=20. blocked=true deja solo las bloqueadas (su totalElements es el «N bloqueadas» del "
+                    + "encabezado).")
     @GetMapping
     public PageResponse<IssueResponse> getIssues(@PathVariable String slug, @PathVariable UUID projectId,
                                                  @ParameterObject IssueFilter filter,
@@ -53,7 +55,9 @@ public class IssueController {
         return issueService.getIssues(slug, projectId, filter, pageable);
     }
 
-    @Operation(summary = "Crear issue")
+    @Operation(summary = "Crear issue",
+            description = "templateId (opcional) = plantilla con la que se rellenó el formulario: suma un uso a la "
+                    + "plantilla (400 si no es de este proyecto).")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public IssueResponse create(@PathVariable String slug, @PathVariable UUID projectId,

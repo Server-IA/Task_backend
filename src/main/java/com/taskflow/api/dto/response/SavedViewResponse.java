@@ -14,6 +14,8 @@ public record SavedViewResponse(
         /** Orden dentro de su grupo (compartidas o personales), desde 0. */
         int position,
         /** {@code true} si la creó el usuario actual. */
-        boolean mine
+        boolean mine,
+        /** Tareas que cumplen sus filtros ahora mismo (las mismas que lista {@code GET /issues} con esos filtros). */
+        long issueCount
 ) {
 }

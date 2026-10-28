@@ -34,18 +34,21 @@ public class IssueRelationController {
 
     @Operation(summary = "Dependencias de la tarea",
             description = "blocks = tareas que esta bloquea; blockedBy = tareas que la bloquean; related = "
-                    + "relacionadas. Cada lista va ordenada por número de tarea.")
+                    + "relacionadas. La otra tarea puede ser de otro proyecto del workspace (issue.project). Cada "
+                    + "lista va ordenada por código: primero las de este proyecto. accessible = false si no tengo "
+                    + "acceso al proyecto de la otra tarea: entonces viene sin título ni asignados.")
     @GetMapping
     public IssueRelationsResponse getRelations(@PathVariable String slug, @PathVariable UUID projectId,
-                                               @PathVariable UUID issueId) {
-        return relationService.getRelations(slug, projectId, issueId);
+                                               @PathVariable UUID issueId, @AuthenticationPrincipal UserPrincipal me) {
+        return relationService.getRelations(slug, projectId, issueId, me.getId());
     }
 
     @Operation(summary = "Agregar dependencia",
             description = "type: BLOCKS (esta tarea bloquea a issueId), BLOCKED_BY (issueId bloquea a esta) o RELATES. "
-                    + "La otra tarea debe ser del mismo proyecto (400). Responde 409 si es la misma tarea, si la "
-                    + "relación ya existe o si las dos tareas quedarían bloqueándose mutuamente. Devuelve la relación "
-                    + "vista desde esta tarea y la registra en el historial de ambas.")
+                    + "La otra tarea puede ser de cualquier proyecto del workspace al que tenga acceso (si no, 400). "
+                    + "Responde 409 si es la misma tarea, si la relación ya existe o si las dos tareas quedarían "
+                    + "bloqueándose mutuamente. Devuelve la relación vista desde esta tarea y la registra en el "
+                    + "historial de ambas.")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public IssueRelationResponse create(@PathVariable String slug, @PathVariable UUID projectId,

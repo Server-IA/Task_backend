@@ -63,8 +63,10 @@ las estadísticas del proyecto (mediana, throughput, burndown), «Mi trabajo», 
 búsqueda, `SortOrderCalculator`, el avance de ciclos, las dependencias (duplicados, ciclos y
 desbloqueo), la checklist (orden y conteos), las plantillas (por defecto y validaciones), las
 menciones, las vistas guardadas (visibilidad y permisos), el cierre de ciclos (a dónde va cada tarea,
-409 y ciclo cerrado inmutable), la retrospectiva (votos, permisos, convertir acciones, terminar) y la
-daily (día hábil anterior y agregación por persona).
+409 y ciclo cerrado inmutable), la retrospectiva (votos, permisos, convertir acciones, responsable,
+terminar, aviso al equipo), la daily (día hábil anterior, agregación por persona, ciclo en curso, resumen
+y bloqueos de otros proyectos), las dependencias entre proyectos, `startedAt` y el tiempo de ciclo, el
+filtro por persona de las estadísticas y el orden y los contadores de las vistas guardadas.
 
 ## Arquitectura
 
@@ -212,6 +214,10 @@ o quitar miembros; crear, editar o borrar ciclos y módulos; gestionar las vista
 
 `group` ∈ `BACKLOG | UNSTARTED | STARTED | COMPLETED | CANCELLED`; los colores van como `#RRGGBB`.
 
+Cada proyecto trae `nextIssueCode`: el código que recibirá la próxima tarea (`"WEB-26"`, para el «→ será
+WEB-26» del formulario de nueva tarea). Es orientativo: si otra persona crea una tarea antes, esa se
+lleva el número.
+
 ### Issues
 
 Base: `/workspaces/{slug}/projects/{projectId}/issues`.
@@ -244,41 +250,62 @@ Base: `/workspaces/{slug}/projects/{projectId}/issues`.
   "dueDate": "2026-10-30",
   "assigneeIds": ["uuid"],
   "labelIds": ["uuid"],
-  "checklist": [ { "kind": "CRITERION | CHECK", "text": "…" } ]
+  "checklist": [ { "kind": "CRITERION | CHECK", "text": "…" } ],
+  "templateId": "uuid"
 }
 ```
 
 `checklist` (opcional, máx. 50) crea los criterios y pasos en la misma transacción, en el orden
-recibido; es lo que se envía al crear una tarea desde una plantilla.
+recibido; es lo que se envía al crear una tarea desde una plantilla. `templateId` (opcional) es la
+plantilla con la que se rellenó el formulario: suma un uso a la plantilla (`usageCount`); 400 si no es
+de este proyecto.
 
 El issue recibe un código legible (`code: "WEB-12"`) que sigue al identificador del proyecto. La
 respuesta incluye también su ciclo (`cycle: { id, name }` o `null`), sus módulos (`modules: [...]`),
 `completedAt`: cuándo entró a un estado del grupo `COMPLETED` (`null` si no está completada; se
-borra si sale de ese grupo y no cambia al moverla entre dos estados completados), y los contadores
-`blockedByCount` (tareas que la bloquean y siguen abiertas: si es mayor que 0, mostrar «bloqueada»),
-`checklistTotal`/`checklistDone` y `criteriaTotal`/`criteriaDone`.
+borra si sale de ese grupo y no cambia al moverla entre dos estados completados), `startedAt`: la
+primera vez que entró a un estado del grupo `STARTED` (`null` si nunca pasó por uno; no se borra al
+salir), y los contadores `blockedByCount` (tareas que la bloquean y siguen abiertas: si es mayor que 0,
+mostrar «bloqueada»), `checklistTotal`/`checklistDone` y `criteriaTotal`/`criteriaDone`. Además:
+
+- `blockedByCodes`: códigos de esas tareas, ordenados (`["AMC-4", "WEB-2"]`; pueden ser de otro
+  proyecto) para el chip «bloqueada por WEB-2».
+- `blockingCodes`: códigos de las tareas abiertas que esta bloquea mientras siga abierta, para el chip
+  «bloquea WEB-7» (o «bloquea 2» si hay varias).
+- `checklistUpdatedAt`: último cambio de los criterios o la checklist («actualizado hace…»); `null` si
+  nunca tuvo. Cambiar la checklist no modifica `updatedAt`.
 
 **Dependencias** (`relations`): `type` = `BLOCKS` (esta tarea bloquea a `issueId`), `BLOCKED_BY`
 (`issueId` bloquea a esta; se guarda como el `BLOCKS` inverso) o `RELATES` (simétrica). La otra tarea
-debe ser del mismo proyecto (400). Responde **409** si es la misma tarea, si la relación ya existe o
-si dos tareas quedarían bloqueándose mutuamente. Cada cambio queda en el historial de ambas tareas
-(`field: "RELATION"`, con textos como `"bloquea WEB-12"`, `"bloqueada por WEB-3"` o
+puede ser de **cualquier proyecto del workspace** al que el usuario tenga acceso (si no existe o no
+tiene acceso, 400). Responde **409** si es la misma tarea, si la relación ya existe o si dos tareas
+quedarían bloqueándose mutuamente. Cada cambio queda en el historial de ambas tareas
+(`field: "RELATION"`, con textos como `"bloquea WEB-12"`, `"bloqueada por AMC-3"` o
 `"relacionada con WEB-7"`; en `newValue` al agregar y en `oldValue` al quitar). Cuando una tarea
 abierta pasa a un estado `COMPLETED`, los asignados de cada tarea que bloqueaba y que ya no tiene
 otros bloqueos abiertos reciben `ISSUE_UNBLOCKED`.
 
 ```json
 { "blocks": [ Rel ], "blockedBy": [ Rel ], "related": [ Rel ] }
-Rel = { "relationId": "…", "issue": { "id": "…", "code": "WEB-12", "title": "…", "state": StateResponse, "assignees": [ UserSummary ] } }
+Rel = { "relationId": "…", "issue": RelatedIssue, "accessible": true }
+RelatedIssue = { "id", "code": "AMC-4", "title", "state": StateResponse, "assignees": [ UserSummary ],
+                 "project": { "id", "name", "identifier" }, "dueDate", "blockedByCount", "subIssueCount",
+                 "completedSubIssueCount", "checklistTotal", "checklistDone" }
 ```
 
-`POST` devuelve el `Rel` visto desde la tarea de la URL (`issue` es la otra tarea).
+Cada lista va ordenada por código, primero las tareas del proyecto de la URL. `accessible: false`
+cuando el usuario no tiene acceso al proyecto de la otra tarea: entonces `title` viene `null` y
+`assignees` vacío (el código, el proyecto y el estado sí vienen). `POST` devuelve el `Rel` visto desde
+la tarea de la URL (`issue` es la otra tarea). Para buscar tareas de otros proyectos al agregar una
+dependencia sirve `GET /workspaces/{slug}/search?q=`.
 
 **Criterios y checklist** (`checklist`): `kind` = `CRITERION` (criterio de aceptación) o `CHECK`
 (paso); `text` de 1 a 500 caracteres; máximo 100 por tarea (409). El `GET` devuelve
-`[ { id, kind, text, done, position } ]`: primero los criterios y luego los pasos, cada grupo por
-`position` (0, 1, 2…). Al agregar, el elemento queda al final de los de su tipo; en el `PATCH`,
-`position` es el nuevo índice dentro de su tipo y los demás se renumeran.
+`[ { id, kind, text, done, position, checkedBy, checkedAt } ]`: primero los criterios y luego los
+pasos, cada grupo por `position` (0, 1, 2…). Al agregar, el elemento queda al final de los de su tipo;
+en el `PATCH`, `position` es el nuevo índice dentro de su tipo y los demás se renumeran. Marcarlo
+(`done: true`) guarda `checkedBy` (UserSummary de quien lo marcó) y `checkedAt`; desmarcarlo los
+borra. Los marcados antes de esta versión tienen `checkedBy: null` y `checkedAt` aproximado.
 
 **Editar** (PATCH parcial): los campos `null` u omitidos no cambian; `assigneeIds`/`labelIds`
 reemplazan la lista completa (`[]` la vacía); `description: ""` la borra; para quitar padre o
@@ -288,10 +315,13 @@ fechas se envía `clearParent`, `clearStartDate` o `clearDueDate` en `true`.
 
 ```
 GET /issues?state=<id>&state=<id>&priority=HIGH&assignee=<userId>&label=<id>
-           &cycle=<id>&module=<id>&search=login&page=0&size=20&sort=sortOrder,asc
+           &cycle=<id>&module=<id>&blocked=true&search=login&page=0&size=20&sort=sortOrder,asc
 ```
 
-`search` busca en el título y también por código (`WEB-12` o `12`). Tamaño máximo de página: 200.
+`search` busca en el título y también por código (`WEB-12` o `12`). `blocked=true` deja solo las
+tareas con al menos un bloqueo abierto (`blocked=false`, las que no tienen): el «N bloqueadas» del
+encabezado es el `totalElements` de `?blocked=true&size=1` con los mismos filtros. Tamaño máximo de
+página: 200.
 Respuesta paginada:
 
 ```json
@@ -329,9 +359,14 @@ Base: `/workspaces/{slug}/projects/{projectId}`.
 
 Cada ciclo y módulo trae `progress: { totalIssues, completedIssues, percentage }` (completados =
 issues en estados del grupo `COMPLETED`). Los ciclos traen además `status`:
-`DRAFT | UPCOMING | CURRENT | COMPLETED` y `closedAt` (`null` mientras siga abierto; un ciclo cerrado
-siempre está `COMPLETED`). Para listar los issues de un ciclo o módulo se usa el filtro `?cycle=` o
-`?module=` del listado de issues.
+`DRAFT | UPCOMING | CURRENT | COMPLETED`, `closedAt` (`null` mientras siga abierto; un ciclo cerrado
+siempre está `COMPLETED`) y `closedBy` (UserSummary de quien lo cerró, para «cerrado por …»; `null` si
+sigue abierto). Para listar los issues de un ciclo o módulo se usa el filtro `?cycle=` o `?module=` del
+listado de issues.
+
+**Tiempo de ciclo** (cierre, retrospectiva y estadísticas): mediana de días «de En curso a Hecho», de
+`startedAt` a `completedAt`, redondeada a un decimal. Las tareas completadas que nunca pasaron por un
+estado `STARTED` (`startedAt: null`) no cuentan; si no queda ninguna, `null`.
 
 **Cerrar un ciclo** (solo el PM). `close-preview` responde:
 
@@ -340,11 +375,12 @@ siempre está `COMPLETED`). Para listar los issues de un ciclo o módulo se usa 
   "unfinishedCount": 3, "cycleTimeDays": 2.5, "nextCycle": CycleResponse | null }
 ```
 
-`IssueRef = { id, code, title, state: StateResponse, assignees: [UserSummary] }`. `completed` = grupo
-`COMPLETED`; `unfinished` = ni completadas ni canceladas (las canceladas no salen en ninguna lista y se
-quedan en el ciclo); ambas por número. `cycleTimeDays` = mediana de días de `createdAt` a `completedAt`
-de las completadas (1 decimal, `null` si no hay). `nextCycle` = el siguiente ciclo sin cerrar por
-fecha de inicio (para un ciclo sin fechas, el primero que no ha terminado).
+`IssueRef` es el `RelatedIssue` de las dependencias (`id, code, title, state, assignees, project,
+dueDate, blockedByCount, subIssueCount, completedSubIssueCount, checklistTotal, checklistDone`;
+`blockedByCount > 0` = «bloqueada»). `completed` = grupo `COMPLETED`; `unfinished` = ni completadas ni
+canceladas (las canceladas no salen en ninguna lista y se quedan en el ciclo); ambas por número.
+`cycleTimeDays` = tiempo de ciclo de las completadas (ver arriba). `nextCycle` = el siguiente ciclo sin
+cerrar por fecha de inicio (para un ciclo sin fechas, el primero que no ha terminado).
 
 ```http
 POST /cycles/{cycleId}/close
@@ -359,7 +395,8 @@ terminar se ignoran). Sin ciclo siguiente y con alguna tarea hacia `NEXT_CYCLE` 
 `targetCycleId` que no es del proyecto o es el mismo ciclo → 400, cerrado → 409. Si el ciclo terminaba
 después de hoy, su `endDate` pasa a hoy. Cerrar un ciclo ya cerrado, o que aún no empieza, → 409. Cada
 tarea movida registra `CYCLE` en su historial. Un ciclo cerrado no acepta cambios de nombre ni de
-fechas (la descripción sí) ni tareas nuevas → 409.
+fechas (la descripción sí) ni tareas nuevas → 409. `startRetro: true` abre la retrospectiva y avisa a
+los miembros del proyecto (notificación `RETRO_STARTED`, menos a quien la abre; solo en la app).
 
 ### Retrospectiva
 
@@ -368,9 +405,9 @@ Base: `/workspaces/{slug}/projects/{projectId}/cycles/{cycleId}/retro`.
 | Método | Ruta | Permiso | Descripción |
 |---|---|---|---|
 | GET | (base) | Acceso al proyecto | Ver la retro (sin empezar: `started: false` y sin notas) |
-| POST | `/start` | PM | Abrirla (también con `startRetro` al cerrar); si ya estaba abierta, no cambia |
-| POST | `/notes` | Acceso | `{ column: WENT_WELL \| IMPROVE \| ACTION, text }` (1 a 500) → `201` nota |
-| PATCH / DELETE | `/notes/{noteId}` | Autor o PM (403) | Editar `{ text }` / eliminar (`204`) |
+| POST | `/start` | PM | Abrirla (también con `startRetro` al cerrar) y avisar al equipo (`RETRO_STARTED`); si ya estaba abierta, no cambia ni vuelve a avisar |
+| POST | `/notes` | Acceso | `{ column: WENT_WELL \| IMPROVE \| ACTION, text, ownerId? }` (1 a 500) → `201` nota |
+| PATCH / DELETE | `/notes/{noteId}` | Autor o PM (403) | Editar `{ text?, ownerId?, clearOwner? }` (parcial) / eliminar (`204`) |
 | POST / DELETE | `/notes/{noteId}/vote` | Acceso | Votar / quitar mi voto → `{ note, myVotesLeft }` |
 | POST | `/notes/{noteId}/convert` | PM | Acción → tarea (`201` `IssueResponse`) |
 | POST | `/finish` | PM | Terminarla: notas y votos quedan de solo lectura |
@@ -380,7 +417,8 @@ Base: `/workspaces/{slug}/projects/{projectId}/cycles/{cycleId}/retro`.
   "summary": { "completedCount": 8, "totalCount": 12, "carriedToCycle": 3, "carriedToBacklog": 1,
                "cycleTimeDays": 2.5 },
   "notes": [ { "id": "…", "column": "ACTION", "text": "Automatizar el deploy", "author": UserSummary,
-               "createdAt": "…", "votes": 2, "votedByMe": true, "issue": IssueRef | null } ],
+               "owner": UserSummary | null, "createdAt": "…", "votes": 2, "votedByMe": true,
+               "issue": IssueRef | null } ],
   "myVotesLeft": 3,
   "previousActions": [ nota ACTION de la retro del ciclo cerrado anterior, con su issue si se convirtió ] }
 ```
@@ -392,10 +430,14 @@ Base: `/workspaces/{slug}/projects/{projectId}/cycles/{cycleId}/retro`.
 - Votos: uno por nota y 5 por persona en cada retro (409 si ya votaste o no te quedan). Quitar un voto
   que no existe no cambia nada.
 - Crear, editar, borrar y votar solo con la retro abierta y sin terminar (409).
+- Responsable (`owner`, «responsable: Luis»): solo en las `ACTION` (si no, 400) y debe ser miembro del
+  proyecto (400). `ownerId` lo cambia y `clearOwner: true` lo quita; mismas reglas que editar la nota.
 - Convertir: solo `ACTION` (400) y una vez (409). La tarea se crea en el primer estado `UNSTARTED` (o
   el estado por defecto), con el texto como título (cortado a 255 con «…»; entonces el texto completo
-  va en la descripción) y la descripción «Acción acordada en la retrospectiva del ciclo «Sprint 3».».
-  Se puede convertir también con la retro terminada.
+  va en la descripción) y la descripción «Acción acordada en la retrospectiva del ciclo «Sprint 3».»,
+  asignada al responsable si sigue siendo miembro del proyecto (si no, sin asignar). Se puede convertir
+  también con la retro terminada.
+- «Cerrado por X» sale de `closedBy` del ciclo (`GET /cycles/{cycleId}`).
 
 ### Plantillas de tarea y vistas guardadas
 
@@ -406,24 +448,28 @@ Base: `/workspaces/{slug}/projects/{projectId}`.
 | GET / POST | `/templates` | Plantillas en su orden / crear (PM) |
 | PATCH / DELETE | `/templates/{templateId}` | Editar o reordenar (PM) / eliminar (PM) |
 | GET / POST | `/views` | Vistas visibles / guardar una vista |
+| PUT | `/views/order` | Ordenar vistas `{ shared?: [ids], personal?: [ids] }` |
 | PATCH / DELETE | `/views/{viewId}` | Editar, compartir o reordenar / eliminar |
 
 **Plantillas**: `{ id, name, titlePrefix, description, priority, labels: [LabelResponse], checklist:
-[ { kind, text } ], position }`. Al crear la tarea, el frontend antepone `titlePrefix` al título
-(por ejemplo `"[Bug] "`, con su espacio), usa `description` (markdown), `priority` (`null` = no la
-fija) y `labels`, y envía `checklist` en el campo `checklist` de `POST /issues`. Crear:
+[ { kind, text } ], position, usageCount }`. Al crear la tarea, el frontend antepone `titlePrefix` al
+título (por ejemplo `"[Bug] "`, con su espacio), usa `description` (markdown), `priority` (`null` = no
+la fija) y `labels`, y envía `checklist` en el campo `checklist` y el id de la plantilla en
+`templateId` de `POST /issues` (eso suma 1 a `usageCount`, «12 usos»). Crear:
 `{ name, titlePrefix?, description?, priority?, labelIds?, checklist? }` (`name` de 1 a 60 y único en
 el proyecto → 409; etiquetas del proyecto → si no, 400). Editar es parcial: `titlePrefix` o
 `description` vacíos los quitan, `priority: "NONE"` quita la prioridad, `labelIds` y `checklist`
 reemplazan la lista y `position` es el nuevo índice (desde 0).
 
-**Vistas guardadas**: `[ { id, name, shared, owner: UserSummary, filters, position, mine } ]`,
+**Vistas guardadas**: `[ { id, name, shared, owner: UserSummary, filters, position, mine, issueCount } ]`,
 primero las compartidas del proyecto y luego mis vistas personales, cada grupo por `position`
-(`mine` = la creé yo). `filters` usa los mismos nombres que el listado de tareas:
+(`mine` = la creé yo; `issueCount` = tareas que cumplen sus filtros ahora, las mismas que devuelve
+`GET /issues` con esos filtros). `filters` usa los mismos nombres que el listado de tareas:
 
 ```json
 { "state": ["uuid"], "priority": ["HIGH"], "assignee": ["uuid"], "label": ["uuid"],
-  "search": "login", "view": "list | board", "sort": "dueDate,asc" }
+  "search": "login", "cycle": "uuid", "module": "uuid", "blocked": true,
+  "view": "list | board", "sort": "dueDate,asc", "groupBy": "state | priority | assignee | label" }
 ```
 
 Crear: `{ name, shared?, filters? }` (`name` de 1 a 40). Editar: `{ name?, filters?, shared?,
@@ -431,6 +477,11 @@ position? }` (`filters` reemplaza todos los filtros; `position` es el índice de
 cambiar `shared` pasa al final del otro grupo). Una vista personal solo la ve y gestiona su dueño
 (para los demás, 404); crear, editar, eliminar o compartir una vista compartida es solo del project
 manager (403).
+
+**Ordenar vistas** (`PUT /views/order`): `shared` = ids de **todas** las vistas compartidas en el
+nuevo orden (solo el project manager, si no 403); `personal` = ids de **todas** mis vistas personales.
+Al menos una de las dos (400); cada lista debe tener exactamente las vistas de su grupo, sin repetir
+(400). Devuelve las vistas visibles, como el `GET`.
 
 ### Estadísticas, mi trabajo, actividad y búsqueda
 
@@ -440,7 +491,7 @@ completada ni cancelada. Las semanas empiezan el **lunes**, en la zona horaria `
 
 | Método | Ruta | Permiso | Descripción |
 |---|---|---|---|
-| GET | `/workspaces/{slug}/projects/{projectId}/stats?weeks=8` | Acceso al proyecto | Estadísticas (`weeks` ∈ 4, 8, 12; otro valor → 400) |
+| GET | `/workspaces/{slug}/projects/{projectId}/stats?weeks=8&assignee=` | Acceso al proyecto | Estadísticas (`weeks` ∈ 4, 8, 12; otro valor → 400; `assignee` = filtro «+ persona») |
 | GET | `/workspaces/{slug}/my-work?view=assigned` | Miembro | Mis tareas abiertas: `assigned` \| `created` \| `commented` |
 | GET | `/workspaces/{slug}/activity?page=0&size=30&type=all&projectId=&actorId=` | Miembro | Feed paginado (`PageResponse`), lo más reciente primero; `size` máx. 100 |
 | GET | `/workspaces/{slug}/activity/summary?days=7` | Miembro | Resumen de los últimos `days` días (1 a 365) |
@@ -463,9 +514,12 @@ completada ni cancelada. Las semanas empiezan el **lunes**, en la zona horaria `
 ```
 
 - `overdue`: abiertas con `dueDate` anterior a hoy, la más vencida primero, máximo 10.
-- `cycleTimeDays`: mediana de días de `createdAt` a `completedAt` de las completadas en las `weeks`
-  semanas mostradas (1 decimal); `previousCycleTimeDays`, la del periodo anterior de igual duración.
-  `null` si no hay completadas.
+- `cycleTimeDays`: tiempo de ciclo (de `startedAt` a `completedAt`, ver «Ciclos») de las completadas
+  en las `weeks` semanas mostradas; `previousCycleTimeDays`, la del periodo anterior de igual
+  duración. `null` si no hay ninguna que cuente.
+- `assignee` (se puede repetir: `?assignee=a&assignee=b`): todas las métricas cuentan solo las tareas
+  asignadas ahora a alguna de esas personas (abiertas, creadas, completadas, vencidas, tiempo de
+  ciclo, throughput, burndown, por estado, estancadas) y `workload` muestra solo a esas personas.
 - `throughput`: exactamente `weeks` elementos, del más antiguo a la semana actual.
 - `burndown`: el ciclo en curso (hoy entre sus fechas; si se solapan, el que empezó más tarde) o
   `null`. `total` = tareas del ciclo sin las canceladas; un punto por día desde el inicio hasta hoy
@@ -480,11 +534,19 @@ completada ni cancelada. Las semanas empiezan el **lunes**, en la zona horaria `
 
 ```json
 { "issues": [ IssueResponse… ], "assignedCount": 7, "createdCount": 4, "commentedCount": 3,
-  "completedThisWeek": 4, "inProgressCount": 2 }
+  "completedThisWeek": 4, "inProgressCount": 3, "overdueCount": 1, "projectCount": 2,
+  "byState": [ { "name": "En curso", "color": "#F59E0B", "group": "STARTED", "count": 2 },
+               { "name": "En revisión", "color": "#8B5CF6", "group": "STARTED", "count": 1 } ],
+  "nextDue": IssueRef | null }
 ```
 
-`completedThisWeek` = asignadas a mí y completadas desde el lunes; `inProgressCount` = asignadas a mí
-y abiertas en un estado del grupo `STARTED`.
+Los contadores de las asignadas no dependen de la vista pedida. `completedThisWeek` = asignadas a mí y
+completadas desde el lunes («4 cerradas»); `inProgressCount` = asignadas a mí y abiertas en un estado
+del grupo `STARTED`; `overdueCount` y `projectCount` son el «7 tareas asignadas a ti en 2 proyectos · 1
+vencida»; `byState` = mis asignadas abiertas por estado (solo estados con alguna; los de distintos
+proyectos con el mismo nombre y grupo se suman), por grupo y orden del tablero: «2 en curso · 1 en
+revisión» son las entradas del grupo `STARTED`; `nextDue` = la asignada con la fecha límite más
+próxima **después de hoy** («Próxima fecha: mañana · WEB-19»).
 
 **Feed de actividad** (`activity`): `type` = `all` | `state` (cambios de estado, incluido completar) |
 `comments` | `assignments`. En los comentarios, `newValue` trae el texto (hasta 240 caracteres).
@@ -515,12 +577,19 @@ entradas por proyecto, de más a menos (solo proyectos con actividad):
 
 ```json
 { "date": "2026-10-28", "previousDate": "2026-10-27",
+  "cycle": { "id": "…", "name": "Sprint 1", "startDate": "2026-10-15", "endDate": "2026-10-29" } | null,
+  "summary": { "moved": 2, "started": 1, "completed": 1, "comments": 4, "blocked": 1 },
   "people": [ { "user": UserSummary,
-                "yesterday": [ { "issue": IssueRef, "change": "movió a En revisión" } ],
+                "yesterday": [ { "issue": IssueRef, "change": "movió a En revisión",
+                                 "fromState": "En curso", "toState": "En revisión" } ],
                 "today": [ IssueRef ],
-                "blockers": [ { "issue": IssueRef, "blockedBy": [ { "id": "…", "code": "WEB-3", "title": "…" } ] } ] } ],
+                "blockers": [ { "issue": IssueRef, "blockedBy": [ IssueRef ] } ],
+                "openCount": 3, "cycleAssignedCount": 4, "cycleCompletedCount": 1 } ],
   "note": { "text": "…", "updatedBy": UserSummary | null, "updatedAt": "…" } | null }
 ```
+
+`IssueRef` es el mismo de las dependencias: trae `dueDate` («vence mañana»), `assignees`,
+`blockedByCount`, `subIssueCount`/`completedSubIssueCount` y `checklistTotal`/`checklistDone`.
 
 - `previousDate`: el día anterior; si `date` es lunes, sábado o domingo, el viernes.
 - `people`: miembros del proyecto y asignados a tareas abiertas, por nombre, aunque no tengan nada.
@@ -529,7 +598,18 @@ entradas por proyecto, de más a menos (solo proyectos con actividad):
   `movió a {estado}` > `creó` > `comentó` > `actualizó` (cualquier otro campo). Máximo 8.
 - `today`: sus tareas abiertas en un estado `STARTED` o con `dueDate` ≤ `date`, por fecha límite (sin
   fecha al final), prioridad y número. Máximo 8.
-- `blockers`: sus tareas abiertas con bloqueos abiertos (`blockedBy` por número).
+- `blockers`: sus tareas abiertas con bloqueos abiertos. `blockedBy` (por código) trae el estado y los
+  asignados de cada tarea que bloquea («bloqueada por WEB-2 (Luis)»), aunque esa tarea no aparezca en
+  otra parte de la daily; si es de otro proyecto al que no tengo acceso, viene sin título ni asignados.
+- `fromState`/`toState`: solo en `completó` y `movió a …` («Por hacer → En curso»), con los nombres
+  que guardó el historial.
+- `cycle`: el ciclo en curso ese día (sin cerrar y con `date` entre sus fechas), para «Sprint 1 · día 13
+  de 15»; `cycleAssignedCount`/`cycleCompletedCount` = tareas de la persona en ese ciclo (sin las
+  canceladas) y cuántas completó («4 tareas asignadas · 1 hecha»); 0 si no hay ciclo. `openCount` =
+  sus tareas abiertas del proyecto.
+- `summary` (mismo periodo que `yesterday`, de todo el proyecto): `moved` = tareas distintas que
+  cambiaron de estado, `started` = tareas que empezaron (su `startedAt` cae en el periodo),
+  `completed` = completadas, `comments` = comentarios, `blocked` = tareas en `blockers` de alguien.
 
 **Búsqueda** (`search`): título (sin importar mayúsculas) o código. `WEB-12` busca esa tarea exacta
 (y va primera); `12` busca el número en todos los proyectos. Después, las actualizadas más
@@ -538,7 +618,11 @@ recientemente.
 ### Notificaciones
 
 Nunca se avisa a quien hizo la acción. Cada notificación trae
-`issue: { id, code, title, projectId, workspaceSlug }` para navegar al issue. Tipos (`type`):
+`issue: { id, code, title, projectId, workspaceSlug }` para navegar al issue (`null` en
+`RETRO_STARTED`), `cycle: { id, name, projectId, projectIdentifier, workspaceSlug }` (solo en
+`RETRO_STARTED`) y `comment: { id, excerpt }` en `ISSUE_COMMENTED` e `ISSUE_MENTIONED` (el texto del
+comentario en una línea, con las menciones como «@Nombre», hasta 200 caracteres con «…»; `null` si el
+comentario se borró). Tipos (`type`):
 
 - `ISSUE_ASSIGNED`: te asignaron la tarea.
 - `ISSUE_COMMENTED`: comentaron una tarea que tienes asignada o que creaste.
@@ -550,11 +634,14 @@ Nunca se avisa a quien hizo la acción. Cada notificación trae
   más los project managers de `GET /workspaces/{slug}/members` (`role: "OWNER"`).
 - `ISSUE_UNBLOCKED`: se completó el último bloqueo abierto de una tarea que tienes asignada
   (`"WEB-15 ya no está bloqueada: WEB-12 se completó"`).
+- `RETRO_STARTED`: se abrió la retrospectiva de un ciclo de un proyecto del que eres miembro
+  (`"Ana abrió la retrospectiva de «Sprint 1»: agrega tus notas"`). Solo en la app (sin correo).
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| GET | `/notifications?unread=false&page=0&size=20` | Mis notificaciones (más recientes primero) |
+| GET | `/notifications?unread=false&type=&page=0&size=20` | Mis notificaciones (más recientes primero); `type` filtra (se puede repetir; sin `type`, todas) |
 | GET | `/notifications/unread-count` | `{ count }` para el badge |
+| GET | `/notifications/counts` | `{ unread, unreadMentions, mentions }` para las pestañas de la bandeja |
 | PATCH | `/notifications/{id}/read` | Marcar como leída |
 | POST | `/notifications/read-all` | Marcar todas como leídas |
 
@@ -562,7 +649,7 @@ Nunca se avisa a quien hizo la acción. Cada notificación trae
 
 ## Modelo de datos
 
-Migraciones en `src/main/resources/db/migration` (`V1__users.sql` … `V15__daily_notes.sql`).
+Migraciones en `src/main/resources/db/migration` (`V1__users.sql` … `V19__notification_retro_and_comment.sql`).
 `V7` elimina el rol `ADMIN` (los admins e invitaciones con ese rol pasan a `MEMBER`) y `V8` agrega
 `issues.completed_at` (rellenado con la fecha del último cambio de estado hacia el estado actual, o
 `updated_at`). `V9` crea `issue_relations` (un índice único sobre el par de tareas sin importar la
@@ -572,7 +659,14 @@ defecto para los proyectos existentes, `V12` `saved_views` (filtros en `jsonb`),
 tipos de notificación `ISSUE_UNBLOCKED` e `ISSUE_MENTIONED`, `V14` el cierre de ciclos
 (`cycles.closed_at`, `closed_by_id`, `carried_to_cycle`, `carried_to_backlog`, `retro_started_at`,
 `retro_finished_at`) y la retrospectiva (`retro_notes`, cuya columna se llama `retro_column`, y
-`retro_note_votes`), y `V15` `daily_notes` (una nota por proyecto y día).
+`retro_note_votes`), `V15` `daily_notes` (una nota por proyecto y día), `V16` `issues.started_at` (la
+primera vez que la tarea entró a un estado `STARTED`; rellenado desde el historial: el primer cambio
+hacia un estado `STARTED` por nombre, o la creación si se creó en uno; las que hoy están en curso sin
+explicación en el historial toman su último cambio de estado; las demás quedan en `NULL`), `V17` quién
+y cuándo marcó cada elemento de la checklist (`checked_by_id`, `checked_at`; los ya marcados toman
+`checked_at = updated_at`) e `issues.checklist_updated_at`, `V18` `issue_templates.usage_count` y
+`retro_notes.owner_id`, y `V19` el tipo `RETRO_STARTED` con `notifications.cycle_id` y
+`notifications.comment_id` (rellenado para las notificaciones de comentarios ya enviadas).
 Las entidades usan **UUID** y `created_at`/`updated_at`. Las tablas intermedias puras
 (`issue_assignees`, `issue_labels`, `cycle_issues`, `module_issues`, `issue_template_labels`,
 `retro_note_votes`) usan clave compuesta.

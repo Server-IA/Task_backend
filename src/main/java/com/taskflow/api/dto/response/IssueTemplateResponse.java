@@ -16,6 +16,8 @@ public record IssueTemplateResponse(
         IssuePriority priority,
         List<LabelResponse> labels,
         List<TemplateChecklistItemResponse> checklist,
-        int position
+        int position,
+        /** Tareas creadas con la plantilla ({@code templateId} en {@code POST /issues}). */
+        int usageCount
 ) {
 }

@@ -12,6 +12,11 @@ public record ProjectResponse(
         int issueCount,
         int openIssueCount,
         int overdueIssueCount,
+        /**
+         * Código que recibirá la próxima tarea («→ será WEB-26»). Orientativo: si otra persona crea una tarea antes,
+         * esa se lleva el número.
+         */
+        String nextIssueCode,
         Instant createdAt,
         Instant updatedAt
 ) {

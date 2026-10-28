@@ -17,6 +17,7 @@ import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.mapper.IssueMapper;
 import com.taskflow.api.repository.IssueRepository;
+import com.taskflow.api.repository.IssueTemplateRepository;
 import com.taskflow.api.repository.LabelRepository;
 import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.ProjectRepository;
@@ -64,6 +65,8 @@ class IssueServiceImplTest {
 
     @Mock
     private IssueRepository issueRepository;
+    @Mock
+    private IssueTemplateRepository templateRepository;
     @Mock
     private ProjectRepository projectRepository;
     @Mock
@@ -126,7 +129,7 @@ class IssueServiceImplTest {
     }
 
     private static CreateIssueRequest createRequest(String title) {
-        return new CreateIssueRequest(title, null, null, null, null, null, null, null, null, null);
+        return new CreateIssueRequest(title, null, null, null, null, null, null, null, null, null, null);
     }
 
     @Nested
@@ -178,7 +181,7 @@ class IssueServiceImplTest {
             when(userRepository.findAllById(Set.of(outsider.getId()))).thenReturn(List.of(outsider));
             when(projectMemberRepository.countMembers(eq(project.getId()), anyCollection())).thenReturn(0L);
             CreateIssueRequest request = new CreateIssueRequest("Tarea", null, null, null, null, null, null,
-                    List.of(outsider.getId()), null, null);
+                    List.of(outsider.getId()), null, null, null);
 
             assertThatThrownBy(() -> issueService.create(SLUG, project.getId(), author.getId(), request))
                     .isInstanceOf(BadRequestException.class)
@@ -199,13 +202,14 @@ class IssueServiceImplTest {
                         .toList();
             });
             CreateIssueRequest request = new CreateIssueRequest("[Bug] Login", null, null, null, null, null, null,
-                    null, null, checklist);
+                    null, null, checklist, null);
 
             issueService.create(SLUG, project.getId(), author.getId(), request);
 
             ArgumentCaptor<Issue> saved = ArgumentCaptor.forClass(Issue.class);
             verify(issueRepository).save(saved.capture());
             verify(checklistService).createAll(saved.getValue(), checklist);
+            assertThat(saved.getValue().getChecklistUpdatedAt()).isNotNull();
             assertThat(saved.getValue().getCriteriaTotal()).isEqualTo(1);
             assertThat(saved.getValue().getChecklistTotal()).isEqualTo(2);
             assertThat(saved.getValue().getChecklistDone()).isZero();
@@ -213,9 +217,49 @@ class IssueServiceImplTest {
         }
 
         @Test
+        void conPlantillaSumaUnUsoALaPlantilla() {
+            UUID templateId = UUID.randomUUID();
+            when(templateRepository.incrementUsage(templateId, project.getId())).thenReturn(1);
+            CreateIssueRequest request = new CreateIssueRequest("[Bug] Login", null, null, null, null, null, null,
+                    null, null, null, templateId);
+
+            issueService.create(SLUG, project.getId(), author.getId(), request);
+
+            verify(templateRepository).incrementUsage(templateId, project.getId());
+            verify(issueRepository).save(any(Issue.class));
+        }
+
+        @Test
+        void unaPlantillaDeOtroProyectoResponde400() {
+            UUID templateId = UUID.randomUUID();
+            when(templateRepository.incrementUsage(templateId, project.getId())).thenReturn(0);
+            CreateIssueRequest request = new CreateIssueRequest("Tarea", null, null, null, null, null, null,
+                    null, null, null, templateId);
+
+            assertThatThrownBy(() -> issueService.create(SLUG, project.getId(), author.getId(), request))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessage("La plantilla no existe en este proyecto");
+            verify(issueRepository, never()).save(any());
+        }
+
+        @Test
+        void sinPlantillaNoCuentaUsos() {
+            when(projectRepository.findIssueCounter(project.getId())).thenReturn(1);
+
+            issueService.create(SLUG, project.getId(), author.getId(), createRequest("Tarea"));
+
+            verifyNoInteractions(templateRepository);
+            ArgumentCaptor<Issue> saved = ArgumentCaptor.forClass(Issue.class);
+            verify(issueRepository).save(saved.capture());
+            // Sin checklist, la checklist nunca se actualizó; en un estado sin empezar, la tarea no empezó
+            assertThat(saved.getValue().getChecklistUpdatedAt()).isNull();
+            assertThat(saved.getValue().getStartedAt()).isNull();
+        }
+
+        @Test
         void rechazaFechaLimiteAnteriorAlInicio() {
             CreateIssueRequest request = new CreateIssueRequest("Tarea", null, null, null, null,
-                    LocalDate.of(2026, 10, 20), LocalDate.of(2026, 10, 10), null, null, null);
+                    LocalDate.of(2026, 10, 20), LocalDate.of(2026, 10, 10), null, null, null, null);
 
             assertThatThrownBy(() -> issueService.create(SLUG, project.getId(), author.getId(), request))
                     .isInstanceOf(BadRequestException.class);
@@ -316,7 +360,7 @@ class IssueServiceImplTest {
         @Test
         void unaTareaCreadaEnUnEstadoCompletadoQuedaCompletada() {
             CreateIssueRequest request = new CreateIssueRequest("Tarea", null, done.getId(), null, null, null, null,
-                    null, null, null);
+                    null, null, null, null);
 
             issueService.create(SLUG, project.getId(), author.getId(), request);
 
@@ -378,6 +422,72 @@ class IssueServiceImplTest {
             assertThat(issue.getCompletedAt()).isEqualTo(completedAt);
         }
 
+    }
+
+    /** {@code startedAt}: la primera vez que la tarea entra a un estado del grupo STARTED. */
+    @Nested
+    class StartedAt {
+
+        private State inProgress;
+        private State review;
+
+        @BeforeEach
+        void stubs() {
+            inProgress = state("En curso", StateGroup.STARTED);
+            review = state("En revisión", StateGroup.STARTED);
+            lenient().when(lookup.user(author.getId())).thenReturn(author);
+            lenient().when(issueRepository.saveAndFlush(any(Issue.class)))
+                    .thenAnswer(invocation -> invocation.getArgument(0));
+            for (State state : List.of(todo, inProgress, review, done)) {
+                lenient().when(stateRepository.findByIdAndProjectId(state.getId(), project.getId()))
+                        .thenReturn(Optional.of(state));
+            }
+        }
+
+        private UpdateIssueRequest updateState(UUID stateId) {
+            return new UpdateIssueRequest(null, null, stateId, null, null, null, null, null, null, null, null, null);
+        }
+
+        @Test
+        void unaTareaCreadaEnCursoEmpiezaAlCrearse() {
+            CreateIssueRequest request = new CreateIssueRequest("Tarea", null, inProgress.getId(), null, null, null,
+                    null, null, null, null, null);
+
+            issueService.create(SLUG, project.getId(), author.getId(), request);
+
+            ArgumentCaptor<Issue> saved = ArgumentCaptor.forClass(Issue.class);
+            verify(issueRepository).save(saved.capture());
+            assertThat(saved.getValue().getStartedAt()).isNotNull();
+        }
+
+        @Test
+        void seFijaLaPrimeraVezYNoCambiaAlVolverAEmpezar() {
+            Issue issue = issue(todo, 1);
+            Instant before = Instant.now();
+
+            issueService.move(SLUG, project.getId(), issue.getId(), author.getId(),
+                    new MoveIssueRequest(inProgress.getId(), null, null));
+            Instant startedAt = issue.getStartedAt();
+            assertThat(startedAt).isNotNull().isAfterOrEqualTo(before);
+
+            // Pasar a otro estado STARTED, volver a sin empezar y empezar otra vez no la cambia
+            issueService.update(SLUG, project.getId(), issue.getId(), author.getId(), updateState(review.getId()));
+            issueService.update(SLUG, project.getId(), issue.getId(), author.getId(), updateState(todo.getId()));
+            assertThat(issue.getStartedAt()).isEqualTo(startedAt);
+            issueService.move(SLUG, project.getId(), issue.getId(), author.getId(),
+                    new MoveIssueRequest(inProgress.getId(), null, null));
+            assertThat(issue.getStartedAt()).isEqualTo(startedAt);
+        }
+
+        @Test
+        void completarSinPasarPorEnCursoNoLaFija() {
+            Issue issue = issue(todo, 1);
+
+            issueService.update(SLUG, project.getId(), issue.getId(), author.getId(), updateState(done.getId()));
+
+            assertThat(issue.getCompletedAt()).isNotNull();
+            assertThat(issue.getStartedAt()).isNull();
+        }
     }
 
     /** Completar una tarea que bloquea a otras avisa a las que quedan desbloqueadas. */

@@ -16,8 +16,8 @@ import lombok.Setter;
 import java.util.UUID;
 
 /**
- * Dependencia entre dos tareas del mismo proyecto. Con {@code BLOCKS}, {@code source} bloquea a {@code target};
- * {@code RELATES} es simétrica y se guarda una sola vez.
+ * Dependencia entre dos tareas del mismo workspace (pueden ser de proyectos distintos). Con {@code BLOCKS},
+ * {@code source} bloquea a {@code target}; {@code RELATES} es simétrica y se guarda una sola vez.
  */
 @Getter
 @Setter

@@ -13,6 +13,7 @@ import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.Project;
 import com.taskflow.api.entity.RetroNote;
 import com.taskflow.api.entity.State;
+import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.enums.RetroColumn;
 import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.exception.BadRequestException;
@@ -22,9 +23,11 @@ import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.PlanningMapper;
 import com.taskflow.api.repository.CycleRepository;
 import com.taskflow.api.repository.IssueRepository;
+import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.RetroNoteRepository;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.service.IssueService;
+import com.taskflow.api.service.NotificationService;
 import com.taskflow.api.service.RetroService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -50,12 +53,16 @@ public class RetroServiceImpl implements RetroService {
     static final String ALREADY_VOTED_MESSAGE = "Ya votaste por esta nota";
     static final String NO_VOTES_LEFT_MESSAGE = "Ya usaste tus " + MAX_VOTES + " votos en esta retrospectiva";
     static final String ONLY_ACTIONS_MESSAGE = "Solo las acciones se pueden convertir en tarea";
+    static final String ONLY_ACTIONS_OWNER_MESSAGE = "Solo las acciones tienen responsable";
+    static final String OWNER_NOT_MEMBER_MESSAGE = "El responsable debe ser miembro del proyecto";
 
     private final CycleRepository cycleRepository;
     private final RetroNoteRepository noteRepository;
     private final StateRepository stateRepository;
     private final IssueRepository issueRepository;
+    private final ProjectMemberRepository projectMemberRepository;
     private final IssueService issueService;
+    private final NotificationService notificationService;
     private final ProjectAccess projectAccess;
     private final ResourceLookup lookup;
     private final PlanningMapper mapper;
@@ -75,6 +82,7 @@ public class RetroServiceImpl implements RetroService {
         if (cycle.getRetroStartedAt() == null) {
             cycle.setRetroStartedAt(Instant.now());
             cycleRepository.saveAndFlush(cycle);
+            notificationService.notifyRetroStarted(cycle, lookup.user(userId));
         }
         return toResponse(project, cycle, userId);
     }
@@ -83,9 +91,13 @@ public class RetroServiceImpl implements RetroService {
     @Transactional
     public RetroNoteResponse createNote(String slug, UUID projectId, UUID cycleId, UUID userId,
                                         RetroNoteRequest request) {
-        Cycle cycle = findCycle(lookup.project(slug, projectId), cycleId);
+        Project project = lookup.project(slug, projectId);
+        Cycle cycle = findCycle(project, cycleId);
         ensureOpen(cycle);
         RetroNote note = new RetroNote(cycle, request.column(), request.text().strip(), lookup.user(userId));
+        if (request.ownerId() != null) {
+            note.setOwner(findOwner(project, note, request.ownerId()));
+        }
         return toNoteResponse(noteRepository.save(note), userId);
     }
 
@@ -98,7 +110,17 @@ public class RetroServiceImpl implements RetroService {
         ensureOpen(cycle);
         RetroNote note = findNote(cycle, noteId);
         ensureAuthorOrManager(project, note, userId, "editarla");
-        note.setText(request.text().strip());
+        if (request.text() != null) {
+            if (request.text().isBlank()) {
+                throw new BadRequestException("El texto no puede estar vacío");
+            }
+            note.setText(request.text().strip());
+        }
+        if (Boolean.TRUE.equals(request.clearOwner())) {
+            note.setOwner(null);
+        } else if (request.ownerId() != null) {
+            note.setOwner(findOwner(project, note, request.ownerId()));
+        }
         // El flush ejecuta @PreUpdate para que la respuesta lleve el updatedAt nuevo.
         return toNoteResponse(noteRepository.saveAndFlush(note), userId);
     }
@@ -169,9 +191,15 @@ public class RetroServiceImpl implements RetroService {
                 .map(State::getId)
                 .orElse(null);
         String title = issueTitle(note.getText());
+        // Se asigna al responsable si sigue siendo miembro del proyecto (si no, queda sin asignar).
+        User owner = note.getOwner();
+        List<UUID> assigneeIds = owner != null
+                && projectMemberRepository.existsByProjectIdAndUserId(project.getId(), owner.getId())
+                ? List.of(owner.getId())
+                : null;
         IssueResponse issue = issueService.create(slug, projectId, userId, new CreateIssueRequest(
                 title, issueDescription(cycle, note.getText(), title), stateId,
-                null, null, null, null, null, null, null));
+                null, null, null, null, assigneeIds, null, null, null));
         note.setIssue(issueRepository.getReferenceById(issue.id()));
         noteRepository.save(note);
         return issue;
@@ -261,6 +289,17 @@ public class RetroServiceImpl implements RetroService {
         if (cycle.getRetroFinishedAt() != null) {
             throw new ConflictException(FINISHED_MESSAGE);
         }
+    }
+
+    /** Responsable de una acción: solo las acciones lo tienen y debe ser miembro del proyecto (si no, 400). */
+    private User findOwner(Project project, RetroNote note, UUID ownerId) {
+        if (note.getColumn() != RetroColumn.ACTION) {
+            throw new BadRequestException(ONLY_ACTIONS_OWNER_MESSAGE);
+        }
+        if (!projectMemberRepository.existsByProjectIdAndUserId(project.getId(), ownerId)) {
+            throw new BadRequestException(OWNER_NOT_MEMBER_MESSAGE);
+        }
+        return lookup.user(ownerId);
     }
 
     private void ensureAuthorOrManager(Project project, RetroNote note, UUID userId, String action) {

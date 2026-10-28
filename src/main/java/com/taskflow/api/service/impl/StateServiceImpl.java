@@ -79,6 +79,10 @@ public class StateServiceImpl implements StateService {
             } else if (state.getStateGroup() == StateGroup.COMPLETED) {
                 issueRepository.clearCompletedInState(state.getId());
             }
+            // Y las que nunca habían empezado empiezan ahora si el estado pasa a STARTED.
+            if (request.group() == StateGroup.STARTED) {
+                issueRepository.markStartedInState(state.getId(), Instant.now());
+            }
             state.setStateGroup(request.group());
         }
         if (request.position() != null) {

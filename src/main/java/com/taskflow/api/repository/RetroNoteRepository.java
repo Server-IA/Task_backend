@@ -11,10 +11,14 @@ import java.util.UUID;
 
 public interface RetroNoteRepository extends JpaRepository<RetroNote, UUID> {
 
-    /** Notas de la retrospectiva del ciclo, de la más antigua a la más reciente, con el autor y la tarea cargados. */
+    /**
+     * Notas de la retrospectiva del ciclo, de la más antigua a la más reciente, con el autor, el responsable y la
+     * tarea cargados.
+     */
     @Query("""
             select n from RetroNote n
             join fetch n.author
+            left join fetch n.owner
             left join fetch n.issue
             where n.cycle.id = :cycleId
             order by n.createdAt asc, n.id asc

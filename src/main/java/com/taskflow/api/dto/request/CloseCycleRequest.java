@@ -10,7 +10,7 @@ import java.util.UUID;
 /**
  * Cerrar un ciclo. Las tareas sin terminar (ni completadas ni canceladas) van a donde diga {@code moveTo}, salvo
  * las que tengan una excepción en {@code overrides}. {@code targetCycleId} elige el ciclo destino (por defecto, el
- * siguiente). {@code startRetro} abre la retrospectiva del ciclo.
+ * siguiente). {@code startRetro} abre la retrospectiva del ciclo y avisa a los miembros del proyecto.
  */
 public record CloseCycleRequest(
         @NotNull(message = "Indica a dónde van las tareas sin terminar: NEXT_CYCLE o BACKLOG")

@@ -1,6 +1,8 @@
 package com.taskflow.api.service.impl;
 
 import com.taskflow.api.dto.request.CreateSavedViewRequest;
+import com.taskflow.api.dto.request.IssueFilter;
+import com.taskflow.api.dto.request.ReorderSavedViewsRequest;
 import com.taskflow.api.dto.request.UpdateSavedViewRequest;
 import com.taskflow.api.dto.response.SavedViewResponse;
 import com.taskflow.api.entity.Project;
@@ -11,6 +13,8 @@ import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.ProjectMapper;
+import com.taskflow.api.repository.IssueRepository;
+import com.taskflow.api.repository.IssueSpecifications;
 import com.taskflow.api.repository.SavedViewRepository;
 import com.taskflow.api.service.SavedViewService;
 import lombok.RequiredArgsConstructor;
@@ -18,14 +22,23 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class SavedViewServiceImpl implements SavedViewService {
 
+    static final String REORDER_SHARED_FORBIDDEN = "Solo el project manager puede ordenar las vistas compartidas";
+    static final String REORDER_EMPTY = "Indica el nuevo orden de las vistas compartidas o de tus vistas personales";
+
     private final SavedViewRepository viewRepository;
+    private final IssueRepository issueRepository;
     private final ProjectAccess projectAccess;
     private final ResourceLookup lookup;
     private final ProjectMapper projectMapper;
@@ -34,9 +47,7 @@ public class SavedViewServiceImpl implements SavedViewService {
     @Transactional(readOnly = true)
     public List<SavedViewResponse> getViews(String slug, UUID projectId, UUID userId) {
         Project project = lookup.project(slug, projectId);
-        return viewRepository.findVisible(project.getId(), userId).stream()
-                .map(view -> toResponse(view, userId))
-                .toList();
+        return visible(project, userId);
     }
 
     @Override
@@ -109,6 +120,54 @@ public class SavedViewServiceImpl implements SavedViewService {
         renumber(without(group(project, view.isShared(), view.getOwner()), view));
     }
 
+    @Override
+    @Transactional
+    public List<SavedViewResponse> reorder(String slug, UUID projectId, UUID userId,
+                                           ReorderSavedViewsRequest request) {
+        Project project = lookup.project(slug, projectId);
+        if (request.shared() == null && request.personal() == null) {
+            throw new BadRequestException(REORDER_EMPTY);
+        }
+        if (request.shared() != null) {
+            if (!projectAccess.isManager(project.getWorkspace(), userId)) {
+                throw new ForbiddenException(REORDER_SHARED_FORBIDDEN);
+            }
+            applyOrder(viewRepository.findAllByProjectIdAndSharedTrueOrderByPositionAscCreatedAtAsc(project.getId()),
+                    request.shared(), "las vistas compartidas del proyecto");
+        }
+        if (request.personal() != null) {
+            applyOrder(viewRepository.findAllByProjectIdAndOwnerIdAndSharedFalseOrderByPositionAscCreatedAtAsc(
+                    project.getId(), userId), request.personal(), "tus vistas personales");
+        }
+        viewRepository.flush();
+        return visible(project, userId);
+    }
+
+    /** Las mismas reglas que el listado de tareas ({@code GET /issues}) con los filtros de la vista. */
+    static IssueFilter issueFilter(SavedViewFilters filters) {
+        SavedViewFilters f = filters == null ? SavedViewFilters.empty() : filters;
+        return new IssueFilter(f.state(), f.priority(), f.assignee(), f.label(), f.search(), f.cycle(), f.module(),
+                f.blocked());
+    }
+
+    /**
+     * Pone las vistas del grupo en el orden de {@code ids}, que debe tener exactamente las mismas vistas, sin repetir.
+     */
+    private static void applyOrder(List<SavedView> group, List<UUID> ids, String groupName) {
+        Set<UUID> requested = new HashSet<>(ids);
+        Map<UUID, SavedView> byId = group.stream().collect(Collectors.toMap(SavedView::getId, Function.identity()));
+        if (requested.size() != ids.size() || !requested.equals(byId.keySet())) {
+            throw new BadRequestException("La lista debe tener exactamente " + groupName + ", sin repetir");
+        }
+        renumber(ids.stream().map(byId::get).toList());
+    }
+
+    private List<SavedViewResponse> visible(Project project, UUID userId) {
+        return viewRepository.findVisible(project.getId(), userId).stream()
+                .map(view -> toResponse(view, userId))
+                .toList();
+    }
+
     /** Una vista personal de otro usuario no existe para quien la pide. */
     private SavedView findVisibleView(Project project, UUID viewId, UUID userId) {
         return viewRepository.findByIdAndProjectId(viewId, project.getId())
@@ -147,7 +206,10 @@ public class SavedViewServiceImpl implements SavedViewService {
         return filters == null ? SavedViewFilters.empty() : filters.normalized();
     }
 
+    /** {@code issueCount}: una consulta de conteo por vista, con los mismos filtros que el listado de tareas. */
     private SavedViewResponse toResponse(SavedView view, UUID userId) {
-        return projectMapper.toSavedViewResponse(view, view.getOwner().getId().equals(userId));
+        long issueCount = issueRepository.count(
+                IssueSpecifications.matching(view.getProject().getId(), issueFilter(view.getFilters())));
+        return projectMapper.toSavedViewResponse(view, view.getOwner().getId().equals(userId), issueCount);
     }
 }

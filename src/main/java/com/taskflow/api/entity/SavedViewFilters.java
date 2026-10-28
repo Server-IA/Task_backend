@@ -12,8 +12,8 @@ import java.util.UUID;
 
 /**
  * Filtros de una vista guardada (se guardan como jsonb). Usan los mismos nombres que los parámetros del listado de
- * tareas; {@code view} indica si se muestra como lista o tablero y {@code sort} el orden (por ejemplo
- * {@code "priority"} o {@code "dueDate,asc"}).
+ * tareas; {@code view} indica si se muestra como lista o tablero, {@code sort} el orden (por ejemplo
+ * {@code "priority"} o {@code "dueDate,asc"}) y {@code groupBy} cómo se agrupa la lista.
  */
 public record SavedViewFilters(
         @Size(max = 50, message = "Máximo 50 estados")
@@ -36,20 +36,37 @@ public record SavedViewFilters(
 
         @Size(max = 60, message = "El orden no puede superar 60 caracteres")
         @Pattern(regexp = SORT_PATTERN, message = "El orden debe tener el formato campo o campo,asc|desc")
-        String sort
+        String sort,
+
+        /** Id del ciclo. */
+        UUID cycle,
+
+        /** Id del módulo. */
+        UUID module,
+
+        /** {@code true}: solo las bloqueadas; {@code false}: solo las que no lo están; {@code null}: todas. */
+        Boolean blocked,
+
+        @Pattern(regexp = GROUP_BY_PATTERN, message = "groupBy debe ser state, priority, assignee o label")
+        String groupBy
 ) {
 
     /** Nombre de un campo y, opcionalmente, la dirección: {@code dueDate} o {@code dueDate,desc}. */
     public static final String SORT_PATTERN = "^[A-Za-z][A-Za-z0-9_.]*(,(asc|desc|ASC|DESC))?$";
 
+    /** Agrupación de la lista; {@code null} = sin agrupar. */
+    public static final String GROUP_BY_PATTERN = "state|priority|assignee|label";
+
     public static SavedViewFilters empty() {
-        return new SavedViewFilters(List.of(), List.of(), List.of(), List.of(), null, null, null);
+        return new SavedViewFilters(List.of(), List.of(), List.of(), List.of(), null, null, null, null, null, null,
+                null);
     }
 
     /** Listas sin nulos ni repetidos ({@code []} si no vienen) y búsqueda sin espacios sobrantes. */
     public SavedViewFilters normalized() {
         return new SavedViewFilters(distinct(state), distinct(priority), distinct(assignee), distinct(label),
-                search == null || search.isBlank() ? null : search.trim(), view, sort);
+                search == null || search.isBlank() ? null : search.trim(), view, sort, cycle, module, blocked,
+                groupBy);
     }
 
     private static <T> List<T> distinct(Collection<T> values) {

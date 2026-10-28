@@ -30,6 +30,10 @@ public record IssueFilter(
         UUID cycle,
 
         @Parameter(description = "Id del módulo")
-        UUID module
+        UUID module,
+
+        @Parameter(description = "true = solo las bloqueadas (con al menos un bloqueo abierto, de cualquier proyecto); "
+                + "false = solo las que no lo están")
+        Boolean blocked
 ) {
 }

@@ -5,6 +5,7 @@ import com.taskflow.api.dto.request.UpdateChecklistItemRequest;
 import com.taskflow.api.dto.response.ChecklistItemResponse;
 import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.IssueChecklistItem;
+import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.enums.ChecklistItemKind;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
@@ -17,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
@@ -58,15 +60,18 @@ public class IssueChecklistServiceImpl implements IssueChecklistService {
         List<IssueChecklistItem> siblings = siblings(issue, request.kind());
         int position = siblings.isEmpty() ? 0 : siblings.getLast().getPosition() + 1;
         IssueChecklistItem item = new IssueChecklistItem(issue, request.kind(), request.text().trim(), position);
-        return issueMapper.toChecklistItemResponse(itemRepository.save(item));
+        ChecklistItemResponse response = issueMapper.toChecklistItemResponse(itemRepository.save(item));
+        issueRepository.touchChecklist(issue.getId(), Instant.now());
+        return response;
     }
 
     @Override
     @Transactional
-    public ChecklistItemResponse update(String slug, UUID projectId, UUID issueId, UUID itemId,
+    public ChecklistItemResponse update(String slug, UUID projectId, UUID issueId, UUID itemId, UUID userId,
                                         UpdateChecklistItemRequest request) {
         Issue issue = findIssue(slug, projectId, issueId);
         IssueChecklistItem item = findItem(issue, itemId);
+        Instant now = Instant.now();
         if (request.text() != null) {
             String text = request.text().trim();
             if (text.isEmpty()) {
@@ -74,8 +79,8 @@ public class IssueChecklistServiceImpl implements IssueChecklistService {
             }
             item.setText(text);
         }
-        if (request.done() != null) {
-            item.setDone(request.done());
+        if (request.done() != null && request.done() != item.isDone()) {
+            markDone(item, request.done(), request.done() ? lookup.user(userId) : null, now);
         }
         if (request.position() != null) {
             List<IssueChecklistItem> ordered = new ArrayList<>(siblings(issue, item.getKind()));
@@ -84,7 +89,9 @@ public class IssueChecklistServiceImpl implements IssueChecklistService {
             renumber(ordered);
         }
         // El flush ejecuta @PreUpdate para que la respuesta lleve el updatedAt nuevo.
-        return issueMapper.toChecklistItemResponse(itemRepository.saveAndFlush(item));
+        ChecklistItemResponse response = issueMapper.toChecklistItemResponse(itemRepository.saveAndFlush(item));
+        issueRepository.touchChecklist(issue.getId(), now);
+        return response;
     }
 
     @Override
@@ -97,6 +104,18 @@ public class IssueChecklistServiceImpl implements IssueChecklistService {
         renumber(siblings(issue, item.getKind()).stream()
                 .filter(other -> !other.getId().equals(item.getId()))
                 .toList());
+        issueRepository.touchChecklist(issue.getId(), Instant.now());
+    }
+
+    /**
+     * Marca o desmarca el elemento: al marcarlo guarda quién y cuándo; al desmarcarlo los borra.
+     *
+     * @param user quien lo marca, o {@code null} al desmarcarlo
+     */
+    static void markDone(IssueChecklistItem item, boolean done, User user, Instant now) {
+        item.setDone(done);
+        item.setCheckedBy(done ? user : null);
+        item.setCheckedAt(done ? now : null);
     }
 
     @Override

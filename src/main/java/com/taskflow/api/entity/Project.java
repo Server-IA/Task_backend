@@ -53,4 +53,12 @@ public class Project extends BaseEntity {
             + "where i.project_id = id and st.state_group not in ('COMPLETED', 'CANCELLED') "
             + "and i.due_date < current_date)")
     private int overdueIssueCount;
+
+    /**
+     * Código que recibirá la próxima tarea, por ejemplo {@code WEB-26}. Es orientativo: si otra persona crea una
+     * tarea antes, esa se lleva el número.
+     */
+    public String getNextIssueCode() {
+        return identifier + "-" + (issueCounter + 1);
+    }
 }

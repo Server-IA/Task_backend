@@ -1,6 +1,7 @@
 package com.taskflow.api.controller;
 
 import com.taskflow.api.dto.request.CreateSavedViewRequest;
+import com.taskflow.api.dto.request.ReorderSavedViewsRequest;
 import com.taskflow.api.dto.request.UpdateSavedViewRequest;
 import com.taskflow.api.dto.response.SavedViewResponse;
 import com.taskflow.api.security.UserPrincipal;
@@ -17,6 +18,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -36,7 +38,8 @@ public class SavedViewController {
 
     @Operation(summary = "Listar vistas",
             description = "Las compartidas del proyecto y luego mis vistas personales, cada grupo por position. "
-                    + "mine = la creé yo.")
+                    + "mine = la creé yo. issueCount = tareas que cumplen sus filtros (las mismas que GET /issues con "
+                    + "esos filtros).")
     @GetMapping
     public List<SavedViewResponse> getViews(@PathVariable String slug, @PathVariable UUID projectId,
                                             @AuthenticationPrincipal UserPrincipal me) {
@@ -45,7 +48,8 @@ public class SavedViewController {
 
     @Operation(summary = "Guardar vista",
             description = "Personal por defecto; shared: true solo lo puede usar el project manager (403). filters: "
-                    + "{ state, priority, assignee, label, search, view: list|board, sort } (ej. sort \"dueDate,asc\").")
+                    + "{ state, priority, assignee, label, search, cycle, module, blocked, view: list|board, sort, "
+                    + "groupBy: state|priority|assignee|label } (ej. sort \"dueDate,asc\").")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public SavedViewResponse create(@PathVariable String slug, @PathVariable UUID projectId,
@@ -63,6 +67,18 @@ public class SavedViewController {
                                     @AuthenticationPrincipal UserPrincipal me,
                                     @Valid @RequestBody UpdateSavedViewRequest request) {
         return viewService.update(slug, projectId, viewId, me.getId(), request);
+    }
+
+    @Operation(summary = "Ordenar vistas",
+            description = "shared = ids de todas las vistas compartidas del proyecto en el nuevo orden (solo el project "
+                    + "manager: 403); personal = ids de todas mis vistas personales en el nuevo orden. Al menos una de "
+                    + "las dos; cada una debe tener exactamente las vistas de su grupo, sin repetir (400). Devuelve "
+                    + "las vistas visibles, como el listado.")
+    @PutMapping("/order")
+    public List<SavedViewResponse> reorder(@PathVariable String slug, @PathVariable UUID projectId,
+                                           @AuthenticationPrincipal UserPrincipal me,
+                                           @Valid @RequestBody ReorderSavedViewsRequest request) {
+        return viewService.reorder(slug, projectId, me.getId(), request);
     }
 
     @Operation(summary = "Eliminar vista",

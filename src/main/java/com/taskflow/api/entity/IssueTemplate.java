@@ -58,6 +58,13 @@ public class IssueTemplate extends BaseEntity {
     @Column(nullable = false)
     private int position;
 
+    /**
+     * Tareas creadas con la plantilla. Solo lo modifica {@code IssueTemplateRepository.incrementUsage} con un UPDATE
+     * atómico, por eso Hibernate nunca lo escribe.
+     */
+    @Column(name = "usage_count", nullable = false, insertable = false, updatable = false)
+    private int usageCount;
+
     @ManyToMany
     @JoinTable(name = "issue_template_labels",
             joinColumns = @JoinColumn(name = "template_id"),

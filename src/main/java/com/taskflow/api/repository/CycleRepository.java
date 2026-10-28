@@ -3,6 +3,7 @@ package com.taskflow.api.repository;
 import com.taskflow.api.entity.Cycle;
 import com.taskflow.api.entity.enums.StateGroup;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
@@ -18,11 +19,13 @@ public interface CycleRepository extends JpaRepository<Cycle, UUID> {
 
     @Query("""
             select c from Cycle c
+            left join fetch c.closedBy
             where c.project.id = :projectId
             order by case when c.startDate is null then 1 else 0 end, c.startDate desc, c.createdAt desc
             """)
     List<Cycle> findAllByProjectId(@Param("projectId") UUID projectId);
 
+    @EntityGraph(attributePaths = "closedBy")
     Optional<Cycle> findByIdAndProjectId(UUID id, UUID projectId);
 
     /**

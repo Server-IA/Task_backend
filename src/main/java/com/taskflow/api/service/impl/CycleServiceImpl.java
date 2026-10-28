@@ -26,6 +26,7 @@ import com.taskflow.api.mapper.PlanningMapper;
 import com.taskflow.api.repository.CycleRepository;
 import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.service.CycleService;
+import com.taskflow.api.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -58,6 +59,7 @@ public class CycleServiceImpl implements CycleService {
 
     private final CycleRepository cycleRepository;
     private final ActivityService activityService;
+    private final NotificationService notificationService;
     private final PlanningSupport support;
     private final ResourceLookup lookup;
     private final PlanningMapper mapper;
@@ -245,10 +247,14 @@ public class CycleServiceImpl implements CycleService {
         cycle.setClosedBy(actor);
         cycle.setCarriedToCycle(toCycle.size());
         cycle.setCarriedToBacklog(toBacklog.size());
-        if (Boolean.TRUE.equals(request.startRetro()) && cycle.getRetroStartedAt() == null) {
+        boolean retroStarts = Boolean.TRUE.equals(request.startRetro()) && cycle.getRetroStartedAt() == null;
+        if (retroStarts) {
             cycle.setRetroStartedAt(now);
         }
         Cycle saved = cycleRepository.saveAndFlush(cycle);
+        if (retroStarts) {
+            notificationService.notifyRetroStarted(saved, actor);
+        }
         return new CloseCycleResponse(toResponse(saved), toCycle.size(), toBacklog.size(),
                 saved.getRetroStartedAt() != null);
     }

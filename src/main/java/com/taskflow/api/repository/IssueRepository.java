@@ -20,6 +20,10 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
     @EntityGraph(attributePaths = {"project", "state"})
     Optional<Issue> findByIdAndProjectId(UUID id, UUID projectId);
 
+    /** Tarea de cualquier proyecto del workspace (para las dependencias entre proyectos). */
+    @EntityGraph(attributePaths = {"project", "state"})
+    Optional<Issue> findByIdAndProjectWorkspaceId(UUID id, UUID workspaceId);
+
     @EntityGraph(attributePaths = {"project", "state"})
     List<Issue> findAllByParentIdOrderBySequenceIdAsc(UUID parentId);
 
@@ -44,15 +48,32 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
     @Query("update Issue i set i.completedAt = null where i.state.id = :stateId")
     int clearCompletedInState(@Param("stateId") UUID stateId);
 
+    /** El estado pasó al grupo STARTED: sus tareas que nunca habían empezado empiezan ahora. */
+    @Modifying
+    @Query("update Issue i set i.startedAt = :now where i.state.id = :stateId and i.startedAt is null")
+    int markStartedInState(@Param("stateId") UUID stateId, @Param("now") Instant now);
+
+    /** Cambió la checklist de la tarea. No pasa por la entidad, así que no modifica {@code updatedAt}. */
+    @Modifying
+    @Query("update Issue i set i.checklistUpdatedAt = :now where i.id = :issueId")
+    int touchChecklist(@Param("issueId") UUID issueId, @Param("now") Instant now);
+
     // ----- Estadísticas del proyecto -----
 
     @Query("""
             select new com.taskflow.api.repository.IssueStatsRow(i.id, i.sequenceId, i.title, s.id, s.stateGroup,
-                   i.dueDate, i.createdAt, i.updatedAt, i.completedAt)
+                   i.dueDate, i.createdAt, i.updatedAt, i.startedAt, i.completedAt)
             from Issue i join i.state s
             where i.project.id = :projectId
             """)
     List<IssueStatsRow> findStatsRows(@Param("projectId") UUID projectId);
+
+    /** Ids de las tareas del proyecto asignadas a alguno de los usuarios (el filtro por persona de las estadísticas). */
+    @Query("""
+            select distinct i.id from Issue i join i.assignees u
+            where i.project.id = :projectId and u.id in :userIds
+            """)
+    List<UUID> findIdsAssignedToAny(@Param("projectId") UUID projectId, @Param("userIds") Collection<UUID> userIds);
 
     /** Asignados de las tareas que no están en los grupos excluidos (una fila por tarea y usuario). */
     @Query("""
@@ -73,14 +94,6 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
             """)
     List<Issue> findAssignedTo(@Param("projectIds") Collection<UUID> projectIds, @Param("userId") UUID userId,
                                @Param("excludedGroups") Collection<StateGroup> excludedGroups);
-
-    @Query("""
-            select count(i) from Issue i
-            where i.project.id in :projectIds and i.state.stateGroup not in :excludedGroups
-              and i.id in (select x.id from Issue x join x.assignees u where u.id = :userId)
-            """)
-    long countAssignedTo(@Param("projectIds") Collection<UUID> projectIds, @Param("userId") UUID userId,
-                         @Param("excludedGroups") Collection<StateGroup> excludedGroups);
 
     @EntityGraph(attributePaths = {"project", "state"})
     @Query("""
@@ -116,15 +129,6 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
     long countCommentedBy(@Param("projectIds") Collection<UUID> projectIds, @Param("userId") UUID userId,
                           @Param("excludedGroups") Collection<StateGroup> excludedGroups);
 
-    /** Tareas asignadas al usuario cuyo estado está en el grupo indicado (por ejemplo, STARTED). */
-    @Query("""
-            select count(i) from Issue i
-            where i.project.id in :projectIds and i.state.stateGroup = :group
-              and i.id in (select x.id from Issue x join x.assignees u where u.id = :userId)
-            """)
-    long countAssignedInGroup(@Param("projectIds") Collection<UUID> projectIds, @Param("userId") UUID userId,
-                              @Param("group") StateGroup group);
-
     @Query("""
             select count(i) from Issue i
             where i.project.id in :projectIds and i.completedAt >= :since
@@ -144,6 +148,27 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
             """)
     List<Issue> findAssignedInProject(@Param("projectId") UUID projectId,
                                       @Param("excludedGroups") Collection<StateGroup> excludedGroups);
+
+    /** Tareas de un ciclo con su estado y sus asignados. */
+    @EntityGraph(attributePaths = {"state", "assignees"})
+    @Query("select i from Issue i where i.id in (select ci.id from Cycle c join c.issues ci where c.id = :cycleId)")
+    List<Issue> findAllInCycle(@Param("cycleId") UUID cycleId);
+
+    /** Tareas del proyecto que empezaron (entraron por primera vez a un estado STARTED) en {@code [from, to)}. */
+    @Query("""
+            select count(i) from Issue i
+            where i.project.id = :projectId and i.startedAt >= :from and i.startedAt < :to
+            """)
+    long countStartedBetween(@Param("projectId") UUID projectId, @Param("from") Instant from,
+                             @Param("to") Instant to);
+
+    /** Tareas del proyecto completadas en {@code [from, to)} (y que siguen completadas). */
+    @Query("""
+            select count(i) from Issue i
+            where i.project.id = :projectId and i.completedAt >= :from and i.completedAt < :to
+            """)
+    long countCompletedBetween(@Param("projectId") UUID projectId, @Param("from") Instant from,
+                               @Param("to") Instant to);
 
     // ----- Resumen de actividad -----
 

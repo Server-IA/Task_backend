@@ -48,7 +48,9 @@ public class RetroController {
     }
 
     @Operation(summary = "Abrir retrospectiva (project manager)",
-            description = "También se abre al cerrar el ciclo con startRetro. Si ya estaba abierta, no cambia nada.")
+            description = "También se abre al cerrar el ciclo con startRetro. Al abrirse avisa a los miembros del "
+                    + "proyecto (notificación RETRO_STARTED, menos a quien la abre). Si ya estaba abierta, no cambia "
+                    + "nada ni vuelve a avisar.")
     @PostMapping("/start")
     @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     public RetroResponse start(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID cycleId,
@@ -58,7 +60,8 @@ public class RetroController {
 
     @Operation(summary = "Agregar nota",
             description = "column: WENT_WELL (qué salió bien), IMPROVE (qué mejorar) o ACTION (acciones); text de 1 a "
-                    + "500. Solo con la retrospectiva abierta y sin terminar (409).")
+                    + "500; ownerId = responsable de una acción (solo ACTION y miembro del proyecto: si no, 400). Solo "
+                    + "con la retrospectiva abierta y sin terminar (409).")
     @PostMapping("/notes")
     @ResponseStatus(HttpStatus.CREATED)
     public RetroNoteResponse createNote(@PathVariable String slug, @PathVariable UUID projectId,
@@ -68,7 +71,9 @@ public class RetroController {
     }
 
     @Operation(summary = "Editar nota",
-            description = "Solo su autor o el project manager (403), con la retrospectiva sin terminar (409).")
+            description = "Edición parcial: text, ownerId (responsable de una acción, miembro del proyecto) o "
+                    + "clearOwner: true para quitarlo. Solo su autor o el project manager (403), con la retrospectiva "
+                    + "sin terminar (409).")
     @PatchMapping("/notes/{noteId}")
     public RetroNoteResponse updateNote(@PathVariable String slug, @PathVariable UUID projectId,
                                         @PathVariable UUID cycleId, @PathVariable UUID noteId,
@@ -106,7 +111,8 @@ public class RetroController {
     @Operation(summary = "Convertir acción en tarea (project manager)",
             description = "Solo notas ACTION (400). Crea la tarea en el primer estado «sin empezar» (UNSTARTED) del "
                     + "proyecto, o en el estado por defecto si no hay, con el texto como título y una descripción que "
-                    + "apunta a la retrospectiva. 409 si ya se convirtió.")
+                    + "apunta a la retrospectiva, asignada al responsable de la acción (si sigue siendo miembro del "
+                    + "proyecto). 409 si ya se convirtió.")
     @PostMapping("/notes/{noteId}/convert")
     @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     @ResponseStatus(HttpStatus.CREATED)

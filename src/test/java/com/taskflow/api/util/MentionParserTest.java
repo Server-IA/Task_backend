@@ -42,4 +42,21 @@ class MentionParserTest {
 
         assertThat(MentionParser.userIds(body)).hasSize(MentionParser.MAX_MENTIONS);
     }
+
+    @Test
+    void elExtractoMuestraLasMencionesComoNombreEnUnaLinea() {
+        String body = "@[Ana Pérez](" + ana + ") ¿lo revisas\n\nantes de la   daily? $1 \\o/";
+
+        assertThat(MentionParser.excerpt(body, 200)).isEqualTo("@Ana Pérez ¿lo revisas antes de la daily? $1 \\o/");
+        assertThat(MentionParser.excerpt(null, 200)).isNull();
+    }
+
+    @Test
+    void elExtractoSeCortaSinPartirUnaMencion() {
+        String body = "Hola @[Luis](" + luis + ") " + "x".repeat(300);
+
+        String excerpt = MentionParser.excerpt(body, 20);
+
+        assertThat(excerpt).isEqualTo("Hola @Luis xxxxxxxxx…");
+    }
 }

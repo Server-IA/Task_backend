@@ -39,6 +39,19 @@ public class Notification extends BaseEntity {
     @JoinColumn(name = "issue_id")
     private Issue issue;
 
+    /** Ciclo de la notificación ({@code RETRO_STARTED}); {@code null} en las de tareas. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "cycle_id")
+    private Cycle cycle;
+
+    /**
+     * Comentario que la generó ({@code ISSUE_COMMENTED} o {@code ISSUE_MENTIONED}); {@code null} en las demás o si
+     * el comentario se borró.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "comment_id")
+    private Comment comment;
+
     @Column(name = "is_read", nullable = false)
     private boolean read = false;
 }

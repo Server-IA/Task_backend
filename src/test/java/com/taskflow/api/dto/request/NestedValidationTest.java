@@ -43,7 +43,11 @@ class NestedValidationTest {
     }
 
     private static SavedViewFilters filters(String view, String sort) {
-        return new SavedViewFilters(null, null, null, null, null, view, sort);
+        return filters(view, sort, null);
+    }
+
+    private static SavedViewFilters filters(String view, String sort, String groupBy) {
+        return new SavedViewFilters(null, null, null, null, null, view, sort, null, null, null, groupBy);
     }
 
     @Test
@@ -51,7 +55,7 @@ class NestedValidationTest {
         CreateIssueRequest request = new CreateIssueRequest("Tarea", null, null, null, null, null, null, null, null,
                 List.of(new ChecklistItemRequest(ChecklistItemKind.CHECK, "Bien"),
                         new ChecklistItemRequest(null, "  "),
-                        new ChecklistItemRequest(ChecklistItemKind.CRITERION, "x".repeat(501))));
+                        new ChecklistItemRequest(ChecklistItemKind.CRITERION, "x".repeat(501))), null);
 
         assertThat(paths(validator.validate(request)))
                 .containsExactly("checklist[1].kind", "checklist[1].text", "checklist[2].text");
@@ -78,9 +82,13 @@ class NestedValidationTest {
 
     @Test
     void elTextoDeUnaNotaDeLaRetroVaDe1A500() {
-        assertThat(paths(validator.validate(new RetroNoteRequest(null, " ")))).containsExactly("column", "text");
-        assertThat(paths(validator.validate(new UpdateRetroNoteRequest("x".repeat(501))))).containsExactly("text");
-        assertThat(validator.validate(new RetroNoteRequest(RetroColumn.ACTION, "x".repeat(500)))).isEmpty();
+        assertThat(paths(validator.validate(new RetroNoteRequest(null, " ", null)))).containsExactly("column", "text");
+        assertThat(paths(validator.validate(new UpdateRetroNoteRequest("x".repeat(501), null, null))))
+                .containsExactly("text");
+        assertThat(paths(validator.validate(new UpdateRetroNoteRequest("", null, null)))).containsExactly("text");
+        assertThat(validator.validate(new UpdateRetroNoteRequest(null, UUID.randomUUID(), null))).isEmpty();
+        assertThat(validator.validate(new RetroNoteRequest(RetroColumn.ACTION, "x".repeat(500), UUID.randomUUID())))
+                .isEmpty();
         assertThat(paths(validator.validate(new DailyNoteRequest("x".repeat(5001))))).containsExactly("text");
         assertThat(validator.validate(new DailyNoteRequest(null))).isEmpty();
     }
@@ -94,6 +102,11 @@ class NestedValidationTest {
         assertThat(validator.validate(new CreateSavedViewRequest("Vista", false, filters("board", "dueDate,asc"))))
                 .isEmpty();
         assertThat(validator.validate(new CreateSavedViewRequest("Vista", false, filters("list", "priority"))))
+                .isEmpty();
+        assertThat(paths(validator.validate(new CreateSavedViewRequest("Vista", false,
+                filters("list", null, "estado")))))
+                .containsExactly("filters.groupBy");
+        assertThat(validator.validate(new CreateSavedViewRequest("Vista", false, filters("list", null, "assignee"))))
                 .isEmpty();
     }
 }

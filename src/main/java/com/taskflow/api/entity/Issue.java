@@ -11,6 +11,7 @@ import jakarta.persistence.JoinTable;
 import jakarta.persistence.ManyToMany;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -19,6 +20,7 @@ import org.hibernate.annotations.Formula;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 @Getter
@@ -75,6 +77,20 @@ public class Issue extends BaseEntity {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    /**
+     * La primera vez que entró a un estado del grupo STARTED; {@code null} si nunca pasó por uno. No se borra al
+     * salir del grupo: el tiempo de ciclo se mide desde aquí hasta {@link #completedAt}.
+     */
+    @Column(name = "started_at")
+    private Instant startedAt;
+
+    /**
+     * Último cambio de su checklist (agregar, editar, marcar, reordenar o borrar un elemento); {@code null} si nunca
+     * tuvo. Cambiar la checklist no modifica {@code updatedAt}.
+     */
+    @Column(name = "checklist_updated_at")
+    private Instant checklistUpdatedAt;
+
     @ManyToMany
     @JoinTable(name = "issue_assignees",
             joinColumns = @JoinColumn(name = "issue_id"),
@@ -111,6 +127,34 @@ public class Issue extends BaseEntity {
             + "and st.state_group not in ('COMPLETED', 'CANCELLED'))")
     private int blockedByCount;
 
+    /**
+     * Códigos de esas tareas separados por coma y ordenados (por ejemplo {@code AMC-4,WEB-2}); pueden ser de otros
+     * proyectos del workspace. {@code null} si no tiene bloqueos abiertos. Se lee con {@link #getBlockedByCodes()}.
+     */
+    @Getter(AccessLevel.NONE)
+    @Setter(AccessLevel.NONE)
+    @Formula("(select string_agg(p.identifier || '-' || b.sequence_id, ',' order by p.identifier, b.sequence_id) "
+            + "from issue_relations r join issues b on b.id = r.source_issue_id "
+            + "join states st on st.id = b.state_id join projects p on p.id = b.project_id "
+            + "where r.target_issue_id = id and r.type = 'BLOCKS' "
+            + "and st.state_group not in ('COMPLETED', 'CANCELLED'))")
+    private String blockedByCodesText;
+
+    /**
+     * Códigos de las tareas abiertas que esta bloquea, separados por coma y ordenados; solo mientras esta siga abierta
+     * (una tarea cerrada ya no bloquea). Se lee con {@link #getBlockingCodes()}.
+     */
+    @Getter(AccessLevel.NONE)
+    @Setter(AccessLevel.NONE)
+    @Formula("(select string_agg(p.identifier || '-' || b.sequence_id, ',' order by p.identifier, b.sequence_id) "
+            + "from issue_relations r join issues b on b.id = r.target_issue_id "
+            + "join states st on st.id = b.state_id join projects p on p.id = b.project_id "
+            + "where r.source_issue_id = id and r.type = 'BLOCKS' "
+            + "and st.state_group not in ('COMPLETED', 'CANCELLED') "
+            + "and exists (select 1 from states own where own.id = state_id "
+            + "and own.state_group not in ('COMPLETED', 'CANCELLED')))")
+    private String blockingCodesText;
+
     /** Pasos de la checklist ({@code CHECK}). */
     @Formula("(select count(*) from issue_checklist_items c where c.issue_id = id and c.kind = 'CHECK')")
     private int checklistTotal;
@@ -125,6 +169,20 @@ public class Issue extends BaseEntity {
     @Formula("(select count(*) from issue_checklist_items c "
             + "where c.issue_id = id and c.kind = 'CRITERION' and c.done)")
     private int criteriaDone;
+
+    /** Códigos de las tareas abiertas que la bloquean, ordenados (vacío si no está bloqueada). */
+    public List<String> getBlockedByCodes() {
+        return splitCodes(blockedByCodesText);
+    }
+
+    /** Códigos de las tareas abiertas que bloquea mientras siga abierta, ordenados (vacío si no bloquea ninguna). */
+    public List<String> getBlockingCodes() {
+        return splitCodes(blockingCodesText);
+    }
+
+    private static List<String> splitCodes(String text) {
+        return text == null || text.isBlank() ? List.of() : List.of(text.split(","));
+    }
 
     /** Código legible, por ejemplo {@code WEB-12}. Se calcula para que siga al identificador del proyecto. */
     public String getCode() {

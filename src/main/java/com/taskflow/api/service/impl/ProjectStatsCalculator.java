@@ -27,6 +27,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -95,15 +96,31 @@ final class ProjectStatsCalculator {
     }
 
     /**
-     * Mediana de días entre la creación y el completado de las tareas completadas en {@code [from, to)},
-     * redondeada a un decimal; {@code null} si no hay ninguna.
+     * Mediana de días «de En curso a Hecho» (de {@code startedAt} a {@code completedAt}) de las tareas completadas en
+     * {@code [from, to)}, redondeada a un decimal. Las que nunca pasaron por un estado STARTED no cuentan;
+     * {@code null} si no queda ninguna.
      */
     Double cycleTimeDays(List<IssueStatsRow> issues, LocalDate from, LocalDate to) {
-        List<Double> days = issues.stream()
+        return roundedMedianDays(issues.stream()
                 .filter(issue -> completedBetween(issue, from, to))
-                .map(issue -> Duration.between(issue.createdAt(), issue.completedAt()).toMillis() / MILLIS_PER_DAY)
-                .toList();
-        Double median = median(days);
+                .map(issue -> cycleTime(issue.startedAt(), issue.completedAt()))
+                .toList());
+    }
+
+    /**
+     * Días entre que la tarea empezó y se completó; {@code null} si no tiene alguna de las dos fechas (nunca pasó por
+     * un estado STARTED o no está completada) o si están al revés.
+     */
+    static Double cycleTime(Instant startedAt, Instant completedAt) {
+        if (startedAt == null || completedAt == null || completedAt.isBefore(startedAt)) {
+            return null;
+        }
+        return Duration.between(startedAt, completedAt).toMillis() / MILLIS_PER_DAY;
+    }
+
+    /** Mediana de los valores no nulos, redondeada a un decimal; {@code null} si no hay ninguno. */
+    static Double roundedMedianDays(Collection<Double> days) {
+        Double median = median(days.stream().filter(Objects::nonNull).toList());
         return median == null ? null : Math.round(median * 10) / 10.0;
     }
 

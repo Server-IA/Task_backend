@@ -95,9 +95,9 @@ public class CycleController {
 
     @Operation(summary = "Vista previa del cierre (project manager)",
             description = "Tareas completadas (grupo COMPLETED) y sin terminar (ni completadas ni canceladas) del ciclo, "
-                    + "por número; cycleTimeDays = mediana de días de creación a completado de las completadas "
-                    + "(null si no hay); nextCycle = siguiente ciclo sin cerrar por fecha de inicio (destino por "
-                    + "defecto), o null.")
+                    + "por número; cycleTimeDays = mediana de días de En curso a Hecho (startedAt a completedAt) de "
+                    + "las completadas que pasaron por un estado STARTED (null si no hay); nextCycle = siguiente ciclo "
+                    + "sin cerrar por fecha de inicio (destino por defecto), o null.")
     @GetMapping("/{cycleId}/close-preview")
     @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     public CloseCyclePreviewResponse closePreview(@PathVariable String slug, @PathVariable UUID projectId,
@@ -109,8 +109,9 @@ public class CycleController {
             description = "Las tareas sin terminar van a moveTo (NEXT_CYCLE: al ciclo targetCycleId o, sin él, al "
                     + "siguiente; BACKLOG: salen del ciclo sin cambiar de estado), salvo las de overrides. Sin ciclo "
                     + "siguiente y con alguna tarea hacia NEXT_CYCLE responde 400. Si el ciclo terminaba después de "
-                    + "hoy, su fin pasa a hoy. startRetro abre la retrospectiva. Un ciclo ya cerrado, o que aún no "
-                    + "empezó, responde 409.")
+                    + "hoy, su fin pasa a hoy. startRetro abre la retrospectiva y avisa a los miembros del proyecto "
+                    + "(notificación RETRO_STARTED, menos a mí). Un ciclo ya cerrado, o que aún no empezó, responde "
+                    + "409.")
     @PostMapping("/{cycleId}/close")
     @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     public CloseCycleResponse close(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID cycleId,

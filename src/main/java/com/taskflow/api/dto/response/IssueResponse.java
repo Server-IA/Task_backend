@@ -28,15 +28,32 @@ public record IssueResponse(
         int completedSubIssueCount,
         /** Tareas que la bloquean y siguen abiertas; mayor que 0 = «bloqueada». */
         int blockedByCount,
+        /**
+         * Códigos de esas tareas, ordenados (por ejemplo {@code ["AMC-4", "WEB-2"]}); pueden ser de otros proyectos
+         * del workspace. Vacío si no está bloqueada.
+         */
+        List<String> blockedByCodes,
+        /**
+         * Códigos de las tareas abiertas que esta bloquea, ordenados; vacío si no bloquea ninguna o si ya está
+         * cerrada (una tarea completada o cancelada ya no bloquea).
+         */
+        List<String> blockingCodes,
         /** Pasos de la checklist (total y hechos). */
         int checklistTotal,
         int checklistDone,
         /** Criterios de aceptación (total y cumplidos). */
         int criteriaTotal,
         int criteriaDone,
+        /** Último cambio de los criterios o la checklist; {@code null} si nunca tuvo. */
+        Instant checklistUpdatedAt,
         UserSummaryResponse createdBy,
         Instant createdAt,
         Instant updatedAt,
+        /**
+         * La primera vez que entró a un estado del grupo STARTED; {@code null} si nunca pasó por uno. No se borra al
+         * salir del grupo.
+         */
+        Instant startedAt,
         /** Cuándo se completó (entró a un estado del grupo COMPLETED); {@code null} si no está completada. */
         Instant completedAt
 ) {

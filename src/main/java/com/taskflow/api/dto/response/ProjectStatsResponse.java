@@ -7,7 +7,8 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Estadísticas de un proyecto. Las semanas empiezan el lunes, en la zona horaria de la aplicación.
+ * Estadísticas de un proyecto (o de las tareas asignadas a las personas del filtro {@code assignee}). Las semanas
+ * empiezan el lunes, en la zona horaria de la aplicación.
  * Abierta = ni completada ni cancelada.
  *
  * @param openCount             tareas abiertas
@@ -15,8 +16,9 @@ import java.util.UUID;
  * @param completedThisWeek     tareas completadas esta semana
  * @param completedLastWeek     tareas completadas la semana pasada
  * @param overdue               abiertas con fecha límite anterior a hoy (máximo 10, la más vencida primero)
- * @param cycleTimeDays         mediana de días entre creación y completado de las tareas completadas en el
- *                              periodo elegido; {@code null} si no hay ninguna
+ * @param cycleTimeDays         mediana de días «de En curso a Hecho» (de {@code startedAt} a {@code completedAt}) de
+ *                              las tareas completadas en el periodo elegido; las que nunca pasaron por un estado
+ *                              STARTED no cuentan; {@code null} si no queda ninguna
  * @param previousCycleTimeDays lo mismo para el periodo anterior de igual duración
  * @param throughput            completadas por semana: exactamente {@code weeks} semanas, de la más antigua
  *                              a la actual

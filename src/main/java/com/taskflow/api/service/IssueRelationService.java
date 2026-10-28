@@ -10,10 +10,15 @@ import java.util.UUID;
 
 public interface IssueRelationService {
 
-    IssueRelationsResponse getRelations(String slug, UUID projectId, UUID issueId);
+    /**
+     * Dependencias de la tarea. Las que cruzan a un proyecto al que el usuario no tiene acceso se devuelven sin título
+     * ni asignados ({@code accessible: false}).
+     */
+    IssueRelationsResponse getRelations(String slug, UUID projectId, UUID issueId, UUID userId);
 
     /**
-     * Relaciona la tarea con otra del mismo proyecto ({@code BLOCKED_BY} se guarda como el {@code BLOCKS} inverso).
+     * Relaciona la tarea con otra del mismo workspace a cuyo proyecto el usuario tiene acceso ({@code BLOCKED_BY} se
+     * guarda como el {@code BLOCKS} inverso).
      * Responde 409 si es la misma tarea, si la relación ya existe o si dos tareas quedarían bloqueándose
      * mutuamente. Registra la relación en el historial de ambas tareas.
      */

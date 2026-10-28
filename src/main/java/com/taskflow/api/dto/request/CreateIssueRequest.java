@@ -12,6 +12,7 @@ import java.util.UUID;
 /**
  * Solo el título es obligatorio. Sin estado, el issue va al primer estado del tablero (Backlog);
  * sin prioridad, queda en NONE. {@code checklist} crea sus criterios y pasos en la misma transacción.
+ * {@code templateId} es la plantilla con la que el frontend rellenó el formulario (solo cuenta su uso).
  */
 public record CreateIssueRequest(
         @NotBlank(message = "El título es obligatorio")
@@ -39,6 +40,9 @@ public record CreateIssueRequest(
 
         /** Criterios y pasos que se crean junto con la tarea (por ejemplo, los de una plantilla), en orden. */
         @Size(max = 50, message = "Máximo 50 elementos en la checklist")
-        List<@Valid ChecklistItemRequest> checklist
+        List<@Valid ChecklistItemRequest> checklist,
+
+        /** Plantilla usada (del mismo proyecto); suma un uso a la plantilla. */
+        UUID templateId
 ) {
 }

@@ -97,6 +97,8 @@ class ControllerPermissionsTest {
                 arguments(SavedViewController.class, "create", ACCESS),
                 arguments(SavedViewController.class, "update", ACCESS),
                 arguments(SavedViewController.class, "delete", ACCESS),
+                // Ordenar: el servicio exige project manager para las compartidas; las personales, las del usuario
+                arguments(SavedViewController.class, "reorder", ACCESS),
                 // Retrospectiva: notas y votos de cualquier miembro del proyecto (editar o borrar una nota ajena se
                 // valida en el servicio); abrirla, terminarla y convertir acciones en tareas, del project manager
                 arguments(RetroController.class, "getRetro", ACCESS),
@@ -132,5 +134,25 @@ class ControllerPermissionsTest {
 
         assertThat(rule).as("@PreAuthorize de %s.%s", controller.getSimpleName(), methodName).isNotNull();
         assertThat(rule.value()).isEqualTo(expected);
+    }
+
+    /**
+     * Las notificaciones (lista con filtro por tipo, contadores de la bandeja, marcar como leídas) son siempre las del
+     * usuario autenticado: no dependen de un workspace, así que no llevan regla.
+     */
+    @ParameterizedTest(name = "NotificationController.{0}")
+    @MethodSource("notificationEndpoints")
+    void lasNotificacionesSoloExigenEstarAutenticado(String methodName) {
+        Method method = Arrays.stream(NotificationController.class.getDeclaredMethods())
+                .filter(candidate -> candidate.getName().equals(methodName))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(NotificationController.class.getAnnotation(PreAuthorize.class)).isNull();
+        assertThat(method.getAnnotation(PreAuthorize.class)).isNull();
+    }
+
+    static Stream<String> notificationEndpoints() {
+        return Stream.of("getMyNotifications", "countUnread", "counts", "markAsRead", "markAllAsRead");
     }
 }

@@ -1,6 +1,7 @@
 package com.taskflow.api.service;
 
 import com.taskflow.api.dto.request.CreateSavedViewRequest;
+import com.taskflow.api.dto.request.ReorderSavedViewsRequest;
 import com.taskflow.api.dto.request.UpdateSavedViewRequest;
 import com.taskflow.api.dto.response.SavedViewResponse;
 
@@ -21,4 +22,10 @@ public interface SavedViewService {
     SavedViewResponse update(String slug, UUID projectId, UUID viewId, UUID userId, UpdateSavedViewRequest request);
 
     void delete(String slug, UUID projectId, UUID viewId, UUID userId);
+
+    /**
+     * Reordena las compartidas (solo el project manager) y/o mis vistas personales; cada lista debe tener exactamente
+     * las vistas de su grupo. Devuelve las vistas visibles, como {@link #getViews}.
+     */
+    List<SavedViewResponse> reorder(String slug, UUID projectId, UUID userId, ReorderSavedViewsRequest request);
 }

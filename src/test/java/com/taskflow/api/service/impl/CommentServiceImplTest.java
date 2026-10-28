@@ -125,7 +125,7 @@ class CommentServiceImplTest {
             comment("Hola " + mention(ana) + " y " + mention(outsider));
 
             assertThat(queriedIds()).containsExactly(ana.getId(), outsider.getId());
-            verify(notificationService).notifyCommented(issue, author, List.of(ana));
+            verify(notificationService).notifyCommented(eq(issue), eq(author), any(Comment.class), eq(List.of(ana)));
         }
 
         @Test
@@ -135,7 +135,7 @@ class CommentServiceImplTest {
             comment(mention(ana) + " " + mention(author) + " otra vez " + mention(ana));
 
             assertThat(queriedIds()).containsExactly(ana.getId());
-            verify(notificationService).notifyCommented(issue, author, List.of(ana));
+            verify(notificationService).notifyCommented(eq(issue), eq(author), any(Comment.class), eq(List.of(ana)));
         }
 
         @Test
@@ -143,7 +143,10 @@ class CommentServiceImplTest {
             comment("Listo, ya quedó");
 
             verify(userRepository, never()).findMentionable(any(), any(), any());
-            verify(notificationService).notifyCommented(issue, author, List.of());
+            // La notificación lleva el comentario recién guardado (la bandeja muestra su extracto)
+            ArgumentCaptor<Comment> notified = ArgumentCaptor.forClass(Comment.class);
+            verify(notificationService).notifyCommented(eq(issue), eq(author), notified.capture(), eq(List.of()));
+            assertThat(notified.getValue().getBody()).isEqualTo("Listo, ya quedó");
         }
     }
 
@@ -171,8 +174,8 @@ class CommentServiceImplTest {
                     new CommentRequest("Revisa esto " + mention(ana) + " y tú también " + mention(luis)));
 
             assertThat(queriedIds()).containsExactly(luis.getId());
-            verify(notificationService).notifyMentioned(issue, author, List.of(luis));
-            verify(notificationService, never()).notifyCommented(any(), any(), any());
+            verify(notificationService).notifyMentioned(issue, author, comment, List.of(luis));
+            verify(notificationService, never()).notifyCommented(any(), any(), any(), any());
         }
 
         @Test
@@ -181,7 +184,7 @@ class CommentServiceImplTest {
                     new CommentRequest("Revisa esto, " + mention(ana) + ", cuando puedas"));
 
             verify(userRepository, never()).findMentionable(any(), any(), any());
-            verify(notificationService).notifyMentioned(issue, author, List.of());
+            verify(notificationService).notifyMentioned(issue, author, comment, List.of());
         }
 
         @Test
@@ -189,7 +192,7 @@ class CommentServiceImplTest {
             assertThatThrownBy(() -> commentService.update(SLUG, project.getId(), issue.getId(), comment.getId(),
                     ana.getId(), new CommentRequest("Hola " + mention(luis))))
                     .isInstanceOf(ForbiddenException.class);
-            verify(notificationService, never()).notifyMentioned(any(), any(), any());
+            verify(notificationService, never()).notifyMentioned(any(), any(), any(), any());
         }
     }
 }

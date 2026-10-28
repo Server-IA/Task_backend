@@ -13,6 +13,7 @@ import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.Named;
 
+import java.util.List;
 import java.util.Set;
 
 @Mapper(uses = {UserMapper.class, ProjectMapper.class})
@@ -24,8 +25,20 @@ public interface IssueMapper {
 
     IssueSummaryResponse toSummary(Issue issue);
 
-    /** La otra tarea de una dependencia. Necesita su estado y su proyecto cargados. */
+    /** Referencia a una tarea (la otra de una dependencia, las de la daily…). Necesita su estado y su proyecto. */
     RelatedIssueResponse toRelated(Issue issue);
+
+    /**
+     * La otra tarea de una dependencia cuando el usuario no tiene acceso a su proyecto: sin título ni asignados.
+     * Con {@code @Named} para que MapStruct no la use en lugar de {@link #toRelated}.
+     */
+    @Named("restrictedRelated")
+    default RelatedIssueResponse toRestrictedRelated(Issue issue) {
+        RelatedIssueResponse full = toRelated(issue);
+        return new RelatedIssueResponse(full.id(), full.code(), null, full.state(), List.of(), full.project(),
+                full.dueDate(), full.blockedByCount(), full.subIssueCount(), full.completedSubIssueCount(),
+                full.checklistTotal(), full.checklistDone());
+    }
 
     ChecklistItemResponse toChecklistItemResponse(IssueChecklistItem item);
 
