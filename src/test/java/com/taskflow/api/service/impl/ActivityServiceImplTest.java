@@ -5,6 +5,7 @@ import com.taskflow.api.dto.response.ActivitySummaryResponse;
 import com.taskflow.api.dto.response.PageResponse;
 import com.taskflow.api.entity.Workspace;
 import com.taskflow.api.entity.enums.ActivityField;
+import com.taskflow.api.entity.enums.ProjectColor;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.mapper.CollaborationMapper;
 import com.taskflow.api.repository.IssueActivityRepository;
@@ -151,8 +152,8 @@ class ActivityServiceImplTest {
         @Test
         void sumaLaActividadDeLosProyectosAccesibles() {
             when(activityRepository.countByProjectSince(eq(List.of(web, app)), any(Instant.class))).thenReturn(List.of(
-                    new ProjectActivityCount(web, "Sitio web", "WEB", 29),
-                    new ProjectActivityCount(app, "App", "APP", 9)));
+                    new ProjectActivityCount(web, "Sitio web", "WEB", ProjectColor.TEAL, 29),
+                    new ProjectActivityCount(app, "App", "APP", ProjectColor.AMBER, 9)));
             when(activityRepository.countByFieldSince(eq(List.of(web, app)), eq(ActivityField.COMMENT),
                     any(Instant.class))).thenReturn(12L);
             when(issueRepository.countCompletedSince(eq(List.of(web, app)), any(Instant.class))).thenReturn(9L);

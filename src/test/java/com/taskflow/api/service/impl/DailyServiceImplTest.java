@@ -316,6 +316,84 @@ class DailyServiceImplTest {
                     at(monday, 0));
         }
 
+        /** Última actividad del proyecto antes de la reunión (o ninguna, con null). */
+        private void lastActivity(Instant last) {
+            when(activityRepository.findLastInProjectBetween(eq(project.getId()), any(Instant.class),
+                    any(Instant.class))).thenReturn(last);
+        }
+
+        @Test
+        void ayerEsElUltimoDiaConActividadSiElDiaHabilAnteriorNoTuvo() {
+            // Martes festivo sin movimiento: la daily del miércoles mira desde el lunes
+            members(ana);
+            openIssues();
+            activities();
+            LocalDate monday = LocalDate.of(2026, 10, 26);
+            lastActivity(at(monday, 17));
+
+            DailyResponse daily = dailyService.getDaily(SLUG, project.getId(), VIEWER, WEDNESDAY);
+
+            assertThat(daily.previousDate()).isEqualTo(monday);
+            verify(activityRepository).findAllInProjectBetween(project.getId(), at(monday, 0), at(WEDNESDAY, 0));
+            // Busca la última actividad en los 14 días anteriores a la reunión
+            verify(activityRepository).findLastInProjectBetween(project.getId(), at(WEDNESDAY.minusDays(14), 0),
+                    at(WEDNESDAY, 0));
+        }
+
+        @Test
+        void elLunesTrasUnViernesSinActividadMiraDesdeElJueves() {
+            members(ana);
+            openIssues();
+            activities();
+            LocalDate monday = LocalDate.of(2026, 10, 26);
+            LocalDate thursday = LocalDate.of(2026, 10, 22);
+            lastActivity(at(thursday, 23));
+
+            DailyResponse daily = dailyService.getDaily(SLUG, project.getId(), VIEWER, monday);
+
+            assertThat(daily.previousDate()).isEqualTo(thursday);
+            verify(activityRepository).findAllInProjectBetween(project.getId(), at(thursday, 0), at(monday, 0));
+        }
+
+        @Test
+        void laActividadDelFinDeSemanaNoAcortaElLunes() {
+            // Alguien comentó el sábado: el lunes sigue incluyendo el viernes
+            members(ana);
+            openIssues();
+            activities();
+            LocalDate monday = LocalDate.of(2026, 10, 26);
+            lastActivity(at(LocalDate.of(2026, 10, 24), 11));
+
+            DailyResponse daily = dailyService.getDaily(SLUG, project.getId(), VIEWER, monday);
+
+            assertThat(daily.previousDate()).isEqualTo(LocalDate.of(2026, 10, 23));
+        }
+
+        @Test
+        void sinActividadEnDosSemanasEsElDiaHabilAnterior() {
+            members(ana);
+            openIssues();
+            activities();
+            lastActivity(null);
+
+            DailyResponse daily = dailyService.getDaily(SLUG, project.getId(), VIEWER, WEDNESDAY);
+
+            assertThat(daily.previousDate()).isEqualTo(LocalDate.of(2026, 10, 27));
+        }
+
+        @Test
+        void elDiaDeLaUltimaActividadSeCuentaEnLaZonaDeBogota() {
+            // 00:30 del martes en UTC son las 19:30 del lunes en Bogotá
+            members(ana);
+            openIssues();
+            activities();
+            lastActivity(Instant.parse("2026-10-27T00:30:00Z"));
+
+            DailyResponse daily = dailyService.getDaily(SLUG, project.getId(), VIEWER, WEDNESDAY);
+
+            assertThat(daily.previousDate()).isEqualTo(LocalDate.of(2026, 10, 26));
+        }
+
         @Test
         void comoMaximoOchoEntradasPorLista() {
             members(ana);

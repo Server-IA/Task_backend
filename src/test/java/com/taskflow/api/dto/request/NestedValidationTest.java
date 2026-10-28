@@ -64,7 +64,7 @@ class NestedValidationTest {
     @Test
     void validaLaChecklistDeLasPlantillas() {
         IssueTemplateRequest request = new IssueTemplateRequest("Bug", null, null, null, null,
-                List.of(new ChecklistItemRequest(ChecklistItemKind.CHECK, "")));
+                List.of(new ChecklistItemRequest(ChecklistItemKind.CHECK, "")), null, null);
 
         assertThat(paths(validator.validate(request))).containsExactly("checklist[0].text");
     }

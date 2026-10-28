@@ -1,6 +1,7 @@
 package com.taskflow.api.repository;
 
 import com.taskflow.api.entity.Project;
+import com.taskflow.api.entity.enums.ProjectColor;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -38,6 +39,10 @@ public interface ProjectRepository extends JpaRepository<Project, UUID> {
                                              @Param("userId") UUID userId);
 
     boolean existsByWorkspaceIdAndIdentifier(UUID workspaceId, String identifier);
+
+    /** Colores de los proyectos del workspace (uno por proyecto, con repeticiones). */
+    @Query("select p.color from Project p where p.workspace.id = :workspaceId")
+    List<ProjectColor> findColorsByWorkspaceId(@Param("workspaceId") UUID workspaceId);
 
     /**
      * Incrementa el contador de issues con un UPDATE atómico. La fila queda bloqueada hasta el final de la

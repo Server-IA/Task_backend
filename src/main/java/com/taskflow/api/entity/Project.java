@@ -1,7 +1,10 @@
 package com.taskflow.api.entity;
 
+import com.taskflow.api.entity.enums.ProjectColor;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
@@ -31,6 +34,11 @@ public class Project extends BaseEntity {
 
     @Column(columnDefinition = "text")
     private String description;
+
+    /** Color de la pastilla del proyecto (clave de la paleta). */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 12)
+    private ProjectColor color;
 
     /**
      * Último número de issue asignado. Solo lo modifica {@code ProjectRepository.incrementIssueCounter}

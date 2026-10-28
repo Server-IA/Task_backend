@@ -11,7 +11,8 @@ import java.util.UUID;
 /**
  * Crear una plantilla de tarea. Solo el nombre es obligatorio; queda al final de la lista.
  * {@code titlePrefix} se guarda tal cual (por ejemplo «[Bug] », con su espacio final) y una prioridad
- * {@code NONE} equivale a no fijarla.
+ * {@code NONE} equivale a no fijarla. {@code stateId} debe ser un estado del proyecto y {@code assigneeIds},
+ * miembros del proyecto.
  */
 public record IssueTemplateRequest(
         @NotBlank(message = "El nombre es obligatorio")
@@ -30,6 +31,13 @@ public record IssueTemplateRequest(
         List<UUID> labelIds,
 
         @Size(max = 50, message = "Máximo 50 elementos en la checklist")
-        List<@Valid ChecklistItemRequest> checklist
+        List<@Valid ChecklistItemRequest> checklist,
+
+        /** Estado con el que nace la tarea; {@code null}: la plantilla no lo fija. */
+        UUID stateId,
+
+        /** Asignados por defecto. */
+        @Size(max = 20, message = "Máximo 20 asignados")
+        List<UUID> assigneeIds
 ) {
 }

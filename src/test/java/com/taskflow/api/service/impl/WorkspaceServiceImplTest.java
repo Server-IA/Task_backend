@@ -8,6 +8,7 @@ import com.taskflow.api.entity.enums.WorkspaceRole;
 import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.mapper.WorkspaceMapper;
+import com.taskflow.api.repository.IssueTemplateRepository;
 import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.repository.WorkspaceRepository;
@@ -41,6 +42,8 @@ class WorkspaceServiceImplTest {
     private WorkspaceMemberRepository memberRepository;
     @Mock
     private ProjectMemberRepository projectMemberRepository;
+    @Mock
+    private IssueTemplateRepository templateRepository;
     @Mock
     private ResourceLookup lookup;
     @Mock
@@ -141,6 +144,8 @@ class WorkspaceServiceImplTest {
             workspaceService.removeMember(SLUG, devId, devId);
 
             verify(projectMemberRepository).deleteAllInWorkspace(workspace.getId(), devId);
+            // Deja de ser asignado por defecto en las plantillas de los proyectos del workspace
+            verify(templateRepository).removeAssigneeInWorkspace(workspace.getId(), devId);
             verify(memberRepository).delete(dev);
         }
 

@@ -3,6 +3,7 @@ package com.taskflow.api.mapper;
 import com.taskflow.api.dto.response.IssueTemplateResponse;
 import com.taskflow.api.dto.response.LabelResponse;
 import com.taskflow.api.dto.response.ProjectMemberResponse;
+import com.taskflow.api.dto.response.ProjectRefResponse;
 import com.taskflow.api.dto.response.ProjectResponse;
 import com.taskflow.api.dto.response.SavedViewResponse;
 import com.taskflow.api.dto.response.StateResponse;
@@ -22,6 +23,9 @@ public interface ProjectMapper {
 
     @Mapping(target = "workspaceId", source = "workspace.id")
     ProjectResponse toResponse(Project project);
+
+    /** Referencia corta (nombre, identificador y color): la de las tareas, el feed y las dependencias. */
+    ProjectRefResponse toRef(Project project);
 
     @Mapping(target = "joinedAt", source = "createdAt")
     ProjectMemberResponse toMemberResponse(ProjectMember member);

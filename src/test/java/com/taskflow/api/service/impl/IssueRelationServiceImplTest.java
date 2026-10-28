@@ -108,7 +108,8 @@ class IssueRelationServiceImplTest {
     private static RelatedIssueResponse related(Issue issue, boolean full) {
         Project project = issue.getProject();
         return new RelatedIssueResponse(issue.getId(), issue.getCode(), full ? issue.getTitle() : null, null,
-                List.of(), new ProjectRefResponse(project.getId(), project.getName(), project.getIdentifier()),
+                List.of(), new ProjectRefResponse(project.getId(), project.getName(), project.getIdentifier(),
+                        project.getColor()),
                 issue.getDueDate(), 0, 0, 0, 0, 0);
     }
 

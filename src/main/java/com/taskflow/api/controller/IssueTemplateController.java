@@ -34,16 +34,16 @@ public class IssueTemplateController {
 
     @Operation(summary = "Listar plantillas (en su orden)",
             description = "Al crear una tarea desde una plantilla, el frontend antepone titlePrefix al título, usa "
-                    + "description, priority y labels, envía checklist en el campo checklist de la tarea y el id de "
-                    + "la plantilla en templateId. usageCount = tareas creadas con la plantilla.")
+                    + "description, priority, state, assignees y labels, envía checklist en el campo checklist de la "
+                    + "tarea y el id de la plantilla en templateId. usageCount = tareas creadas con la plantilla.")
     @GetMapping
     public List<IssueTemplateResponse> getTemplates(@PathVariable String slug, @PathVariable UUID projectId) {
         return templateService.getTemplates(slug, projectId);
     }
 
     @Operation(summary = "Crear plantilla (project manager)",
-            description = "El nombre no se repite en el proyecto (409) y las etiquetas deben ser del proyecto (400). "
-                    + "Queda al final de la lista.")
+            description = "El nombre no se repite en el proyecto (409); las etiquetas y el estado deben ser del "
+                    + "proyecto y los asignados, miembros del proyecto (400). Queda al final de la lista.")
     @PostMapping
     @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     @ResponseStatus(HttpStatus.CREATED)
@@ -54,7 +54,8 @@ public class IssueTemplateController {
 
     @Operation(summary = "Editar o reordenar plantilla (project manager)",
             description = "Edición parcial. titlePrefix o description vacíos los quitan y priority NONE quita la "
-                    + "prioridad; labelIds y checklist reemplazan la lista; position = nuevo índice (desde 0).")
+                    + "prioridad; stateId cambia el estado por defecto y clearState lo quita; labelIds, assigneeIds y "
+                    + "checklist reemplazan la lista; position = nuevo índice (desde 0).")
     @PatchMapping("/{templateId}")
     @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     public IssueTemplateResponse update(@PathVariable String slug, @PathVariable UUID projectId,

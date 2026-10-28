@@ -12,6 +12,8 @@ public record IssueResponse(
         String code,
         int sequenceId,
         UUID projectId,
+        /** Proyecto de la tarea con su identificador y su color (para la pastilla en búsquedas y «Mi trabajo»). */
+        ProjectRefResponse project,
         String title,
         String description,
         StateResponse state,

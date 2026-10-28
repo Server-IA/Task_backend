@@ -7,7 +7,9 @@ import com.taskflow.api.dto.response.IssueTemplateResponse;
 import com.taskflow.api.entity.IssueTemplate;
 import com.taskflow.api.entity.Label;
 import com.taskflow.api.entity.Project;
+import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.TemplateChecklistItem;
+import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.enums.IssuePriority;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
@@ -15,6 +17,9 @@ import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.ProjectMapper;
 import com.taskflow.api.repository.IssueTemplateRepository;
 import com.taskflow.api.repository.LabelRepository;
+import com.taskflow.api.repository.ProjectMemberRepository;
+import com.taskflow.api.repository.StateRepository;
+import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.service.IssueTemplateService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -35,6 +40,9 @@ public class IssueTemplateServiceImpl implements IssueTemplateService {
 
     private final IssueTemplateRepository templateRepository;
     private final LabelRepository labelRepository;
+    private final StateRepository stateRepository;
+    private final ProjectMemberRepository projectMemberRepository;
+    private final UserRepository userRepository;
     private final ResourceLookup lookup;
     private final ProjectMapper projectMapper;
 
@@ -60,6 +68,8 @@ public class IssueTemplateServiceImpl implements IssueTemplateService {
         template.setDescription(blankToNull(request.description(), true));
         template.setPriority(priorityOrNull(request.priority()));
         template.getLabels().addAll(resolveLabels(project, request.labelIds()));
+        template.setState(resolveState(project, request.stateId()));
+        template.getAssignees().addAll(resolveAssignees(project, request.assigneeIds()));
         template.getChecklist().addAll(toItems(request.checklist()));
         template.setPosition(existing.isEmpty() ? 0 : existing.getLast().getPosition() + 1);
         return projectMapper.toTemplateResponse(templateRepository.save(template));
@@ -94,6 +104,16 @@ public class IssueTemplateServiceImpl implements IssueTemplateService {
             Set<Label> labels = resolveLabels(project, request.labelIds());
             template.getLabels().clear();
             template.getLabels().addAll(labels);
+        }
+        if (Boolean.TRUE.equals(request.clearState())) {
+            template.setState(null);
+        } else if (request.stateId() != null) {
+            template.setState(resolveState(project, request.stateId()));
+        }
+        if (request.assigneeIds() != null) {
+            Set<User> assignees = resolveAssignees(project, request.assigneeIds());
+            template.getAssignees().clear();
+            template.getAssignees().addAll(assignees);
         }
         if (request.checklist() != null) {
             template.getChecklist().clear();
@@ -145,6 +165,32 @@ public class IssueTemplateServiceImpl implements IssueTemplateService {
         }
         Set<Label> sorted = new LinkedHashSet<>();
         labels.stream().sorted(Comparator.comparing(Label::getName)).forEach(sorted::add);
+        return sorted;
+    }
+
+    /** Estado por defecto: debe ser del proyecto ({@code null} = la plantilla no lo fija). */
+    private State resolveState(Project project, UUID stateId) {
+        if (stateId == null) {
+            return null;
+        }
+        return stateRepository.findByIdAndProjectId(stateId, project.getId())
+                .orElseThrow(() -> new BadRequestException("El estado debe pertenecer al proyecto"));
+    }
+
+    /** Asignados por defecto: miembros del proyecto, ordenados por nombre (el mismo orden con el que se leen). */
+    private Set<User> resolveAssignees(Project project, Collection<UUID> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Set.of();
+        }
+        Set<UUID> distinct = new HashSet<>(ids);
+        List<User> users = userRepository.findAllById(distinct);
+        if (users.size() != distinct.size()
+                || projectMemberRepository.countMembers(project.getId(), distinct) != distinct.size()) {
+            throw new BadRequestException("Los asignados deben ser miembros del proyecto");
+        }
+        Set<User> sorted = new LinkedHashSet<>();
+        users.stream().sorted(Comparator.comparing(User::getFullName, String.CASE_INSENSITIVE_ORDER))
+                .forEach(sorted::add);
         return sorted;
     }
 

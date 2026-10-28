@@ -15,6 +15,10 @@ public record IssueTemplateResponse(
         /** {@code null}: la plantilla no fija prioridad. */
         IssuePriority priority,
         List<LabelResponse> labels,
+        /** Estado con el que nace la tarea; {@code null}: la plantilla no lo fija. */
+        StateResponse state,
+        /** Asignados por defecto (miembros del proyecto), por nombre. */
+        List<UserSummaryResponse> assignees,
         List<TemplateChecklistItemResponse> checklist,
         int position,
         /** Tareas creadas con la plantilla ({@code templateId} en {@code POST /issues}). */

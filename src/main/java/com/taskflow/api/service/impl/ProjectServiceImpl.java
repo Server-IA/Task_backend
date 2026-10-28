@@ -10,6 +10,7 @@ import com.taskflow.api.entity.ProjectMember;
 import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.Workspace;
+import com.taskflow.api.entity.enums.ProjectColor;
 import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
@@ -63,6 +64,9 @@ public class ProjectServiceImpl implements ProjectService {
         project.setName(request.name().trim());
         project.setIdentifier(identifier);
         project.setDescription(blankToNull(request.description()));
+        project.setColor(request.color() != null
+                ? request.color()
+                : ProjectColor.leastUsed(projectRepository.findColorsByWorkspaceId(workspace.getId())));
         projectRepository.save(project);
 
         stateRepository.saveAll(defaultStates(project));
@@ -98,6 +102,9 @@ public class ProjectServiceImpl implements ProjectService {
         }
         if (request.description() != null) {
             project.setDescription(blankToNull(request.description()));
+        }
+        if (request.color() != null) {
+            project.setColor(request.color());
         }
         // El flush ejecuta @PreUpdate para que la respuesta lleve el updatedAt nuevo.
         return projectMapper.toResponse(projectRepository.saveAndFlush(project));
@@ -140,6 +147,7 @@ public class ProjectServiceImpl implements ProjectService {
         ProjectMember member = projectMemberRepository.findByProjectIdAndUserId(project.getId(), userId)
                 .orElseThrow(() -> new ResourceNotFoundException("El usuario no es miembro del proyecto"));
         projectMemberRepository.delete(member);
+        templateRepository.removeAssignee(project.getId(), userId);
     }
 
     /** Backlog, Todo, In Progress, Done y Cancelled, como en Plane. */

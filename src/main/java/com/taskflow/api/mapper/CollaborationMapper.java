@@ -35,11 +35,13 @@ public interface CollaborationMapper {
     NotificationResponse toNotificationResponse(Notification notification);
 
     @Mapping(target = "projectId", source = "project.id")
+    @Mapping(target = "projectColor", source = "project.color")
     @Mapping(target = "workspaceSlug", source = "project.workspace.slug")
     NotificationIssueResponse toNotificationIssue(Issue issue);
 
     @Mapping(target = "projectId", source = "project.id")
     @Mapping(target = "projectIdentifier", source = "project.identifier")
+    @Mapping(target = "projectColor", source = "project.color")
     @Mapping(target = "workspaceSlug", source = "project.workspace.slug")
     NotificationCycleResponse toNotificationCycle(Cycle cycle);
 

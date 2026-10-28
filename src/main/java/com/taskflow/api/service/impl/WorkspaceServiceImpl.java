@@ -14,6 +14,7 @@ import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.WorkspaceMapper;
+import com.taskflow.api.repository.IssueTemplateRepository;
 import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.repository.WorkspaceRepository;
@@ -36,6 +37,7 @@ public class WorkspaceServiceImpl implements WorkspaceService {
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository memberRepository;
     private final ProjectMemberRepository projectMemberRepository;
+    private final IssueTemplateRepository templateRepository;
     private final ResourceLookup lookup;
     private final WorkspaceMapper workspaceMapper;
 
@@ -135,6 +137,7 @@ public class WorkspaceServiceImpl implements WorkspaceService {
         if (member.getRole().isManager()) {
             handOverIfLastManager(workspace, memberUserId);
         }
+        templateRepository.removeAssigneeInWorkspace(workspace.getId(), memberUserId);
         projectMemberRepository.deleteAllInWorkspace(workspace.getId(), memberUserId);
         memberRepository.delete(member);
     }

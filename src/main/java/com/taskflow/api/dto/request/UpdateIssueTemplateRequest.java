@@ -12,7 +12,9 @@ import java.util.UUID;
  * Edición parcial de una plantilla: los campos nulos no se modifican.
  * <ul>
  *   <li>{@code titlePrefix: ""} y {@code description: ""} los quitan; {@code priority: "NONE"} quita la prioridad.</li>
- *   <li>{@code labelIds} y {@code checklist} reemplazan la lista completa ({@code []} la vacía).</li>
+ *   <li>{@code labelIds}, {@code assigneeIds} y {@code checklist} reemplazan la lista completa ({@code []} la
+ *       vacía).</li>
+ *   <li>{@code stateId} cambia el estado por defecto y {@code clearState: true} lo quita.</li>
  *   <li>{@code position} es el nuevo índice (desde 0) entre las plantillas del proyecto.</li>
  * </ul>
  */
@@ -35,6 +37,13 @@ public record UpdateIssueTemplateRequest(
         List<@Valid ChecklistItemRequest> checklist,
 
         @Min(value = 0, message = "La posición no puede ser negativa")
-        Integer position
+        Integer position,
+
+        UUID stateId,
+
+        Boolean clearState,
+
+        @Size(max = 20, message = "Máximo 20 asignados")
+        List<UUID> assigneeIds
 ) {
 }

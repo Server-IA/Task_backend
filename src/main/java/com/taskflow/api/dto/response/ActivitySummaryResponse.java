@@ -1,5 +1,7 @@
 package com.taskflow.api.dto.response;
 
+import com.taskflow.api.entity.enums.ProjectColor;
+
 import java.util.List;
 import java.util.UUID;
 
@@ -20,6 +22,6 @@ public record ActivitySummaryResponse(
         List<ProjectActivity> byProject
 ) {
 
-    public record ProjectActivity(UUID projectId, String name, String identifier, long count) {
+    public record ProjectActivity(UUID projectId, String name, String identifier, ProjectColor color, long count) {
     }
 }

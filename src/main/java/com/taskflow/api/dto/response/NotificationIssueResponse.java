@@ -1,5 +1,7 @@
 package com.taskflow.api.dto.response;
 
+import com.taskflow.api.entity.enums.ProjectColor;
+
 import java.util.UUID;
 
 /**
@@ -10,6 +12,8 @@ public record NotificationIssueResponse(
         String code,
         String title,
         UUID projectId,
+        /** Color del proyecto de la tarea (clave de la paleta). */
+        ProjectColor projectColor,
         String workspaceSlug
 ) {
 }

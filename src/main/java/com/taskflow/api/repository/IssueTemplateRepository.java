@@ -23,6 +23,25 @@ public interface IssueTemplateRepository extends JpaRepository<IssueTemplate, UU
      * Suma un uso a la plantilla con un UPDATE atómico (dos tareas creadas a la vez cuentan las dos). Devuelve 0 si
      * la plantilla no existe en el proyecto.
      */
+    /** Quien sale del proyecto deja de ser asignado por defecto en sus plantillas. */
+    @Modifying
+    @Query(value = """
+            DELETE FROM issue_template_assignees ta
+            USING issue_templates t
+            WHERE ta.template_id = t.id AND t.project_id = :projectId AND ta.user_id = :userId
+            """, nativeQuery = true)
+    int removeAssignee(@Param("projectId") UUID projectId, @Param("userId") UUID userId);
+
+    /** Quien sale del workspace deja de ser asignado por defecto en las plantillas de todos sus proyectos. */
+    @Modifying
+    @Query(value = """
+            DELETE FROM issue_template_assignees ta
+            USING issue_templates t, projects p
+            WHERE ta.template_id = t.id AND t.project_id = p.id
+              AND p.workspace_id = :workspaceId AND ta.user_id = :userId
+            """, nativeQuery = true)
+    int removeAssigneeInWorkspace(@Param("workspaceId") UUID workspaceId, @Param("userId") UUID userId);
+
     @Modifying
     @Query(value = """
             UPDATE issue_templates SET usage_count = usage_count + 1

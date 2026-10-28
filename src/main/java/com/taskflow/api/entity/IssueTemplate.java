@@ -25,8 +25,8 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Plantilla de tarea de un proyecto: prefijo del título, esqueleto de la descripción, prioridad, etiquetas y
- * checklist con los que el frontend rellena el formulario de nueva tarea.
+ * Plantilla de tarea de un proyecto: prefijo del título, esqueleto de la descripción, prioridad, estado, asignados,
+ * etiquetas y checklist con los que el frontend rellena el formulario de nueva tarea.
  */
 @Getter
 @Setter
@@ -55,6 +55,11 @@ public class IssueTemplate extends BaseEntity {
     @Column(length = 10)
     private IssuePriority priority;
 
+    /** Estado con el que nace la tarea; {@code null}: la plantilla no lo fija. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "state_id")
+    private State state;
+
     @Column(nullable = false)
     private int position;
 
@@ -71,6 +76,14 @@ public class IssueTemplate extends BaseEntity {
             inverseJoinColumns = @JoinColumn(name = "label_id"))
     @OrderBy("name ASC")
     private Set<Label> labels = new LinkedHashSet<>();
+
+    /** Asignados por defecto: miembros del proyecto, por nombre. */
+    @ManyToMany
+    @JoinTable(name = "issue_template_assignees",
+            joinColumns = @JoinColumn(name = "template_id"),
+            inverseJoinColumns = @JoinColumn(name = "user_id"))
+    @OrderBy("fullName ASC")
+    private Set<User> assignees = new LinkedHashSet<>();
 
     @ElementCollection
     @CollectionTable(name = "issue_template_items", joinColumns = @JoinColumn(name = "template_id"))

@@ -8,7 +8,9 @@ import java.util.UUID;
  * Daily de un proyecto para un día.
  *
  * @param date         el día de la reunión
- * @param previousDate día hábil anterior: el día antes o, si {@code date} es lunes, sábado o domingo, el viernes
+ * @param previousDate el día de «ayer»: el último día antes de {@code date} con actividad en el proyecto (historial
+ *                     de las tareas y comentarios), sin pasar del día hábil anterior (el día antes o, si {@code date}
+ *                     es lunes, sábado o domingo, el viernes). Sin actividad en los 14 días anteriores, el día hábil
  *                     anterior
  * @param cycle        ciclo en curso ese día (sin cerrar y con {@code date} entre sus fechas); {@code null} si no hay
  * @param summary      resumen del proyecto desde {@code previousDate} hasta antes de {@code date}

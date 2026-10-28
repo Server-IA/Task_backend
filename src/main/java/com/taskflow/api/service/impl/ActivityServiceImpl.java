@@ -97,7 +97,8 @@ public class ActivityServiceImpl implements ActivityService {
         }
         Instant since = Instant.now().minus(Duration.ofDays(days));
         List<ProjectActivity> byProject = activityRepository.countByProjectSince(projectIds, since).stream()
-                .map(row -> new ProjectActivity(row.projectId(), row.name(), row.identifier(), row.count()))
+                .map(row -> new ProjectActivity(row.projectId(), row.name(), row.identifier(), row.color(),
+                        row.count()))
                 .toList();
         return new ActivitySummaryResponse(
                 byProject.stream().mapToLong(ProjectActivity::count).sum(),

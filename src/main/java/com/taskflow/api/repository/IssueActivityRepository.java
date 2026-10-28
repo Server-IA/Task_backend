@@ -61,14 +61,25 @@ public interface IssueActivityRepository extends JpaRepository<IssueActivity, UU
 
     /** Entradas del historial por proyecto desde la fecha indicada, de más a menos. */
     @Query("""
-            select new com.taskflow.api.repository.ProjectActivityCount(p.id, p.name, p.identifier, count(a))
+            select new com.taskflow.api.repository.ProjectActivityCount(p.id, p.name, p.identifier, p.color, count(a))
             from IssueActivity a join a.issue i join i.project p
             where p.id in :projectIds and a.createdAt >= :since
-            group by p.id, p.name, p.identifier
+            group by p.id, p.name, p.identifier, p.color
             order by count(a) desc, p.name asc
             """)
     List<ProjectActivityCount> countByProjectSince(@Param("projectIds") Collection<UUID> projectIds,
                                                    @Param("since") Instant since);
+
+    /**
+     * Momento de la última entrada del historial del proyecto en {@code [from, to)} (de cualquier tipo, comentarios
+     * incluidos); {@code null} si no hubo ninguna.
+     */
+    @Query("""
+            select max(a.createdAt) from IssueActivity a
+            where a.issue.project.id = :projectId and a.createdAt >= :from and a.createdAt < :to
+            """)
+    Instant findLastInProjectBetween(@Param("projectId") UUID projectId, @Param("from") Instant from,
+                                     @Param("to") Instant to);
 
     @Query("""
             select count(a) from IssueActivity a

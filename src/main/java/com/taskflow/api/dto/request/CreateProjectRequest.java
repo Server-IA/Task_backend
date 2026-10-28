@@ -1,9 +1,13 @@
 package com.taskflow.api.dto.request;
 
+import com.taskflow.api.entity.enums.ProjectColor;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
+/**
+ * {@code color} es una clave de la paleta; sin color, el proyecto recibe el menos usado del workspace.
+ */
 public record CreateProjectRequest(
         @NotBlank(message = "El nombre es obligatorio")
         @Size(max = 80, message = "El nombre no puede superar 80 caracteres")
@@ -15,6 +19,8 @@ public record CreateProjectRequest(
         String identifier,
 
         @Size(max = 10000, message = "La descripción es demasiado larga")
-        String description
+        String description,
+
+        ProjectColor color
 ) {
 }

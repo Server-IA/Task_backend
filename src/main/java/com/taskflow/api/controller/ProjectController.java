@@ -45,7 +45,9 @@ public class ProjectController {
 
     @Operation(summary = "Crear proyecto (project manager)",
             description = "Crea los estados por defecto (Backlog, Todo, In Progress, Done, Cancelled) y las plantillas "
-                    + "de tarea por defecto (Reporte de bug, Historia de usuario y Tarea técnica).")
+                    + "de tarea por defecto (Reporte de bug, Historia de usuario y Tarea técnica). color es una clave "
+                    + "de la paleta (TEAL, AMBER, BLUE, PINK, VIOLET, ORANGE, GREEN); sin color, el menos usado del "
+                    + "workspace (entre empatados, el primero de la paleta).")
     @PostMapping
     @PreAuthorize("@workspaceSecurity.isManager(#slug)")
     @ResponseStatus(HttpStatus.CREATED)
@@ -61,7 +63,8 @@ public class ProjectController {
         return projectService.get(slug, projectId);
     }
 
-    @Operation(summary = "Editar proyecto (project manager)")
+    @Operation(summary = "Editar proyecto (project manager)",
+            description = "Edición parcial: los campos nulos no se modifican. color es una clave de la paleta.")
     @PatchMapping("/{projectId}")
     @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     public ProjectResponse update(@PathVariable String slug, @PathVariable UUID projectId,

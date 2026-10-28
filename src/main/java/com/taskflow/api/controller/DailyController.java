@@ -36,8 +36,10 @@ public class DailyController {
     private final DailyService dailyService;
 
     @Operation(summary = "Daily del proyecto",
-            description = "previousDate = día hábil anterior (el día antes; si date es lunes, sábado o domingo, el "
-                    + "viernes). Por persona (miembros del proyecto y asignados a sus tareas abiertas, por nombre): "
+            description = "previousDate = «ayer»: el último día antes de date con actividad en el proyecto "
+                    + "(historial de las tareas y comentarios), sin pasar del día hábil anterior (el día antes; si date "
+                    + "es lunes, sábado o domingo, el viernes); sin actividad en los 14 días anteriores, el día hábil "
+                    + "anterior. Por persona (miembros del proyecto y asignados a sus tareas abiertas, por nombre): "
                     + "yesterday = lo que hizo desde previousDate hasta antes de date, una entrada por tarea con el "
                     + "cambio más importante (completó > movió a {estado} > creó > comentó > actualizó), máximo 8; "
                     + "today = sus tareas abiertas en curso (STARTED) o con fecha límite hasta date, por fecha límite, "

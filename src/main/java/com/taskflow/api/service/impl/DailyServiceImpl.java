@@ -63,6 +63,9 @@ public class DailyServiceImpl implements DailyService {
     /** Máximo de entradas en «ayer» y en «hoy» por persona. */
     static final int MAX_ITEMS = 8;
 
+    /** Hasta cuántos días antes de la reunión se busca el último día con actividad. */
+    static final int ACTIVITY_LOOKBACK_DAYS = 14;
+
     static final String COMPLETED = "completó";
     static final String MOVED_TO = "movió a ";
     static final String CREATED = "creó";
@@ -99,7 +102,7 @@ public class DailyServiceImpl implements DailyService {
         Project project = lookup.project(slug, projectId);
         ZoneId zone = ZoneId.of(properties.timezone());
         LocalDate day = date != null ? date : LocalDate.now(zone);
-        LocalDate previous = previousWorkingDay(day);
+        LocalDate previous = previousDate(project.getId(), day, zone);
 
         // Tareas abiertas con asignados, agrupadas por persona (una con dos asignados cuenta para ambos).
         List<Issue> openIssues = issueRepository.findAssignedInProject(project.getId(), StateGroup.CLOSED);
@@ -117,7 +120,7 @@ public class DailyServiceImpl implements DailyService {
         Map<UUID, List<Issue>> blockersByIssue = openBlockers(openIssues);
         Set<UUID> visibleProjects = visibleBlockerProjects(project, blockersByIssue, userId);
 
-        // Lo hecho desde el día hábil anterior hasta antes del día de la reunión (el lunes incluye el fin de semana).
+        // Lo hecho desde «ayer» hasta antes del día de la reunión (el lunes incluye el fin de semana).
         Instant from = previous.atStartOfDay(zone).toInstant();
         Instant to = day.atStartOfDay(zone).toInstant();
         List<IssueActivity> activities = activityRepository.findAllInProjectBetween(project.getId(), from, to);
@@ -184,6 +187,23 @@ public class DailyServiceImpl implements DailyService {
         note.setUpdatedBy(lookup.user(userId));
         // El flush ejecuta @PreUpdate para que la respuesta lleve el updatedAt nuevo.
         return Optional.of(collaborationMapper.toDailyNoteResponse(noteRepository.saveAndFlush(note)));
+    }
+
+    /**
+     * «Ayer»: el último día antes de la reunión con actividad en el proyecto (el historial de las tareas, comentarios
+     * incluidos), sin pasar del día hábil anterior. Así, después de un festivo o de días sin movimiento retrocede hasta
+     * el último día con cambios, y el lunes sigue mirando desde el viernes aunque alguien haya tocado una tarea el fin
+     * de semana. Sin actividad en los {@value #ACTIVITY_LOOKBACK_DAYS} días anteriores, el día hábil anterior.
+     */
+    LocalDate previousDate(UUID projectId, LocalDate day, ZoneId zone) {
+        LocalDate workingDay = previousWorkingDay(day);
+        Instant last = activityRepository.findLastInProjectBetween(projectId,
+                day.minusDays(ACTIVITY_LOOKBACK_DAYS).atStartOfDay(zone).toInstant(), day.atStartOfDay(zone).toInstant());
+        if (last == null) {
+            return workingDay;
+        }
+        LocalDate lastDay = LocalDate.ofInstant(last, zone);
+        return lastDay.isBefore(workingDay) ? lastDay : workingDay;
     }
 
     /** Día hábil anterior: el día antes o, si es lunes, sábado o domingo, el viernes anterior. */
