@@ -75,4 +75,16 @@ class IssueCompletedAtRuleTest {
         IssueServiceImpl.updateCompletedAt(issue, StateGroup.COMPLETED, NOW);
         assertThat(issue.getCompletedAt()).isNull();
     }
+
+    /** Cuándo un cambio de estado desbloquea a las tareas que la tarea bloqueaba ({@code becameCompleted}). */
+    @Test
+    void soloPasarDeUnGrupoAbiertoACompletadoDesbloqueaAOtras() {
+        assertThat(IssueServiceImpl.becameCompleted(StateGroup.STARTED, StateGroup.COMPLETED)).isTrue();
+        assertThat(IssueServiceImpl.becameCompleted(StateGroup.BACKLOG, StateGroup.COMPLETED)).isTrue();
+        // Una tarea cancelada ya no bloqueaba; entre dos completados no cambia nada
+        assertThat(IssueServiceImpl.becameCompleted(StateGroup.CANCELLED, StateGroup.COMPLETED)).isFalse();
+        assertThat(IssueServiceImpl.becameCompleted(StateGroup.COMPLETED, StateGroup.COMPLETED)).isFalse();
+        assertThat(IssueServiceImpl.becameCompleted(StateGroup.STARTED, StateGroup.CANCELLED)).isFalse();
+        assertThat(IssueServiceImpl.becameCompleted(null, StateGroup.COMPLETED)).isFalse();
+    }
 }

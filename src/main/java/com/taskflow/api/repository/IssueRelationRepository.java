@@ -1,0 +1,56 @@
+package com.taskflow.api.repository;
+
+import com.taskflow.api.entity.Issue;
+import com.taskflow.api.entity.IssueRelation;
+import com.taskflow.api.entity.enums.IssueRelationType;
+import com.taskflow.api.entity.enums.StateGroup;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import java.util.Collection;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+public interface IssueRelationRepository extends JpaRepository<IssueRelation, UUID> {
+
+    /** Relaciones en las que participa la tarea (en cualquier lado), con ambas tareas y sus estados cargados. */
+    @Query("""
+            select r from IssueRelation r
+            join fetch r.source s join fetch s.state
+            join fetch r.target t join fetch t.state
+            where s.id = :issueId or t.id = :issueId
+            """)
+    List<IssueRelation> findAllByIssueId(@Param("issueId") UUID issueId);
+
+    /** La relación solo si la tarea participa en ella. */
+    @Query("""
+            select r from IssueRelation r
+            join fetch r.source s join fetch r.target t
+            where r.id = :id and (s.id = :issueId or t.id = :issueId)
+            """)
+    Optional<IssueRelation> findByIdAndIssueId(@Param("id") UUID id, @Param("issueId") UUID issueId);
+
+    boolean existsBySourceIdAndTargetIdAndType(UUID sourceId, UUID targetId, IssueRelationType type);
+
+    /** Tareas que bloquea la indicada, con su estado y su proyecto cargados. */
+    @Query("""
+            select i from Issue i join fetch i.state join fetch i.project
+            where i.id in (select r.target.id from IssueRelation r
+                           where r.source.id = :blockerId
+                             and r.type = com.taskflow.api.entity.enums.IssueRelationType.BLOCKS)
+            """)
+    List<Issue> findIssuesBlockedBy(@Param("blockerId") UUID blockerId);
+
+    /** Bloqueos de la tarea que siguen abiertos (estado fuera de {@code closedGroups}), sin contar uno de ellos. */
+    @Query("""
+            select count(r) from IssueRelation r
+            where r.target.id = :issueId
+              and r.type = com.taskflow.api.entity.enums.IssueRelationType.BLOCKS
+              and r.source.id <> :excludedBlockerId
+              and r.source.state.stateGroup not in :closedGroups
+            """)
+    long countOpenBlockersExcept(@Param("issueId") UUID issueId, @Param("excludedBlockerId") UUID excludedBlockerId,
+                                 @Param("closedGroups") Collection<StateGroup> closedGroups);
+}

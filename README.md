@@ -56,11 +56,13 @@ El archivo `.env` está en `.gitignore`; nunca se suben secretos.
 ./mvnw test
 ```
 
-Pruebas unitarias de `AuthService`, `IssueService` (código del issue, orden del Kanban, `completedAt`
-y quién puede borrar), `WorkspaceSecurity` y la regla `@PreAuthorize` de cada endpoint (permisos),
-`WorkspaceService` (siempre queda un project manager), las estadísticas del proyecto (mediana,
-throughput, burndown), «Mi trabajo», el feed de actividad, la búsqueda, `SortOrderCalculator` y el
-avance de ciclos.
+Pruebas unitarias de `AuthService`, `IssueService` (código del issue, orden del Kanban, `completedAt`,
+quién puede borrar, checklist al crear y aviso de desbloqueo), `WorkspaceSecurity` y la regla
+`@PreAuthorize` de cada endpoint (permisos), `WorkspaceService` (siempre queda un project manager),
+las estadísticas del proyecto (mediana, throughput, burndown), «Mi trabajo», el feed de actividad, la
+búsqueda, `SortOrderCalculator`, el avance de ciclos, las dependencias (duplicados, ciclos y
+desbloqueo), la checklist (orden y conteos), las plantillas (por defecto y validaciones), las
+menciones y las vistas guardadas (visibilidad y permisos).
 
 ## Arquitectura
 
@@ -186,13 +188,14 @@ backend responde 400 si se usan.
 
 Base: `/workspaces/{slug}/projects`. El **project manager** ve todos los proyectos; un **miembro**,
 solo aquellos de los que es miembro. Al crearlo se generan los estados Backlog, Todo, In Progress,
-Done y Cancelled.
+Done y Cancelled, y las plantillas de tarea Reporte de bug, Historia de usuario y Tarea técnica.
 
 Dentro de un proyecto, un miembro puede ver y crear tareas, editarlas, moverlas, comentar (y
-editar/borrar sus comentarios), meterlas o sacarlas de ciclos y módulos, y ver estados, etiquetas,
-miembros, ciclos y módulos. Configurar el proyecto es solo del project manager (los demás reciben
-**403**): crear, editar o borrar proyectos; crear, editar, reordenar o borrar estados y etiquetas;
-agregar o quitar miembros; crear, editar o borrar ciclos y módulos.
+editar/borrar sus comentarios), meterlas o sacarlas de ciclos y módulos, gestionar dependencias y
+checklists, guardar vistas personales, y ver estados, etiquetas, miembros, ciclos, módulos y
+plantillas. Configurar el proyecto es solo del project manager (los demás reciben **403**): crear,
+editar o borrar proyectos; crear, editar, reordenar o borrar estados, etiquetas y plantillas; agregar
+o quitar miembros; crear, editar o borrar ciclos y módulos; gestionar las vistas compartidas.
 
 | Método | Ruta | Descripción |
 |---|---|---|
@@ -221,6 +224,10 @@ Base: `/workspaces/{slug}/projects/{projectId}/issues`.
 | GET / POST | `/issues/{issueId}/comments` | Comentarios / comentar `{ body }` |
 | PATCH / DELETE | `/issues/{issueId}/comments/{commentId}` | Editar (autor) / borrar (autor o PM) |
 | GET | `/issues/{issueId}/activity` | Historial de cambios |
+| GET / POST | `/issues/{issueId}/relations` | Dependencias / agregar `{ type, issueId }` |
+| DELETE | `/issues/{issueId}/relations/{relationId}` | Quitar dependencia |
+| GET / POST | `/issues/{issueId}/checklist` | Criterios y checklist / agregar `{ kind, text }` |
+| PATCH / DELETE | `/issues/{issueId}/checklist/{itemId}` | Editar, marcar o reordenar `{ text?, done?, position? }` / eliminar |
 
 **Crear** — solo `title` es obligatorio:
 
@@ -234,14 +241,42 @@ Base: `/workspaces/{slug}/projects/{projectId}/issues`.
   "startDate": "2026-10-22",
   "dueDate": "2026-10-30",
   "assigneeIds": ["uuid"],
-  "labelIds": ["uuid"]
+  "labelIds": ["uuid"],
+  "checklist": [ { "kind": "CRITERION | CHECK", "text": "…" } ]
 }
 ```
 
+`checklist` (opcional, máx. 50) crea los criterios y pasos en la misma transacción, en el orden
+recibido; es lo que se envía al crear una tarea desde una plantilla.
+
 El issue recibe un código legible (`code: "WEB-12"`) que sigue al identificador del proyecto. La
-respuesta incluye también su ciclo (`cycle: { id, name }` o `null`), sus módulos (`modules: [...]`) y
+respuesta incluye también su ciclo (`cycle: { id, name }` o `null`), sus módulos (`modules: [...]`),
 `completedAt`: cuándo entró a un estado del grupo `COMPLETED` (`null` si no está completada; se
-borra si sale de ese grupo y no cambia al moverla entre dos estados completados).
+borra si sale de ese grupo y no cambia al moverla entre dos estados completados), y los contadores
+`blockedByCount` (tareas que la bloquean y siguen abiertas: si es mayor que 0, mostrar «bloqueada»),
+`checklistTotal`/`checklistDone` y `criteriaTotal`/`criteriaDone`.
+
+**Dependencias** (`relations`): `type` = `BLOCKS` (esta tarea bloquea a `issueId`), `BLOCKED_BY`
+(`issueId` bloquea a esta; se guarda como el `BLOCKS` inverso) o `RELATES` (simétrica). La otra tarea
+debe ser del mismo proyecto (400). Responde **409** si es la misma tarea, si la relación ya existe o
+si dos tareas quedarían bloqueándose mutuamente. Cada cambio queda en el historial de ambas tareas
+(`field: "RELATION"`, con textos como `"bloquea WEB-12"`, `"bloqueada por WEB-3"` o
+`"relacionada con WEB-7"`; en `newValue` al agregar y en `oldValue` al quitar). Cuando una tarea
+abierta pasa a un estado `COMPLETED`, los asignados de cada tarea que bloqueaba y que ya no tiene
+otros bloqueos abiertos reciben `ISSUE_UNBLOCKED`.
+
+```json
+{ "blocks": [ Rel ], "blockedBy": [ Rel ], "related": [ Rel ] }
+Rel = { "relationId": "…", "issue": { "id": "…", "code": "WEB-12", "title": "…", "state": StateResponse, "assignees": [ UserSummary ] } }
+```
+
+`POST` devuelve el `Rel` visto desde la tarea de la URL (`issue` es la otra tarea).
+
+**Criterios y checklist** (`checklist`): `kind` = `CRITERION` (criterio de aceptación) o `CHECK`
+(paso); `text` de 1 a 500 caracteres; máximo 100 por tarea (409). El `GET` devuelve
+`[ { id, kind, text, done, position } ]`: primero los criterios y luego los pasos, cada grupo por
+`position` (0, 1, 2…). Al agregar, el elemento queda al final de los de su tipo; en el `PATCH`,
+`position` es el nuevo índice dentro de su tipo y los demás se renumeran.
 
 **Editar** (PATCH parcial): los campos `null` u omitidos no cambian; `assigneeIds`/`labelIds`
 reemplazan la lista completa (`[]` la vacía); `description: ""` la borra; para quitar padre o
@@ -292,6 +327,41 @@ Cada ciclo y módulo trae `progress: { totalIssues, completedIssues, percentage 
 issues en estados del grupo `COMPLETED`). Los ciclos traen además `status`:
 `DRAFT | UPCOMING | CURRENT | COMPLETED`. Para listar los issues de un ciclo o módulo se usa el
 filtro `?cycle=` o `?module=` del listado de issues.
+
+### Plantillas de tarea y vistas guardadas
+
+Base: `/workspaces/{slug}/projects/{projectId}`.
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET / POST | `/templates` | Plantillas en su orden / crear (PM) |
+| PATCH / DELETE | `/templates/{templateId}` | Editar o reordenar (PM) / eliminar (PM) |
+| GET / POST | `/views` | Vistas visibles / guardar una vista |
+| PATCH / DELETE | `/views/{viewId}` | Editar, compartir o reordenar / eliminar |
+
+**Plantillas**: `{ id, name, titlePrefix, description, priority, labels: [LabelResponse], checklist:
+[ { kind, text } ], position }`. Al crear la tarea, el frontend antepone `titlePrefix` al título
+(por ejemplo `"[Bug] "`, con su espacio), usa `description` (markdown), `priority` (`null` = no la
+fija) y `labels`, y envía `checklist` en el campo `checklist` de `POST /issues`. Crear:
+`{ name, titlePrefix?, description?, priority?, labelIds?, checklist? }` (`name` de 1 a 60 y único en
+el proyecto → 409; etiquetas del proyecto → si no, 400). Editar es parcial: `titlePrefix` o
+`description` vacíos los quitan, `priority: "NONE"` quita la prioridad, `labelIds` y `checklist`
+reemplazan la lista y `position` es el nuevo índice (desde 0).
+
+**Vistas guardadas**: `[ { id, name, shared, owner: UserSummary, filters, position, mine } ]`,
+primero las compartidas del proyecto y luego mis vistas personales, cada grupo por `position`
+(`mine` = la creé yo). `filters` usa los mismos nombres que el listado de tareas:
+
+```json
+{ "state": ["uuid"], "priority": ["HIGH"], "assignee": ["uuid"], "label": ["uuid"],
+  "search": "login", "view": "list | board", "sort": "dueDate,asc" }
+```
+
+Crear: `{ name, shared?, filters? }` (`name` de 1 a 40). Editar: `{ name?, filters?, shared?,
+position? }` (`filters` reemplaza todos los filtros; `position` es el índice dentro de su grupo; al
+cambiar `shared` pasa al final del otro grupo). Una vista personal solo la ve y gestiona su dueño
+(para los demás, 404); crear, editar, eliminar o compartir una vista compartida es solo del project
+manager (403).
 
 ### Estadísticas, mi trabajo, actividad y búsqueda
 
@@ -373,9 +443,19 @@ recientemente.
 
 ### Notificaciones
 
-Se generan al **asignar** un issue y al **comentar** (a los asignados y al creador), nunca a quien
-hizo la acción. Cada notificación trae `issue: { id, code, title, projectId, workspaceSlug }` para
-navegar al issue.
+Nunca se avisa a quien hizo la acción. Cada notificación trae
+`issue: { id, code, title, projectId, workspaceSlug }` para navegar al issue. Tipos (`type`):
+
+- `ISSUE_ASSIGNED`: te asignaron la tarea.
+- `ISSUE_COMMENTED`: comentaron una tarea que tienes asignada o que creaste.
+- `ISSUE_MENTIONED`: te mencionaron en un comentario (`"Ana te mencionó en WEB-12: …"`). Las
+  menciones se escriben en el cuerpo como `@[Nombre Visible](id-del-usuario)`; solo cuentan los
+  miembros del proyecto y los project managers (el resto se ignora). Quien está mencionado recibe
+  solo la mención, no además `ISSUE_COMMENTED`. Al editar un comentario se avisa únicamente a los
+  mencionados por primera vez. Para el autocompletado sirven `GET /projects/{projectId}/members`
+  más los project managers de `GET /workspaces/{slug}/members` (`role: "OWNER"`).
+- `ISSUE_UNBLOCKED`: se completó el último bloqueo abierto de una tarea que tienes asignada
+  (`"WEB-15 ya no está bloqueada: WEB-12 se completó"`).
 
 | Método | Ruta | Descripción |
 |---|---|---|
@@ -388,12 +468,17 @@ navegar al issue.
 
 ## Modelo de datos
 
-Migraciones en `src/main/resources/db/migration` (`V1__users.sql` … `V8__issue_completed_at.sql`).
+Migraciones en `src/main/resources/db/migration` (`V1__users.sql` … `V13__notification_types.sql`).
 `V7` elimina el rol `ADMIN` (los admins e invitaciones con ese rol pasan a `MEMBER`) y `V8` agrega
 `issues.completed_at` (rellenado con la fecha del último cambio de estado hacia el estado actual, o
-`updated_at`).
+`updated_at`). `V9` crea `issue_relations` (un índice único sobre el par de tareas sin importar la
+dirección y el tipo evita duplicados y bloqueos mutuos), `V10` `issue_checklist_items`, `V11`
+`issue_templates` (+ `issue_template_labels` e `issue_template_items`) con las tres plantillas por
+defecto para los proyectos existentes, `V12` `saved_views` (filtros en `jsonb`) y `V13` agrega los
+tipos de notificación `ISSUE_UNBLOCKED` e `ISSUE_MENTIONED`.
 Las entidades usan **UUID** y `created_at`/`updated_at`. Las tablas intermedias puras
-(`issue_assignees`, `issue_labels`, `cycle_issues`, `module_issues`) usan clave compuesta.
+(`issue_assignees`, `issue_labels`, `cycle_issues`, `module_issues`, `issue_template_labels`) usan
+clave compuesta.
 
 Detalles a tener en cuenta:
 

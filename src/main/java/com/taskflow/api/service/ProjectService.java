@@ -14,7 +14,7 @@ public interface ProjectService {
     /** El project manager ve todos los proyectos; los demás, solo aquellos de los que son miembros. */
     List<ProjectResponse> getProjects(String slug, UUID userId);
 
-    /** Crea el proyecto con sus estados por defecto y agrega al creador como miembro. */
+    /** Crea el proyecto con sus estados y plantillas de tarea por defecto y agrega al creador como miembro. */
     ProjectResponse create(String slug, UUID userId, CreateProjectRequest request);
 
     ProjectResponse get(String slug, UUID projectId);

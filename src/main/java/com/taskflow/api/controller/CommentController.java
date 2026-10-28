@@ -40,7 +40,10 @@ public class CommentController {
         return commentService.getComments(slug, projectId, issueId);
     }
 
-    @Operation(summary = "Comentar", description = "Notifica a los asignados y al creador del issue.")
+    @Operation(summary = "Comentar",
+            description = "Notifica a los asignados y al creador de la tarea. Las menciones se escriben en el cuerpo "
+                    + "como @[Nombre Visible](id-del-usuario): se avisa (ISSUE_MENTIONED) a los mencionados que son "
+                    + "miembros del proyecto o project managers, y a ellos no les llega además el aviso del comentario.")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public CommentResponse create(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID issueId,
@@ -49,7 +52,8 @@ public class CommentController {
         return commentService.create(slug, projectId, issueId, me.getId(), request);
     }
 
-    @Operation(summary = "Editar comentario (solo el autor)")
+    @Operation(summary = "Editar comentario (solo el autor)",
+            description = "Solo se avisa a quienes se mencionan por primera vez en el comentario.")
     @PatchMapping("/{commentId}")
     public CommentResponse update(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID issueId,
                                   @PathVariable UUID commentId, @AuthenticationPrincipal UserPrincipal me,

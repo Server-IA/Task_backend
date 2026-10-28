@@ -72,16 +72,44 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     @Transactional
-    public void notifyCommented(Issue issue, User actor) {
+    public void notifyCommented(Issue issue, User actor, Collection<User> mentioned) {
+        notifyMentioned(issue, actor, mentioned);
+
         Map<UUID, User> recipients = new LinkedHashMap<>();
         issue.getAssignees().forEach(user -> recipients.put(user.getId(), user));
         if (issue.getCreatedBy() != null) {
             recipients.put(issue.getCreatedBy().getId(), issue.getCreatedBy());
         }
         recipients.remove(actor.getId());
+        // La mención gana: quien fue mencionado no recibe además el aviso del comentario.
+        mentioned.forEach(user -> recipients.remove(user.getId()));
 
         String message = actor.getFullName() + " comentó en " + describe(issue);
         recipients.values().forEach(user -> save(user, actor, NotificationType.ISSUE_COMMENTED, message, issue));
+    }
+
+    @Override
+    @Transactional
+    public void notifyMentioned(Issue issue, User actor, Collection<User> mentioned) {
+        String message = actor.getFullName() + " te mencionó en " + describe(issue);
+        distinctExcept(mentioned, actor)
+                .forEach(user -> save(user, actor, NotificationType.ISSUE_MENTIONED, message, issue));
+    }
+
+    @Override
+    @Transactional
+    public void notifyUnblocked(Issue blocked, Issue blocker, User actor) {
+        String message = blocked.getCode() + " ya no está bloqueada: " + blocker.getCode() + " se completó";
+        distinctExcept(blocked.getAssignees(), actor)
+                .forEach(user -> save(user, actor, NotificationType.ISSUE_UNBLOCKED, message, blocked));
+    }
+
+    /** Usuarios sin repetir (por id) y sin quien hizo la acción. */
+    private static Collection<User> distinctExcept(Collection<User> users, User actor) {
+        Map<UUID, User> byId = new LinkedHashMap<>();
+        users.forEach(user -> byId.putIfAbsent(user.getId(), user));
+        byId.remove(actor.getId());
+        return byId.values();
     }
 
     private void save(User recipient, User actor, NotificationType type, String message, Issue issue) {

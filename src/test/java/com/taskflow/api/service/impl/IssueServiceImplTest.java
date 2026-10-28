@@ -1,12 +1,15 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.dto.request.ChecklistItemRequest;
 import com.taskflow.api.dto.request.CreateIssueRequest;
 import com.taskflow.api.dto.request.MoveIssueRequest;
 import com.taskflow.api.dto.request.UpdateIssueRequest;
 import com.taskflow.api.entity.Issue;
+import com.taskflow.api.entity.IssueChecklistItem;
 import com.taskflow.api.entity.Project;
 import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.User;
+import com.taskflow.api.entity.enums.ChecklistItemKind;
 import com.taskflow.api.entity.enums.IssuePriority;
 import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.entity.enums.WorkspaceRole;
@@ -21,6 +24,8 @@ import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.service.ActivityService;
+import com.taskflow.api.service.IssueChecklistService;
+import com.taskflow.api.service.IssueRelationService;
 import com.taskflow.api.service.NotificationService;
 import com.taskflow.api.util.SortOrderCalculator;
 import org.junit.jupiter.api.BeforeEach;
@@ -76,6 +81,10 @@ class IssueServiceImplTest {
     @Mock
     private NotificationService notificationService;
     @Mock
+    private IssueRelationService relationService;
+    @Mock
+    private IssueChecklistService checklistService;
+    @Mock
     private ResourceLookup lookup;
     @Mock
     private IssueMapper issueMapper;
@@ -117,7 +126,7 @@ class IssueServiceImplTest {
     }
 
     private static CreateIssueRequest createRequest(String title) {
-        return new CreateIssueRequest(title, null, null, null, null, null, null, null, null);
+        return new CreateIssueRequest(title, null, null, null, null, null, null, null, null, null);
     }
 
     @Nested
@@ -169,7 +178,7 @@ class IssueServiceImplTest {
             when(userRepository.findAllById(Set.of(outsider.getId()))).thenReturn(List.of(outsider));
             when(projectMemberRepository.countMembers(eq(project.getId()), anyCollection())).thenReturn(0L);
             CreateIssueRequest request = new CreateIssueRequest("Tarea", null, null, null, null, null, null,
-                    List.of(outsider.getId()), null);
+                    List.of(outsider.getId()), null, null);
 
             assertThatThrownBy(() -> issueService.create(SLUG, project.getId(), author.getId(), request))
                     .isInstanceOf(BadRequestException.class)
@@ -178,9 +187,35 @@ class IssueServiceImplTest {
         }
 
         @Test
+        void creaLaChecklistDeLaPlantillaYDevuelveSusConteos() {
+            List<ChecklistItemRequest> checklist = List.of(
+                    new ChecklistItemRequest(ChecklistItemKind.CRITERION, "Dado …, cuando …, entonces …"),
+                    new ChecklistItemRequest(ChecklistItemKind.CHECK, "Reproducir el error"),
+                    new ChecklistItemRequest(ChecklistItemKind.CHECK, "Corregir"));
+            when(checklistService.createAll(any(Issue.class), eq(checklist))).thenAnswer(invocation -> {
+                Issue created = invocation.getArgument(0);
+                return checklist.stream()
+                        .map(item -> new IssueChecklistItem(created, item.kind(), item.text(), 0))
+                        .toList();
+            });
+            CreateIssueRequest request = new CreateIssueRequest("[Bug] Login", null, null, null, null, null, null,
+                    null, null, checklist);
+
+            issueService.create(SLUG, project.getId(), author.getId(), request);
+
+            ArgumentCaptor<Issue> saved = ArgumentCaptor.forClass(Issue.class);
+            verify(issueRepository).save(saved.capture());
+            verify(checklistService).createAll(saved.getValue(), checklist);
+            assertThat(saved.getValue().getCriteriaTotal()).isEqualTo(1);
+            assertThat(saved.getValue().getChecklistTotal()).isEqualTo(2);
+            assertThat(saved.getValue().getChecklistDone()).isZero();
+            assertThat(saved.getValue().getCriteriaDone()).isZero();
+        }
+
+        @Test
         void rechazaFechaLimiteAnteriorAlInicio() {
             CreateIssueRequest request = new CreateIssueRequest("Tarea", null, null, null, null,
-                    LocalDate.of(2026, 10, 20), LocalDate.of(2026, 10, 10), null, null);
+                    LocalDate.of(2026, 10, 20), LocalDate.of(2026, 10, 10), null, null, null);
 
             assertThatThrownBy(() -> issueService.create(SLUG, project.getId(), author.getId(), request))
                     .isInstanceOf(BadRequestException.class);
@@ -281,7 +316,7 @@ class IssueServiceImplTest {
         @Test
         void unaTareaCreadaEnUnEstadoCompletadoQuedaCompletada() {
             CreateIssueRequest request = new CreateIssueRequest("Tarea", null, done.getId(), null, null, null, null,
-                    null, null);
+                    null, null, null);
 
             issueService.create(SLUG, project.getId(), author.getId(), request);
 
@@ -343,6 +378,63 @@ class IssueServiceImplTest {
             assertThat(issue.getCompletedAt()).isEqualTo(completedAt);
         }
 
+    }
+
+    /** Completar una tarea que bloquea a otras avisa a las que quedan desbloqueadas. */
+    @Nested
+    class Unblock {
+
+        private State cancelled;
+
+        @BeforeEach
+        void stubs() {
+            cancelled = state("Cancelled", StateGroup.CANCELLED);
+            lenient().when(lookup.user(author.getId())).thenReturn(author);
+            lenient().when(issueRepository.saveAndFlush(any(Issue.class)))
+                    .thenAnswer(invocation -> invocation.getArgument(0));
+            for (State state : List.of(todo, done, cancelled)) {
+                lenient().when(stateRepository.findByIdAndProjectId(state.getId(), project.getId()))
+                        .thenReturn(Optional.of(state));
+            }
+        }
+
+        private UpdateIssueRequest updateState(UUID stateId) {
+            return new UpdateIssueRequest(null, null, stateId, null, null, null, null, null, null, null, null, null);
+        }
+
+        @Test
+        void alMoverAUnEstadoCompletadoAvisaALasTareasQueBloqueaba() {
+            Issue blocker = issue(todo, 1);
+
+            issueService.move(SLUG, project.getId(), blocker.getId(), author.getId(),
+                    new MoveIssueRequest(done.getId(), null, null));
+
+            verify(relationService).notifyUnblocked(blocker, author);
+        }
+
+        @Test
+        void alEditarElEstadoTambienAvisa() {
+            Issue blocker = issue(todo, 1);
+
+            issueService.update(SLUG, project.getId(), blocker.getId(), author.getId(), updateState(done.getId()));
+
+            verify(relationService).notifyUnblocked(blocker, author);
+        }
+
+        @Test
+        void moverEntreEstadosCompletadosOCancelarNoAvisa() {
+            State deployed = state("Deployed", StateGroup.COMPLETED);
+            when(stateRepository.findByIdAndProjectId(deployed.getId(), project.getId()))
+                    .thenReturn(Optional.of(deployed));
+            Issue completed = issue(done, 1);
+            Issue open = issue(todo, 2);
+
+            issueService.move(SLUG, project.getId(), completed.getId(), author.getId(),
+                    new MoveIssueRequest(deployed.getId(), null, null));
+            issueService.update(SLUG, project.getId(), open.getId(), author.getId(), updateState(cancelled.getId()));
+
+            verify(relationService, never()).notifyUnblocked(any(), any());
+        }
     }
 
     @Nested

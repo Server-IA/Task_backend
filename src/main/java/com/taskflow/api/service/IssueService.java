@@ -15,14 +15,21 @@ public interface IssueService {
 
     PageResponse<IssueResponse> getIssues(String slug, UUID projectId, IssueFilter filter, Pageable pageable);
 
-    /** Asigna el siguiente número del proyecto (WEB-12) y deja el issue al final de su columna. */
+    /**
+     * Asigna el siguiente número del proyecto (WEB-12), deja el issue al final de su columna y crea su checklist
+     * (si viene) en la misma transacción.
+     */
     IssueResponse create(String slug, UUID projectId, UUID userId, CreateIssueRequest request);
 
     IssueResponse get(String slug, UUID projectId, UUID issueId);
 
+    /** Si la tarea pasa de un estado abierto a uno completado, avisa a las tareas que deja desbloqueadas. */
     IssueResponse update(String slug, UUID projectId, UUID issueId, UUID userId, UpdateIssueRequest request);
 
-    /** Cambia el estado y la posición en el Kanban actualizando solo la fila del issue. */
+    /**
+     * Cambia el estado y la posición en el Kanban actualizando solo la fila del issue. Igual que al editar, completar
+     * la tarea avisa a las que deja desbloqueadas.
+     */
     IssueResponse move(String slug, UUID projectId, UUID issueId, UUID userId, MoveIssueRequest request);
 
     /** Solo el project manager o quien creó la tarea pueden eliminarla (403 si no). */

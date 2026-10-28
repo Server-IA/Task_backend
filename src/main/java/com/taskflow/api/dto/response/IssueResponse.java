@@ -26,6 +26,14 @@ public record IssueResponse(
         List<PlanningRefResponse> modules,
         int subIssueCount,
         int completedSubIssueCount,
+        /** Tareas que la bloquean y siguen abiertas; mayor que 0 = «bloqueada». */
+        int blockedByCount,
+        /** Pasos de la checklist (total y hechos). */
+        int checklistTotal,
+        int checklistDone,
+        /** Criterios de aceptación (total y cumplidos). */
+        int criteriaTotal,
+        int criteriaDone,
         UserSummaryResponse createdBy,
         Instant createdAt,
         Instant updatedAt,

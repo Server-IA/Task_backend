@@ -1,6 +1,7 @@
 package com.taskflow.api.dto.request;
 
 import com.taskflow.api.entity.enums.IssuePriority;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
@@ -10,7 +11,7 @@ import java.util.UUID;
 
 /**
  * Solo el título es obligatorio. Sin estado, el issue va al primer estado del tablero (Backlog);
- * sin prioridad, queda en NONE.
+ * sin prioridad, queda en NONE. {@code checklist} crea sus criterios y pasos en la misma transacción.
  */
 public record CreateIssueRequest(
         @NotBlank(message = "El título es obligatorio")
@@ -34,6 +35,10 @@ public record CreateIssueRequest(
         List<UUID> assigneeIds,
 
         @Size(max = 20, message = "Máximo 20 etiquetas")
-        List<UUID> labelIds
+        List<UUID> labelIds,
+
+        /** Criterios y pasos que se crean junto con la tarea (por ejemplo, los de una plantilla), en orden. */
+        @Size(max = 50, message = "Máximo 50 elementos en la checklist")
+        List<@Valid ChecklistItemRequest> checklist
 ) {
 }

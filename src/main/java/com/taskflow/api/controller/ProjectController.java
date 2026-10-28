@@ -44,7 +44,8 @@ public class ProjectController {
     }
 
     @Operation(summary = "Crear proyecto (project manager)",
-            description = "Crea los estados por defecto (Backlog, Todo, In Progress, Done, Cancelled).")
+            description = "Crea los estados por defecto (Backlog, Todo, In Progress, Done, Cancelled) y las plantillas "
+                    + "de tarea por defecto (Reporte de bug, Historia de usuario y Tarea técnica).")
     @PostMapping
     @PreAuthorize("@workspaceSecurity.isManager(#slug)")
     @ResponseStatus(HttpStatus.CREATED)

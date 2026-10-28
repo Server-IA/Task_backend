@@ -1,0 +1,58 @@
+package com.taskflow.api.entity;
+
+import com.taskflow.api.entity.enums.IssuePriority;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
+
+import java.util.Collection;
+import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
+
+/**
+ * Filtros de una vista guardada (se guardan como jsonb). Usan los mismos nombres que los parámetros del listado de
+ * tareas; {@code view} indica si se muestra como lista o tablero y {@code sort} el orden (por ejemplo
+ * {@code "priority"} o {@code "dueDate,asc"}).
+ */
+public record SavedViewFilters(
+        @Size(max = 50, message = "Máximo 50 estados")
+        List<@NotNull(message = "Los estados no pueden ser nulos") UUID> state,
+
+        @Size(max = 5, message = "Máximo 5 prioridades")
+        List<@NotNull(message = "Las prioridades no pueden ser nulas") IssuePriority> priority,
+
+        @Size(max = 50, message = "Máximo 50 asignados")
+        List<@NotNull(message = "Los asignados no pueden ser nulos") UUID> assignee,
+
+        @Size(max = 50, message = "Máximo 50 etiquetas")
+        List<@NotNull(message = "Las etiquetas no pueden ser nulas") UUID> label,
+
+        @Size(max = 200, message = "La búsqueda no puede superar 200 caracteres")
+        String search,
+
+        @Pattern(regexp = "list|board", message = "view debe ser list o board")
+        String view,
+
+        @Size(max = 60, message = "El orden no puede superar 60 caracteres")
+        @Pattern(regexp = SORT_PATTERN, message = "El orden debe tener el formato campo o campo,asc|desc")
+        String sort
+) {
+
+    /** Nombre de un campo y, opcionalmente, la dirección: {@code dueDate} o {@code dueDate,desc}. */
+    public static final String SORT_PATTERN = "^[A-Za-z][A-Za-z0-9_.]*(,(asc|desc|ASC|DESC))?$";
+
+    public static SavedViewFilters empty() {
+        return new SavedViewFilters(List.of(), List.of(), List.of(), List.of(), null, null, null);
+    }
+
+    /** Listas sin nulos ni repetidos ({@code []} si no vienen) y búsqueda sin espacios sobrantes. */
+    public SavedViewFilters normalized() {
+        return new SavedViewFilters(distinct(state), distinct(priority), distinct(assignee), distinct(label),
+                search == null || search.isBlank() ? null : search.trim(), view, sort);
+    }
+
+    private static <T> List<T> distinct(Collection<T> values) {
+        return values == null ? List.of() : values.stream().filter(Objects::nonNull).distinct().toList();
+    }
+}

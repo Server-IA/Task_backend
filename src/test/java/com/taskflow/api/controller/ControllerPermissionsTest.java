@@ -74,7 +74,26 @@ class ControllerPermissionsTest {
                 arguments(IssueController.class, "move", ACCESS),
                 arguments(IssueController.class, "delete", ACCESS),
                 arguments(CommentController.class, "create", ACCESS),
+                arguments(CommentController.class, "update", ACCESS),
                 arguments(CommentController.class, "delete", ACCESS),
+                // Dependencias y checklist: cualquier miembro del proyecto
+                arguments(IssueRelationController.class, "getRelations", ACCESS),
+                arguments(IssueRelationController.class, "create", ACCESS),
+                arguments(IssueRelationController.class, "delete", ACCESS),
+                arguments(IssueChecklistController.class, "getItems", ACCESS),
+                arguments(IssueChecklistController.class, "create", ACCESS),
+                arguments(IssueChecklistController.class, "update", ACCESS),
+                arguments(IssueChecklistController.class, "delete", ACCESS),
+                // Plantillas: las ve todo el proyecto, las configura el project manager
+                arguments(IssueTemplateController.class, "getTemplates", ACCESS),
+                arguments(IssueTemplateController.class, "create", MANAGE),
+                arguments(IssueTemplateController.class, "update", MANAGE),
+                arguments(IssueTemplateController.class, "delete", MANAGE),
+                // Vistas guardadas: el servicio decide quién gestiona cada una (dueño o PM si es compartida)
+                arguments(SavedViewController.class, "getViews", ACCESS),
+                arguments(SavedViewController.class, "create", ACCESS),
+                arguments(SavedViewController.class, "update", ACCESS),
+                arguments(SavedViewController.class, "delete", ACCESS),
                 // Endpoints nuevos
                 arguments(ProjectStatsController.class, "getStats", ACCESS),
                 arguments(MyWorkController.class, "getMyWork", MEMBER),

@@ -7,11 +7,13 @@ import com.taskflow.api.dto.request.UpdateIssueRequest;
 import com.taskflow.api.dto.response.IssueResponse;
 import com.taskflow.api.dto.response.PageResponse;
 import com.taskflow.api.entity.Issue;
+import com.taskflow.api.entity.IssueChecklistItem;
 import com.taskflow.api.entity.Label;
 import com.taskflow.api.entity.Project;
 import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.enums.ActivityField;
+import com.taskflow.api.entity.enums.ChecklistItemKind;
 import com.taskflow.api.entity.enums.IssuePriority;
 import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.entity.enums.WorkspaceRole;
@@ -29,6 +31,8 @@ import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.service.ActivityService;
+import com.taskflow.api.service.IssueChecklistService;
+import com.taskflow.api.service.IssueRelationService;
 import com.taskflow.api.service.IssueService;
 import com.taskflow.api.service.NotificationService;
 import com.taskflow.api.util.SortOrderCalculator;
@@ -68,6 +72,8 @@ public class IssueServiceImpl implements IssueService {
     private final WorkspaceMemberRepository workspaceMemberRepository;
     private final ActivityService activityService;
     private final NotificationService notificationService;
+    private final IssueRelationService relationService;
+    private final IssueChecklistService checklistService;
     private final ResourceLookup lookup;
     private final IssueMapper issueMapper;
 
@@ -110,6 +116,7 @@ public class IssueServiceImpl implements IssueService {
         issue.setSequenceId(nextSequenceId(project));
         issue.setSortOrder(SortOrderCalculator.endOfColumn(issueRepository.findMaxSortOrder(state.getId())));
         issueRepository.save(issue);
+        setChecklistCounts(issue, checklistService.createAll(issue, request.checklist()));
 
         activityService.record(issue, actor, ActivityField.CREATED, null, issue.getTitle());
         notificationService.notifyAssigned(issue, actor, issue.getAssignees());
@@ -130,6 +137,7 @@ public class IssueServiceImpl implements IssueService {
         Issue issue = findIssue(project, issueId);
         User actor = lookup.user(userId);
         IssueChanges changes = new IssueChanges(issue, actor);
+        boolean completed = false;
 
         if (request.title() != null) {
             if (request.title().isBlank()) {
@@ -153,6 +161,7 @@ public class IssueServiceImpl implements IssueService {
             StateGroup previousGroup = issue.getState().getStateGroup();
             issue.setState(state);
             updateCompletedAt(issue, previousGroup, Instant.now());
+            completed = becameCompleted(previousGroup, state.getStateGroup());
             issue.setSortOrder(SortOrderCalculator.endOfColumn(issueRepository.findMaxSortOrder(state.getId())));
         }
         if (request.priority() != null) {
@@ -201,7 +210,11 @@ public class IssueServiceImpl implements IssueService {
             issue.getLabels().addAll(labels);
         }
         // El flush ejecuta @PreUpdate para que la respuesta lleve el updatedAt nuevo.
-        return issueMapper.toResponse(issueRepository.saveAndFlush(issue));
+        Issue saved = issueRepository.saveAndFlush(issue);
+        if (completed) {
+            relationService.notifyUnblocked(saved, actor);
+        }
+        return issueMapper.toResponse(saved);
     }
 
     @Override
@@ -210,9 +223,10 @@ public class IssueServiceImpl implements IssueService {
         Project project = lookup.project(slug, projectId);
         Issue issue = findIssue(project, issueId);
         State target = findState(project, request.stateId());
+        User actor = null;
         if (!target.getId().equals(issue.getState().getId())) {
-            activityService.record(issue, lookup.user(userId), ActivityField.STATE,
-                    issue.getState().getName(), target.getName());
+            actor = lookup.user(userId);
+            activityService.record(issue, actor, ActivityField.STATE, issue.getState().getName(), target.getName());
         }
 
         Issue above = request.afterIssueId() != null ? findNeighbor(project, target, issue, request.afterIssueId()) : null;
@@ -235,7 +249,12 @@ public class IssueServiceImpl implements IssueService {
         StateGroup previousGroup = issue.getState().getStateGroup();
         issue.setState(target);
         updateCompletedAt(issue, previousGroup, Instant.now());
-        return issueMapper.toResponse(issueRepository.saveAndFlush(issue));
+        Issue saved = issueRepository.saveAndFlush(issue);
+        // Pasar de un grupo abierto a COMPLETED implica cambiar de estado, así que actor ya está cargado.
+        if (becameCompleted(previousGroup, target.getStateGroup())) {
+            relationService.notifyUnblocked(saved, actor);
+        }
+        return issueMapper.toResponse(saved);
     }
 
     @Override
@@ -273,6 +292,29 @@ public class IssueServiceImpl implements IssueService {
         } else if (previousGroup != StateGroup.COMPLETED || issue.getCompletedAt() == null) {
             issue.setCompletedAt(now);
         }
+    }
+
+    /**
+     * Una tarea abierta pasó al grupo COMPLETED: deja de bloquear a otras. Venir de CANCELLED no cuenta porque una
+     * tarea cancelada ya no bloqueaba, y moverse entre dos estados completados tampoco.
+     */
+    static boolean becameCompleted(StateGroup previousGroup, StateGroup currentGroup) {
+        return previousGroup != null && previousGroup.isOpen() && currentGroup == StateGroup.COMPLETED;
+    }
+
+    /**
+     * Las fórmulas de la checklist solo se calculan al leer la tarea de la base de datos; en una tarea recién creada
+     * se rellenan con los elementos que se acaban de guardar (ninguno hecho).
+     */
+    private static void setChecklistCounts(Issue issue, List<IssueChecklistItem> items) {
+        issue.setChecklistTotal(countOfKind(items, ChecklistItemKind.CHECK));
+        issue.setCriteriaTotal(countOfKind(items, ChecklistItemKind.CRITERION));
+        issue.setChecklistDone(0);
+        issue.setCriteriaDone(0);
+    }
+
+    private static int countOfKind(List<IssueChecklistItem> items, ChecklistItemKind kind) {
+        return (int) items.stream().filter(item -> item.getKind() == kind).count();
     }
 
     private boolean isManager(String slug, UUID userId) {

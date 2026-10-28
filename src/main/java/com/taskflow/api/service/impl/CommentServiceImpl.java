@@ -13,15 +13,19 @@ import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.CollaborationMapper;
 import com.taskflow.api.repository.CommentRepository;
 import com.taskflow.api.repository.IssueRepository;
+import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.service.CommentService;
 import com.taskflow.api.service.NotificationService;
+import com.taskflow.api.util.MentionParser;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -33,6 +37,7 @@ public class CommentServiceImpl implements CommentService {
 
     private final CommentRepository commentRepository;
     private final IssueRepository issueRepository;
+    private final UserRepository userRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
     private final ActivityService activityService;
     private final NotificationService notificationService;
@@ -42,7 +47,7 @@ public class CommentServiceImpl implements CommentService {
     @Override
     @Transactional(readOnly = true)
     public List<CommentResponse> getComments(String slug, UUID projectId, UUID issueId) {
-        Issue issue = findIssue(slug, projectId, issueId);
+        Issue issue = findIssue(lookup.project(slug, projectId), issueId);
         return commentRepository.findAllByIssueIdWithAuthor(issue.getId()).stream()
                 .map(mapper::toCommentResponse)
                 .toList();
@@ -51,7 +56,8 @@ public class CommentServiceImpl implements CommentService {
     @Override
     @Transactional
     public CommentResponse create(String slug, UUID projectId, UUID issueId, UUID userId, CommentRequest request) {
-        Issue issue = findIssue(slug, projectId, issueId);
+        Project project = lookup.project(slug, projectId);
+        Issue issue = findIssue(project, issueId);
         User author = lookup.user(userId);
 
         Comment comment = new Comment();
@@ -61,7 +67,8 @@ public class CommentServiceImpl implements CommentService {
         commentRepository.save(comment);
 
         activityService.record(issue, author, ActivityField.COMMENT, null, excerpt(comment.getBody()));
-        notificationService.notifyCommented(issue, author);
+        List<User> mentioned = mentionable(project, author, MentionParser.userIds(comment.getBody()));
+        notificationService.notifyCommented(issue, author, mentioned);
         return mapper.toCommentResponse(comment);
     }
 
@@ -69,18 +76,27 @@ public class CommentServiceImpl implements CommentService {
     @Transactional
     public CommentResponse update(String slug, UUID projectId, UUID issueId, UUID commentId, UUID userId,
                                   CommentRequest request) {
-        Comment comment = findComment(findIssue(slug, projectId, issueId), commentId);
+        Project project = lookup.project(slug, projectId);
+        Issue issue = findIssue(project, issueId);
+        Comment comment = findComment(issue, commentId);
         if (!comment.getAuthor().getId().equals(userId)) {
             throw new ForbiddenException("Solo el autor puede editar el comentario");
         }
+        // Solo se avisa a quienes se mencionan por primera vez en este comentario.
+        Set<UUID> newMentions = new LinkedHashSet<>(MentionParser.userIds(request.body()));
+        newMentions.removeAll(MentionParser.userIds(comment.getBody()));
+
         comment.setBody(request.body().trim());
-        return mapper.toCommentResponse(commentRepository.saveAndFlush(comment));
+        CommentResponse response = mapper.toCommentResponse(commentRepository.saveAndFlush(comment));
+        notificationService.notifyMentioned(issue, comment.getAuthor(),
+                mentionable(project, comment.getAuthor(), newMentions));
+        return response;
     }
 
     @Override
     @Transactional
     public void delete(String slug, UUID projectId, UUID issueId, UUID commentId, UUID userId) {
-        Comment comment = findComment(findIssue(slug, projectId, issueId), commentId);
+        Comment comment = findComment(findIssue(lookup.project(slug, projectId), issueId), commentId);
         boolean isAuthor = comment.getAuthor().getId().equals(userId);
         boolean isManager = workspaceMemberRepository.findRole(slug, userId)
                 .map(WorkspaceRole::isManager)
@@ -91,8 +107,20 @@ public class CommentServiceImpl implements CommentService {
         commentRepository.delete(comment);
     }
 
-    private Issue findIssue(String slug, UUID projectId, UUID issueId) {
-        Project project = lookup.project(slug, projectId);
+    /**
+     * De los usuarios mencionados, los que pueden ver la tarea (miembros del proyecto o project managers del
+     * workspace), sin contar al autor. Los ids de personas ajenas al proyecto se ignoran.
+     */
+    private List<User> mentionable(Project project, User author, Set<UUID> mentionedIds) {
+        Set<UUID> ids = new LinkedHashSet<>(mentionedIds);
+        ids.remove(author.getId());
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        return userRepository.findMentionable(ids, project.getId(), project.getWorkspace().getId());
+    }
+
+    private Issue findIssue(Project project, UUID issueId) {
         return issueRepository.findByIdAndProjectId(issueId, project.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Tarea no encontrada"));
     }

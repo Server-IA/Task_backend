@@ -1,10 +1,13 @@
 package com.taskflow.api.mapper;
 
+import com.taskflow.api.dto.response.ChecklistItemResponse;
 import com.taskflow.api.dto.response.IssueResponse;
 import com.taskflow.api.dto.response.IssueSummaryResponse;
 import com.taskflow.api.dto.response.PlanningRefResponse;
+import com.taskflow.api.dto.response.RelatedIssueResponse;
 import com.taskflow.api.entity.Cycle;
 import com.taskflow.api.entity.Issue;
+import com.taskflow.api.entity.IssueChecklistItem;
 import com.taskflow.api.entity.ProjectModule;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
@@ -20,6 +23,11 @@ public interface IssueMapper {
     IssueResponse toResponse(Issue issue);
 
     IssueSummaryResponse toSummary(Issue issue);
+
+    /** La otra tarea de una dependencia. Necesita su estado y su proyecto cargados. */
+    RelatedIssueResponse toRelated(Issue issue);
+
+    ChecklistItemResponse toChecklistItemResponse(IssueChecklistItem item);
 
     PlanningRefResponse toRef(Cycle cycle);
 

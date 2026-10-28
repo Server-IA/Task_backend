@@ -15,6 +15,7 @@ import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.ProjectMapper;
+import com.taskflow.api.repository.IssueTemplateRepository;
 import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.ProjectRepository;
 import com.taskflow.api.repository.StateRepository;
@@ -36,6 +37,7 @@ public class ProjectServiceImpl implements ProjectService {
     private final ProjectMemberRepository projectMemberRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
     private final StateRepository stateRepository;
+    private final IssueTemplateRepository templateRepository;
     private final ProjectAccess projectAccess;
     private final ResourceLookup lookup;
     private final ProjectMapper projectMapper;
@@ -64,6 +66,7 @@ public class ProjectServiceImpl implements ProjectService {
         projectRepository.save(project);
 
         stateRepository.saveAll(defaultStates(project));
+        templateRepository.saveAll(DefaultTemplates.forProject(project));
         projectMemberRepository.save(new ProjectMember(project, lookup.user(userId)));
         return projectMapper.toResponse(project);
     }

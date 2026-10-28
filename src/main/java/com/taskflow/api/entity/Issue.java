@@ -104,6 +104,28 @@ public class Issue extends BaseEntity {
             + "where s.parent_id = id and st.state_group = 'COMPLETED')")
     private int completedSubIssueCount;
 
+    /** Tareas que bloquean a esta y siguen abiertas (ni completadas ni canceladas). */
+    @Formula("(select count(*) from issue_relations r join issues b on b.id = r.source_issue_id "
+            + "join states st on st.id = b.state_id "
+            + "where r.target_issue_id = id and r.type = 'BLOCKS' "
+            + "and st.state_group not in ('COMPLETED', 'CANCELLED'))")
+    private int blockedByCount;
+
+    /** Pasos de la checklist ({@code CHECK}). */
+    @Formula("(select count(*) from issue_checklist_items c where c.issue_id = id and c.kind = 'CHECK')")
+    private int checklistTotal;
+
+    @Formula("(select count(*) from issue_checklist_items c where c.issue_id = id and c.kind = 'CHECK' and c.done)")
+    private int checklistDone;
+
+    /** Criterios de aceptación ({@code CRITERION}). */
+    @Formula("(select count(*) from issue_checklist_items c where c.issue_id = id and c.kind = 'CRITERION')")
+    private int criteriaTotal;
+
+    @Formula("(select count(*) from issue_checklist_items c "
+            + "where c.issue_id = id and c.kind = 'CRITERION' and c.done)")
+    private int criteriaDone;
+
     /** Código legible, por ejemplo {@code WEB-12}. Se calcula para que siga al identificador del proyecto. */
     public String getCode() {
         return project.getIdentifier() + "-" + sequenceId;
