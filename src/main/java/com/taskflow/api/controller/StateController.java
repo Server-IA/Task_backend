@@ -38,23 +38,27 @@ public class StateController {
         return stateService.getStates(slug, projectId);
     }
 
-    @Operation(summary = "Crear estado")
+    @Operation(summary = "Crear estado (project manager)")
     @PostMapping
+    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     @ResponseStatus(HttpStatus.CREATED)
     public StateResponse create(@PathVariable String slug, @PathVariable UUID projectId,
                                 @Valid @RequestBody CreateStateRequest request) {
         return stateService.create(slug, projectId, request);
     }
 
-    @Operation(summary = "Editar estado")
+    @Operation(summary = "Editar o reordenar estado (project manager)")
     @PatchMapping("/{stateId}")
+    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     public StateResponse update(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID stateId,
                                 @Valid @RequestBody UpdateStateRequest request) {
         return stateService.update(slug, projectId, stateId, request);
     }
 
-    @Operation(summary = "Eliminar estado", description = "No se puede si tiene issues o si es el único estado.")
+    @Operation(summary = "Eliminar estado (project manager)",
+            description = "No se puede si tiene tareas o si es el único estado.")
     @DeleteMapping("/{stateId}")
+    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID stateId) {
         stateService.delete(slug, projectId, stateId);

@@ -10,9 +10,7 @@ import com.taskflow.api.entity.ProjectMember;
 import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.Workspace;
-import com.taskflow.api.entity.WorkspaceMember;
 import com.taskflow.api.entity.enums.StateGroup;
-import com.taskflow.api.entity.enums.WorkspaceRole;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ResourceNotFoundException;
@@ -38,6 +36,7 @@ public class ProjectServiceImpl implements ProjectService {
     private final ProjectMemberRepository projectMemberRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
     private final StateRepository stateRepository;
+    private final ProjectAccess projectAccess;
     private final ResourceLookup lookup;
     private final ProjectMapper projectMapper;
 
@@ -45,14 +44,7 @@ public class ProjectServiceImpl implements ProjectService {
     @Transactional(readOnly = true)
     public List<ProjectResponse> getProjects(String slug, UUID userId) {
         Workspace workspace = lookup.workspace(slug);
-        boolean isAdmin = workspaceMemberRepository.findByWorkspaceIdAndUserId(workspace.getId(), userId)
-                .map(WorkspaceMember::getRole)
-                .map(WorkspaceRole::isAdmin)
-                .orElse(false);
-        List<Project> projects = isAdmin
-                ? projectRepository.findAllByWorkspaceIdOrderByName(workspace.getId())
-                : projectRepository.findAllByWorkspaceIdAndMember(workspace.getId(), userId);
-        return projects.stream().map(projectMapper::toResponse).toList();
+        return projectAccess.projects(workspace, userId).stream().map(projectMapper::toResponse).toList();
     }
 
     @Override

@@ -18,6 +18,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -51,30 +52,27 @@ class WorkspaceSecurityTest {
     }
 
     @Test
-    void ownerTieneTodosLosPermisos() {
+    void soloExistenLosRolesProjectManagerYMiembro() {
+        assertThat(WorkspaceRole.values()).containsExactly(WorkspaceRole.OWNER, WorkspaceRole.MEMBER);
+        assertThat(WorkspaceRole.OWNER.isManager()).isTrue();
+        assertThat(WorkspaceRole.MEMBER.isManager()).isFalse();
+    }
+
+    @Test
+    void projectManagerTieneTodosLosPermisos() {
         when(memberRepository.findRole(SLUG, userId)).thenReturn(Optional.of(WorkspaceRole.OWNER));
 
         assertThat(workspaceSecurity.isMember(SLUG)).isTrue();
-        assertThat(workspaceSecurity.isAdmin(SLUG)).isTrue();
-        assertThat(workspaceSecurity.isOwner(SLUG)).isTrue();
+        assertThat(workspaceSecurity.isManager(SLUG)).isTrue();
+        assertThat(workspaceSecurity.canManageProject(SLUG, projectId)).isTrue();
     }
 
     @Test
-    void adminAdministraPeroNoEsDueno() {
-        when(memberRepository.findRole(SLUG, userId)).thenReturn(Optional.of(WorkspaceRole.ADMIN));
-
-        assertThat(workspaceSecurity.isMember(SLUG)).isTrue();
-        assertThat(workspaceSecurity.isAdmin(SLUG)).isTrue();
-        assertThat(workspaceSecurity.isOwner(SLUG)).isFalse();
-    }
-
-    @Test
-    void memberSoloEsMiembro() {
+    void miembroNoGestionaElWorkspace() {
         when(memberRepository.findRole(SLUG, userId)).thenReturn(Optional.of(WorkspaceRole.MEMBER));
 
         assertThat(workspaceSecurity.isMember(SLUG)).isTrue();
-        assertThat(workspaceSecurity.isAdmin(SLUG)).isFalse();
-        assertThat(workspaceSecurity.isOwner(SLUG)).isFalse();
+        assertThat(workspaceSecurity.isManager(SLUG)).isFalse();
     }
 
     @Test
@@ -82,7 +80,8 @@ class WorkspaceSecurityTest {
         when(memberRepository.findRole(SLUG, userId)).thenReturn(Optional.empty());
 
         assertThat(workspaceSecurity.isMember(SLUG)).isFalse();
-        assertThat(workspaceSecurity.isAdmin(SLUG)).isFalse();
+        assertThat(workspaceSecurity.isManager(SLUG)).isFalse();
+        assertThat(workspaceSecurity.canManageProject(SLUG, projectId)).isFalse();
     }
 
     @Test
@@ -90,19 +89,20 @@ class WorkspaceSecurityTest {
         SecurityContextHolder.clearContext();
 
         assertThat(workspaceSecurity.isMember(SLUG)).isFalse();
+        assertThat(workspaceSecurity.isManager(SLUG)).isFalse();
         verifyNoInteractions(memberRepository);
     }
 
     @Test
-    void adminAccedeATodosLosProyectosSinSerMiembro() {
-        when(memberRepository.findRole(SLUG, userId)).thenReturn(Optional.of(WorkspaceRole.ADMIN));
+    void projectManagerAccedeATodosLosProyectosSinSerMiembro() {
+        when(memberRepository.findRole(SLUG, userId)).thenReturn(Optional.of(WorkspaceRole.OWNER));
 
         assertThat(workspaceSecurity.canAccessProject(SLUG, projectId)).isTrue();
         verifyNoInteractions(projectMemberRepository);
     }
 
     @Test
-    void memberSoloAccedeASusProyectos() {
+    void miembroSoloAccedeASusProyectos() {
         when(memberRepository.findRole(SLUG, userId)).thenReturn(Optional.of(WorkspaceRole.MEMBER));
         when(projectMemberRepository.existsByProjectIdAndUserId(projectId, userId)).thenReturn(false);
 
@@ -110,6 +110,16 @@ class WorkspaceSecurityTest {
 
         when(projectMemberRepository.existsByProjectIdAndUserId(projectId, userId)).thenReturn(true);
         assertThat(workspaceSecurity.canAccessProject(SLUG, projectId)).isTrue();
+    }
+
+    @Test
+    void miembroDelProyectoNoPuedeConfigurarlo() {
+        when(memberRepository.findRole(SLUG, userId)).thenReturn(Optional.of(WorkspaceRole.MEMBER));
+        lenient().when(projectMemberRepository.existsByProjectIdAndUserId(projectId, userId)).thenReturn(true);
+
+        assertThat(workspaceSecurity.canAccessProject(SLUG, projectId)).isTrue();
+        // Estados, etiquetas, miembros, ciclos, módulos, editar o borrar el proyecto: solo el project manager.
+        assertThat(workspaceSecurity.canManageProject(SLUG, projectId)).isFalse();
     }
 
     @Test

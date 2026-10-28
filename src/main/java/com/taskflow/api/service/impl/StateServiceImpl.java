@@ -5,6 +5,7 @@ import com.taskflow.api.dto.request.UpdateStateRequest;
 import com.taskflow.api.dto.response.StateResponse;
 import com.taskflow.api.entity.Project;
 import com.taskflow.api.entity.State;
+import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ResourceNotFoundException;
@@ -16,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -70,7 +72,13 @@ public class StateServiceImpl implements StateService {
         if (request.color() != null) {
             state.setColor(request.color().toUpperCase(Locale.ROOT));
         }
-        if (request.group() != null) {
+        if (request.group() != null && request.group() != state.getStateGroup()) {
+            // Las tareas del estado cambian de grupo con él: se mantiene su fecha de completado.
+            if (request.group() == StateGroup.COMPLETED) {
+                issueRepository.markCompletedInState(state.getId(), Instant.now());
+            } else if (state.getStateGroup() == StateGroup.COMPLETED) {
+                issueRepository.clearCompletedInState(state.getId());
+            }
             state.setStateGroup(request.group());
         }
         if (request.position() != null) {

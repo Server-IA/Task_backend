@@ -25,7 +25,8 @@ public interface IssueService {
     /** Cambia el estado y la posición en el Kanban actualizando solo la fila del issue. */
     IssueResponse move(String slug, UUID projectId, UUID issueId, UUID userId, MoveIssueRequest request);
 
-    void delete(String slug, UUID projectId, UUID issueId);
+    /** Solo el project manager o quien creó la tarea pueden eliminarla (403 si no). */
+    void delete(String slug, UUID projectId, UUID issueId, UUID userId);
 
     List<IssueResponse> getSubIssues(String slug, UUID projectId, UUID issueId);
 }

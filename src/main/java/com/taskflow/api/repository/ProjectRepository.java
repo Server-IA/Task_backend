@@ -27,6 +27,16 @@ public interface ProjectRepository extends JpaRepository<Project, UUID> {
     List<Project> findAllByWorkspaceIdAndMember(@Param("workspaceId") UUID workspaceId,
                                                 @Param("userId") UUID userId);
 
+    @Query("select p.id from Project p where p.workspace.id = :workspaceId")
+    List<UUID> findIdsByWorkspaceId(@Param("workspaceId") UUID workspaceId);
+
+    @Query("""
+            select pm.project.id from ProjectMember pm
+            where pm.user.id = :userId and pm.project.workspace.id = :workspaceId
+            """)
+    List<UUID> findIdsByWorkspaceIdAndMember(@Param("workspaceId") UUID workspaceId,
+                                             @Param("userId") UUID userId);
+
     boolean existsByWorkspaceIdAndIdentifier(UUID workspaceId, String identifier);
 
     /**

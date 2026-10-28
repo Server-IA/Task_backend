@@ -30,6 +30,9 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class WorkspaceServiceImpl implements WorkspaceService {
 
+    static final String LAST_MANAGER_MESSAGE =
+            "El workspace debe tener al menos un project manager: asigna ese rol a otra persona primero";
+
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository memberRepository;
     private final ProjectMemberRepository projectMemberRepository;
@@ -108,12 +111,13 @@ public class WorkspaceServiceImpl implements WorkspaceService {
     @Override
     @Transactional
     public WorkspaceMemberResponse updateMemberRole(String slug, UUID memberUserId, UpdateMemberRoleRequest request) {
-        if (request.role() == WorkspaceRole.OWNER) {
-            throw new BadRequestException("No se puede asignar el rol OWNER");
+        Workspace workspace = lockWorkspace(slug);
+        WorkspaceMember member = findMember(workspace, memberUserId);
+        if (member.getRole() == request.role()) {
+            return workspaceMapper.toMemberResponse(member);
         }
-        WorkspaceMember member = findMember(lookup.workspace(slug), memberUserId);
-        if (member.getRole() == WorkspaceRole.OWNER) {
-            throw new ForbiddenException("No se puede cambiar el rol del dueño del workspace");
+        if (member.getRole().isManager()) {
+            handOverIfLastManager(workspace, memberUserId);
         }
         member.setRole(request.role());
         return workspaceMapper.toMemberResponse(member);
@@ -122,16 +126,38 @@ public class WorkspaceServiceImpl implements WorkspaceService {
     @Override
     @Transactional
     public void removeMember(String slug, UUID actorId, UUID memberUserId) {
-        Workspace workspace = lookup.workspace(slug);
-        WorkspaceMember member = findMember(workspace, memberUserId);
-        if (member.getRole() == WorkspaceRole.OWNER) {
-            throw new ForbiddenException("El dueño no puede salir ni ser quitado del workspace");
+        Workspace workspace = lockWorkspace(slug);
+        boolean leaving = actorId.equals(memberUserId);
+        if (!leaving && !roleOf(workspace, actorId).isManager()) {
+            throw new ForbiddenException("Solo el project manager puede quitar miembros");
         }
-        if (!actorId.equals(memberUserId) && !roleOf(workspace, actorId).isAdmin()) {
-            throw new ForbiddenException("Solo un administrador puede quitar miembros");
+        WorkspaceMember member = findMember(workspace, memberUserId);
+        if (member.getRole().isManager()) {
+            handOverIfLastManager(workspace, memberUserId);
         }
         projectMemberRepository.deleteAllInWorkspace(workspace.getId(), memberUserId);
         memberRepository.delete(member);
+    }
+
+    /**
+     * Antes de que un project manager deje de serlo (o salga), comprueba que quede otro: el workspace nunca
+     * se queda sin project manager. Si era el dueño registrado del workspace, el más antiguo de los
+     * restantes pasa a serlo.
+     */
+    private void handOverIfLastManager(Workspace workspace, UUID managerUserId) {
+        List<WorkspaceMember> otherManagers = memberRepository.findOthersWithRole(
+                workspace.getId(), WorkspaceRole.OWNER, managerUserId);
+        if (otherManagers.isEmpty()) {
+            throw new ConflictException(LAST_MANAGER_MESSAGE);
+        }
+        if (workspace.getOwner().getId().equals(managerUserId)) {
+            workspace.setOwner(otherManagers.getFirst().getUser());
+        }
+    }
+
+    private Workspace lockWorkspace(String slug) {
+        return workspaceRepository.findBySlugForUpdate(slug)
+                .orElseThrow(() -> new ResourceNotFoundException("Workspace no encontrado"));
     }
 
     private WorkspaceRole roleOf(Workspace workspace, UUID userId) {

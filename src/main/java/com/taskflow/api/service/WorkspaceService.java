@@ -23,8 +23,12 @@ public interface WorkspaceService {
 
     List<WorkspaceMemberResponse> getMembers(String slug);
 
+    /** Cambia entre project manager (OWNER) y MEMBER; nunca deja el workspace sin project manager (409). */
     WorkspaceMemberResponse updateMemberRole(String slug, UUID memberUserId, UpdateMemberRoleRequest request);
 
-    /** Un admin puede quitar a otros miembros; cualquier miembro puede salirse (salvo el dueño). */
+    /**
+     * El project manager puede quitar a otros miembros y cualquier miembro puede salirse, salvo el último
+     * project manager (409).
+     */
     void removeMember(String slug, UUID actorId, UUID memberUserId);
 }

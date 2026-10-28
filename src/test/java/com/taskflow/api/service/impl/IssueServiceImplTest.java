@@ -9,7 +9,9 @@ import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.enums.IssuePriority;
 import com.taskflow.api.entity.enums.StateGroup;
+import com.taskflow.api.entity.enums.WorkspaceRole;
 import com.taskflow.api.exception.BadRequestException;
+import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.mapper.IssueMapper;
 import com.taskflow.api.repository.IssueRepository;
 import com.taskflow.api.repository.LabelRepository;
@@ -17,6 +19,7 @@ import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.ProjectRepository;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.repository.UserRepository;
+import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.service.NotificationService;
 import com.taskflow.api.util.SortOrderCalculator;
@@ -30,6 +33,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -45,6 +49,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -64,6 +69,8 @@ class IssueServiceImplTest {
     private LabelRepository labelRepository;
     @Mock
     private UserRepository userRepository;
+    @Mock
+    private WorkspaceMemberRepository workspaceMemberRepository;
     @Mock
     private ActivityService activityService;
     @Mock
@@ -250,6 +257,145 @@ class IssueServiceImplTest {
             assertThatThrownBy(() -> issueService.move(SLUG, project.getId(), moving.getId(), author.getId(),
                     new MoveIssueRequest(done.getId(), above.getId(), below.getId())))
                     .isInstanceOf(BadRequestException.class);
+        }
+    }
+
+    @Nested
+    class CompletedAt {
+
+        private UpdateIssueRequest updateState(UUID stateId) {
+            return new UpdateIssueRequest(null, null, stateId, null, null, null, null, null, null, null, null, null);
+        }
+
+        @BeforeEach
+        void stubs() {
+            lenient().when(lookup.user(author.getId())).thenReturn(author);
+            lenient().when(issueRepository.saveAndFlush(any(Issue.class)))
+                    .thenAnswer(invocation -> invocation.getArgument(0));
+            lenient().when(stateRepository.findByIdAndProjectId(done.getId(), project.getId()))
+                    .thenReturn(Optional.of(done));
+            lenient().when(stateRepository.findByIdAndProjectId(todo.getId(), project.getId()))
+                    .thenReturn(Optional.of(todo));
+        }
+
+        @Test
+        void unaTareaCreadaEnUnEstadoCompletadoQuedaCompletada() {
+            CreateIssueRequest request = new CreateIssueRequest("Tarea", null, done.getId(), null, null, null, null,
+                    null, null);
+
+            issueService.create(SLUG, project.getId(), author.getId(), request);
+
+            ArgumentCaptor<Issue> saved = ArgumentCaptor.forClass(Issue.class);
+            verify(issueRepository).save(saved.capture());
+            assertThat(saved.getValue().getCompletedAt()).isNotNull();
+        }
+
+        @Test
+        void alEditarSeFijaAlEntrarAlGrupoCompletadoYSeBorraAlSalir() {
+            Issue issue = issue(todo, 1);
+            Instant before = Instant.now();
+
+            issueService.update(SLUG, project.getId(), issue.getId(), author.getId(), updateState(done.getId()));
+            assertThat(issue.getCompletedAt()).isNotNull().isAfterOrEqualTo(before);
+
+            issueService.update(SLUG, project.getId(), issue.getId(), author.getId(), updateState(todo.getId()));
+            assertThat(issue.getCompletedAt()).isNull();
+        }
+
+        @Test
+        void alMoverEnElKanbanSeFijaYSeBorra() {
+            Issue issue = issue(todo, 1);
+
+            issueService.move(SLUG, project.getId(), issue.getId(), author.getId(),
+                    new MoveIssueRequest(done.getId(), null, null));
+            assertThat(issue.getCompletedAt()).isNotNull();
+
+            issueService.move(SLUG, project.getId(), issue.getId(), author.getId(),
+                    new MoveIssueRequest(todo.getId(), null, null));
+            assertThat(issue.getCompletedAt()).isNull();
+        }
+
+        @Test
+        void moverEntreDosEstadosCompletadosConservaLaFecha() {
+            State deployed = state("Deployed", StateGroup.COMPLETED);
+            when(stateRepository.findByIdAndProjectId(deployed.getId(), project.getId()))
+                    .thenReturn(Optional.of(deployed));
+            Issue issue = issue(done, 1);
+            Instant completedAt = Instant.parse("2026-10-20T15:00:00Z");
+            issue.setCompletedAt(completedAt);
+
+            issueService.move(SLUG, project.getId(), issue.getId(), author.getId(),
+                    new MoveIssueRequest(deployed.getId(), null, null));
+
+            assertThat(issue.getCompletedAt()).isEqualTo(completedAt);
+        }
+
+        @Test
+        void cambiarOtrosCamposNoLaToca() {
+            Issue issue = issue(done, 1);
+            Instant completedAt = Instant.parse("2026-10-20T15:00:00Z");
+            issue.setCompletedAt(completedAt);
+            UpdateIssueRequest priorityOnly = new UpdateIssueRequest(null, null, null, IssuePriority.HIGH, null,
+                    null, null, null, null, null, null, null);
+
+            issueService.update(SLUG, project.getId(), issue.getId(), author.getId(), priorityOnly);
+
+            assertThat(issue.getCompletedAt()).isEqualTo(completedAt);
+        }
+
+    }
+
+    @Nested
+    class Delete {
+
+        private User creator;
+        private Issue issue;
+
+        @BeforeEach
+        void setUpIssue() {
+            creator = new User();
+            creator.setId(UUID.randomUUID());
+            issue = issue(todo, 1);
+            issue.setCreatedBy(creator);
+        }
+
+        @Test
+        void quienCreoLaTareaPuedeEliminarla() {
+            issueService.delete(SLUG, project.getId(), issue.getId(), creator.getId());
+
+            verify(issueRepository).delete(issue);
+            verifyNoInteractions(workspaceMemberRepository);
+        }
+
+        @Test
+        void elProjectManagerPuedeEliminarCualquierTarea() {
+            UUID pmId = UUID.randomUUID();
+            when(workspaceMemberRepository.findRole(SLUG, pmId)).thenReturn(Optional.of(WorkspaceRole.OWNER));
+
+            issueService.delete(SLUG, project.getId(), issue.getId(), pmId);
+
+            verify(issueRepository).delete(issue);
+        }
+
+        @Test
+        void otroMiembroRecibe403() {
+            UUID memberId = UUID.randomUUID();
+            when(workspaceMemberRepository.findRole(SLUG, memberId)).thenReturn(Optional.of(WorkspaceRole.MEMBER));
+
+            assertThatThrownBy(() -> issueService.delete(SLUG, project.getId(), issue.getId(), memberId))
+                    .isInstanceOf(ForbiddenException.class)
+                    .hasMessage("Solo el project manager o quien creó la tarea puede eliminarla");
+            verify(issueRepository, never()).delete(any(Issue.class));
+        }
+
+        @Test
+        void unaTareaSinCreadorSoloLaEliminaElProjectManager() {
+            issue.setCreatedBy(null);
+            UUID memberId = UUID.randomUUID();
+            when(workspaceMemberRepository.findRole(SLUG, memberId)).thenReturn(Optional.of(WorkspaceRole.MEMBER));
+
+            assertThatThrownBy(() -> issueService.delete(SLUG, project.getId(), issue.getId(), memberId))
+                    .isInstanceOf(ForbiddenException.class);
         }
     }
 

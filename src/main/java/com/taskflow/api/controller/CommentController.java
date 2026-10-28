@@ -57,7 +57,7 @@ public class CommentController {
         return commentService.update(slug, projectId, issueId, commentId, me.getId(), request);
     }
 
-    @Operation(summary = "Borrar comentario (autor o ADMIN)")
+    @Operation(summary = "Borrar comentario (autor o project manager)")
     @DeleteMapping("/{commentId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID issueId,

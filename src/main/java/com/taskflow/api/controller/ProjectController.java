@@ -36,17 +36,17 @@ public class ProjectController {
     private final ProjectService projectService;
 
     @Operation(summary = "Listar proyectos",
-            description = "Los ADMIN ven todos los proyectos; los MEMBER, solo aquellos de los que son miembros.")
+            description = "El project manager ve todos los proyectos; los MEMBER, solo aquellos de los que son miembros.")
     @GetMapping
     @PreAuthorize("@workspaceSecurity.isMember(#slug)")
     public List<ProjectResponse> getProjects(@PathVariable String slug, @AuthenticationPrincipal UserPrincipal me) {
         return projectService.getProjects(slug, me.getId());
     }
 
-    @Operation(summary = "Crear proyecto",
+    @Operation(summary = "Crear proyecto (project manager)",
             description = "Crea los estados por defecto (Backlog, Todo, In Progress, Done, Cancelled).")
     @PostMapping
-    @PreAuthorize("@workspaceSecurity.isMember(#slug)")
+    @PreAuthorize("@workspaceSecurity.isManager(#slug)")
     @ResponseStatus(HttpStatus.CREATED)
     public ProjectResponse create(@PathVariable String slug, @AuthenticationPrincipal UserPrincipal me,
                                   @Valid @RequestBody CreateProjectRequest request) {
@@ -60,17 +60,17 @@ public class ProjectController {
         return projectService.get(slug, projectId);
     }
 
-    @Operation(summary = "Editar proyecto")
+    @Operation(summary = "Editar proyecto (project manager)")
     @PatchMapping("/{projectId}")
-    @PreAuthorize("@workspaceSecurity.canAccessProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     public ProjectResponse update(@PathVariable String slug, @PathVariable UUID projectId,
                                   @Valid @RequestBody UpdateProjectRequest request) {
         return projectService.update(slug, projectId, request);
     }
 
-    @Operation(summary = "Eliminar proyecto (ADMIN del workspace)")
+    @Operation(summary = "Eliminar proyecto (project manager)")
     @DeleteMapping("/{projectId}")
-    @PreAuthorize("@workspaceSecurity.isAdmin(#slug)")
+    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable String slug, @PathVariable UUID projectId) {
         projectService.delete(slug, projectId);
@@ -83,18 +83,18 @@ public class ProjectController {
         return projectService.getMembers(slug, projectId);
     }
 
-    @Operation(summary = "Agregar miembro al proyecto", description = "Debe ser miembro del workspace.")
+    @Operation(summary = "Agregar miembro al proyecto (project manager)", description = "Debe ser miembro del workspace.")
     @PostMapping("/{projectId}/members")
-    @PreAuthorize("@workspaceSecurity.canAccessProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     @ResponseStatus(HttpStatus.CREATED)
     public ProjectMemberResponse addMember(@PathVariable String slug, @PathVariable UUID projectId,
                                            @Valid @RequestBody AddProjectMemberRequest request) {
         return projectService.addMember(slug, projectId, request);
     }
 
-    @Operation(summary = "Quitar miembro del proyecto")
+    @Operation(summary = "Quitar miembro del proyecto (project manager)")
     @DeleteMapping("/{projectId}/members/{userId}")
-    @PreAuthorize("@workspaceSecurity.canAccessProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void removeMember(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID userId) {
         projectService.removeMember(slug, projectId, userId);

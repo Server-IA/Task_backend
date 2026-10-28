@@ -1,5 +1,6 @@
 package com.taskflow.api.mapper;
 
+import com.taskflow.api.dto.response.ActivityFeedItemResponse;
 import com.taskflow.api.dto.response.ActivityResponse;
 import com.taskflow.api.dto.response.CommentResponse;
 import com.taskflow.api.dto.response.NotificationIssueResponse;
@@ -17,6 +18,10 @@ public interface CollaborationMapper {
     CommentResponse toCommentResponse(Comment comment);
 
     ActivityResponse toActivityResponse(IssueActivity activity);
+
+    /** Necesita la tarea y su proyecto cargados (el código de la tarea usa el identificador del proyecto). */
+    @Mapping(target = "project", source = "issue.project")
+    ActivityFeedItemResponse toFeedItem(IssueActivity activity);
 
     NotificationResponse toNotificationResponse(Notification notification);
 

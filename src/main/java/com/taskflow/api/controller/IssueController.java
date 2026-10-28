@@ -85,11 +85,13 @@ public class IssueController {
         return issueService.move(slug, projectId, issueId, me.getId(), request);
     }
 
-    @Operation(summary = "Eliminar issue", description = "Sus sub-issues se conservan sin padre.")
+    @Operation(summary = "Eliminar issue (project manager o quien la creó)",
+            description = "Sus sub-issues se conservan sin padre. Cualquier otro miembro recibe 403.")
     @DeleteMapping("/{issueId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID issueId) {
-        issueService.delete(slug, projectId, issueId);
+    public void delete(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID issueId,
+                       @AuthenticationPrincipal UserPrincipal me) {
+        issueService.delete(slug, projectId, issueId, me.getId());
     }
 
     @Operation(summary = "Sub-issues")

@@ -11,7 +11,7 @@ import java.util.UUID;
 
 public interface ProjectService {
 
-    /** Los admins del workspace ven todos los proyectos; los demás, solo aquellos de los que son miembros. */
+    /** El project manager ve todos los proyectos; los demás, solo aquellos de los que son miembros. */
     List<ProjectResponse> getProjects(String slug, UUID userId);
 
     /** Crea el proyecto con sus estados por defecto y agrega al creador como miembro. */

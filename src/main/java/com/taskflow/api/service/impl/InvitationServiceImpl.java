@@ -44,9 +44,6 @@ public class InvitationServiceImpl implements InvitationService {
     @Override
     @Transactional
     public InvitationResponse invite(String slug, UUID inviterId, InviteMemberRequest request) {
-        if (request.role() == WorkspaceRole.OWNER) {
-            throw new BadRequestException("Solo se puede invitar con rol ADMIN o MEMBER");
-        }
         Workspace workspace = lookup.workspace(slug);
         User inviter = lookup.user(inviterId);
         String email = request.email().trim().toLowerCase(Locale.ROOT);
@@ -61,7 +58,8 @@ public class InvitationServiceImpl implements InvitationService {
         WorkspaceInvitation invitation = new WorkspaceInvitation();
         invitation.setWorkspace(workspace);
         invitation.setEmail(email);
-        invitation.setRole(request.role());
+        // Siempre entra como miembro; el project manager puede promoverlo después.
+        invitation.setRole(WorkspaceRole.MEMBER);
         invitation.setInvitedBy(inviter);
         invitation.setTokenHash(TokenUtils.sha256(rawToken));
         invitation.setExpiresAt(Instant.now().plus(Duration.ofDays(properties.tokens().invitationDays())));

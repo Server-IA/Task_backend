@@ -16,6 +16,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.Formula;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.Set;
@@ -66,6 +67,13 @@ public class Issue extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "created_by_id")
     private User createdBy;
+
+    /**
+     * Cuándo entró al grupo de estados COMPLETED; {@code null} mientras no esté completado. Se fija al entrar
+     * al grupo y se borra al salir (moverlo entre dos estados completados no lo cambia).
+     */
+    @Column(name = "completed_at")
+    private Instant completedAt;
 
     @ManyToMany
     @JoinTable(name = "issue_assignees",

@@ -13,8 +13,11 @@ import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.enums.ActivityField;
 import com.taskflow.api.entity.enums.IssuePriority;
+import com.taskflow.api.entity.enums.StateGroup;
+import com.taskflow.api.entity.enums.WorkspaceRole;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
+import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.IssueMapper;
 import com.taskflow.api.repository.IssueRepository;
@@ -24,6 +27,7 @@ import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.ProjectRepository;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.repository.UserRepository;
+import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.service.IssueService;
 import com.taskflow.api.service.NotificationService;
@@ -34,6 +38,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.Comparator;
@@ -52,12 +57,15 @@ public class IssueServiceImpl implements IssueService {
     /** Límite al recorrer la cadena de padres (protege de datos corruptos). */
     private static final int MAX_PARENT_DEPTH = 100;
 
+    static final String DELETE_FORBIDDEN_MESSAGE = "Solo el project manager o quien creó la tarea puede eliminarla";
+
     private final IssueRepository issueRepository;
     private final ProjectRepository projectRepository;
     private final ProjectMemberRepository projectMemberRepository;
     private final StateRepository stateRepository;
     private final LabelRepository labelRepository;
     private final UserRepository userRepository;
+    private final WorkspaceMemberRepository workspaceMemberRepository;
     private final ActivityService activityService;
     private final NotificationService notificationService;
     private final ResourceLookup lookup;
@@ -86,6 +94,7 @@ public class IssueServiceImpl implements IssueService {
         issue.setTitle(request.title().trim());
         issue.setDescription(blankToNull(request.description()));
         issue.setState(state);
+        updateCompletedAt(issue, null, Instant.now());
         issue.setPriority(request.priority() != null ? request.priority() : IssuePriority.NONE);
         if (request.parentId() != null) {
             issue.setParent(findReferencedIssue(project, request.parentId(), "La tarea padre no existe en este proyecto"));
@@ -141,7 +150,9 @@ public class IssueServiceImpl implements IssueService {
         if (request.stateId() != null && !request.stateId().equals(issue.getState().getId())) {
             State state = findState(project, request.stateId());
             changes.track(ActivityField.STATE, issue.getState().getName(), state.getName());
+            StateGroup previousGroup = issue.getState().getStateGroup();
             issue.setState(state);
+            updateCompletedAt(issue, previousGroup, Instant.now());
             issue.setSortOrder(SortOrderCalculator.endOfColumn(issueRepository.findMaxSortOrder(state.getId())));
         }
         if (request.priority() != null) {
@@ -221,16 +232,23 @@ public class IssueServiceImpl implements IssueService {
                 above != null ? above.getSortOrder() : null,
                 below != null ? below.getSortOrder() : null,
                 maxInColumn));
+        StateGroup previousGroup = issue.getState().getStateGroup();
         issue.setState(target);
+        updateCompletedAt(issue, previousGroup, Instant.now());
         return issueMapper.toResponse(issueRepository.saveAndFlush(issue));
     }
 
     @Override
     @Transactional
-    public void delete(String slug, UUID projectId, UUID issueId) {
+    public void delete(String slug, UUID projectId, UUID issueId, UUID userId) {
         Project project = lookup.project(slug, projectId);
+        Issue issue = findIssue(project, issueId);
+        boolean isCreator = issue.getCreatedBy() != null && issue.getCreatedBy().getId().equals(userId);
+        if (!isCreator && !isManager(slug, userId)) {
+            throw new ForbiddenException(DELETE_FORBIDDEN_MESSAGE);
+        }
         // Los sub-issues no se borran: la base de datos les quita el padre (ON DELETE SET NULL).
-        issueRepository.delete(findIssue(project, issueId));
+        issueRepository.delete(issue);
     }
 
     @Override
@@ -241,6 +259,26 @@ public class IssueServiceImpl implements IssueService {
         return issueRepository.findAllByParentIdOrderBySequenceIdAsc(issue.getId()).stream()
                 .map(issueMapper::toResponse)
                 .toList();
+    }
+
+    /**
+     * Mantiene {@code completedAt} tras un cambio de estado: se fija al entrar al grupo COMPLETED y se borra
+     * al salir de él. Moverse entre dos estados completados conserva la fecha original.
+     *
+     * @param previousGroup grupo del estado anterior, o {@code null} si la tarea es nueva
+     */
+    static void updateCompletedAt(Issue issue, StateGroup previousGroup, Instant now) {
+        if (issue.getState().getStateGroup() != StateGroup.COMPLETED) {
+            issue.setCompletedAt(null);
+        } else if (previousGroup != StateGroup.COMPLETED || issue.getCompletedAt() == null) {
+            issue.setCompletedAt(now);
+        }
+    }
+
+    private boolean isManager(String slug, UUID userId) {
+        return workspaceMemberRepository.findRole(slug, userId)
+                .map(WorkspaceRole::isManager)
+                .orElse(false);
     }
 
     /** Incrementa el contador del proyecto en la misma transacción y devuelve el nuevo valor. */

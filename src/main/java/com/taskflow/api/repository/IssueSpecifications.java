@@ -53,10 +53,34 @@ public final class IssueSpecifications {
                 predicates.add(root.get("id").in(issuesOf(query, ProjectModule.class, filter.module())));
             }
             if (filter.search() != null && !filter.search().isBlank()) {
-                predicates.add(searchPredicate(root, cb, filter.search().trim()));
+                predicates.add(searchPredicate(root, cb, filter.search().trim(), false));
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };
+    }
+
+    /**
+     * Búsqueda global: tareas de los proyectos indicados cuyo título contiene el texto o cuyo código coincide.
+     * A diferencia del filtro del listado, «WEB-12» exige también el identificador del proyecto.
+     */
+    public static Specification<Issue> searchInProjects(Collection<UUID> projectIds, String search) {
+        return (root, query, cb) -> cb.and(
+                root.get("project").get("id").in(projectIds),
+                searchPredicate(root, cb, search.trim(), true));
+    }
+
+    /** Tareas cuyo código es exactamente el indicado (por ejemplo «web-12»), en los proyectos indicados. */
+    public static Specification<Issue> codeEquals(Collection<UUID> projectIds, String code) {
+        String text = code.trim();
+        return (root, query, cb) -> cb.and(
+                root.get("project").get("id").in(projectIds),
+                cb.equal(cb.lower(root.get("project").get("identifier")), codePrefix(text)),
+                cb.equal(root.get("sequenceId"), codeNumber(text)));
+    }
+
+    /** Si el texto es un código completo con prefijo, como «WEB-12» (sin importar mayúsculas). */
+    public static boolean isFullCode(String text) {
+        return text != null && text.trim().matches(CODE_PATTERN) && text.trim().contains("-");
     }
 
     private static Subquery<UUID> issuesRelatedTo(CriteriaQuery<?> query, CriteriaBuilder cb,
@@ -77,15 +101,31 @@ public final class IssueSpecifications {
         return subquery;
     }
 
-    /** Busca en el título; si el texto parece un código («WEB-12» o «12»), también por número. */
-    private static Predicate searchPredicate(Root<Issue> root, CriteriaBuilder cb, String search) {
+    /**
+     * Busca en el título; si el texto parece un código («WEB-12» o «12»), también por número. Con
+     * {@code matchIdentifier}, un código con prefijo solo coincide en el proyecto de ese identificador.
+     */
+    private static Predicate searchPredicate(Root<Issue> root, CriteriaBuilder cb, String search,
+                                             boolean matchIdentifier) {
         String pattern = "%" + escapeLike(search.toLowerCase(Locale.ROOT)) + "%";
         Predicate byTitle = cb.like(cb.lower(root.get("title")), pattern, LIKE_ESCAPE);
         if (search.matches(CODE_PATTERN)) {
-            int sequenceId = Integer.parseInt(search.substring(search.lastIndexOf('-') + 1));
-            return cb.or(byTitle, cb.equal(root.get("sequenceId"), sequenceId));
+            Predicate byCode = cb.equal(root.get("sequenceId"), codeNumber(search));
+            if (matchIdentifier && search.contains("-")) {
+                byCode = cb.and(byCode, cb.equal(cb.lower(root.get("project").get("identifier")), codePrefix(search)));
+            }
+            return cb.or(byTitle, byCode);
         }
         return byTitle;
+    }
+
+    private static int codeNumber(String code) {
+        return Integer.parseInt(code.substring(code.lastIndexOf('-') + 1));
+    }
+
+    /** Identificador del código en minúsculas («WEB-12» → «web»). */
+    private static String codePrefix(String code) {
+        return code.substring(0, code.lastIndexOf('-')).toLowerCase(Locale.ROOT);
     }
 
     private static String escapeLike(String value) {

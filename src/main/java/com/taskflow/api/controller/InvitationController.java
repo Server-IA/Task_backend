@@ -34,25 +34,25 @@ public class InvitationController {
 
     private final InvitationService invitationService;
 
-    @Operation(summary = "Invitar por correo (ADMIN)")
+    @Operation(summary = "Invitar por correo (project manager)", description = "La persona entra como MEMBER.")
     @PostMapping("/workspaces/{slug}/invitations")
-    @PreAuthorize("@workspaceSecurity.isAdmin(#slug)")
+    @PreAuthorize("@workspaceSecurity.isManager(#slug)")
     @ResponseStatus(HttpStatus.CREATED)
     public InvitationResponse invite(@PathVariable String slug, @AuthenticationPrincipal UserPrincipal me,
                                      @Valid @RequestBody InviteMemberRequest request) {
         return invitationService.invite(slug, me.getId(), request);
     }
 
-    @Operation(summary = "Invitaciones pendientes del workspace (ADMIN)")
+    @Operation(summary = "Invitaciones pendientes del workspace (project manager)")
     @GetMapping("/workspaces/{slug}/invitations")
-    @PreAuthorize("@workspaceSecurity.isAdmin(#slug)")
+    @PreAuthorize("@workspaceSecurity.isManager(#slug)")
     public List<InvitationResponse> getPending(@PathVariable String slug) {
         return invitationService.getPending(slug);
     }
 
-    @Operation(summary = "Cancelar una invitación pendiente (ADMIN)")
+    @Operation(summary = "Cancelar una invitación pendiente (project manager)")
     @DeleteMapping("/workspaces/{slug}/invitations/{invitationId}")
-    @PreAuthorize("@workspaceSecurity.isAdmin(#slug)")
+    @PreAuthorize("@workspaceSecurity.isManager(#slug)")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void revoke(@PathVariable String slug, @PathVariable UUID invitationId) {
         invitationService.revoke(slug, invitationId);

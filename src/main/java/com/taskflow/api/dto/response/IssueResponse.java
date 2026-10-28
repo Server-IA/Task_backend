@@ -28,6 +28,8 @@ public record IssueResponse(
         int completedSubIssueCount,
         UserSummaryResponse createdBy,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        /** Cuándo se completó (entró a un estado del grupo COMPLETED); {@code null} si no está completada. */
+        Instant completedAt
 ) {
 }

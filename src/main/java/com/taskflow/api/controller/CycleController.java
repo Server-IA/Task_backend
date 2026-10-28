@@ -41,8 +41,9 @@ public class CycleController {
         return cycleService.getCycles(slug, projectId);
     }
 
-    @Operation(summary = "Crear ciclo")
+    @Operation(summary = "Crear ciclo (project manager)")
     @PostMapping
+    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     @ResponseStatus(HttpStatus.CREATED)
     public CycleResponse create(@PathVariable String slug, @PathVariable UUID projectId,
                               @Valid @RequestBody CycleRequest request) {
@@ -55,15 +56,17 @@ public class CycleController {
         return cycleService.get(slug, projectId, cycleId);
     }
 
-    @Operation(summary = "Editar ciclo")
+    @Operation(summary = "Editar ciclo (project manager)")
     @PatchMapping("/{cycleId}")
+    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     public CycleResponse update(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID cycleId,
                               @Valid @RequestBody UpdateCycleRequest request) {
         return cycleService.update(slug, projectId, cycleId, request);
     }
 
-    @Operation(summary = "Eliminar ciclo", description = "Los issues no se borran, solo se desvinculan.")
+    @Operation(summary = "Eliminar ciclo (project manager)", description = "Las tareas no se borran, solo se desvinculan.")
     @DeleteMapping("/{cycleId}")
+    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID cycleId) {
         cycleService.delete(slug, projectId, cycleId);

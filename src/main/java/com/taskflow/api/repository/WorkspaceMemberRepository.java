@@ -39,5 +39,16 @@ public interface WorkspaceMemberRepository extends JpaRepository<WorkspaceMember
 
     boolean existsByWorkspaceIdAndUserId(UUID workspaceId, UUID userId);
 
+    /** Miembros con ese rol, del más antiguo al más reciente, sin contar al usuario indicado. */
+    @Query("""
+            select m from WorkspaceMember m
+            join fetch m.user u
+            where m.workspace.id = :workspaceId and m.role = :role and u.id <> :excludedUserId
+            order by m.createdAt asc
+            """)
+    List<WorkspaceMember> findOthersWithRole(@Param("workspaceId") UUID workspaceId,
+                                             @Param("role") WorkspaceRole role,
+                                             @Param("excludedUserId") UUID excludedUserId);
+
     boolean existsByWorkspaceIdAndUserEmail(UUID workspaceId, String email);
 }

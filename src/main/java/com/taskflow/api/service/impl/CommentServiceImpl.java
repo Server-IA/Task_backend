@@ -28,8 +28,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class CommentServiceImpl implements CommentService {
 
-    /** Extracto del comentario que se guarda en el historial. */
-    private static final int ACTIVITY_EXCERPT_LENGTH = 200;
+    /** Extracto del comentario que se guarda en el historial (lo muestra el feed de actividad). */
+    static final int ACTIVITY_EXCERPT_LENGTH = 240;
 
     private final CommentRepository commentRepository;
     private final IssueRepository issueRepository;
@@ -82,11 +82,11 @@ public class CommentServiceImpl implements CommentService {
     public void delete(String slug, UUID projectId, UUID issueId, UUID commentId, UUID userId) {
         Comment comment = findComment(findIssue(slug, projectId, issueId), commentId);
         boolean isAuthor = comment.getAuthor().getId().equals(userId);
-        boolean isAdmin = workspaceMemberRepository.findRole(slug, userId)
-                .map(WorkspaceRole::isAdmin)
+        boolean isManager = workspaceMemberRepository.findRole(slug, userId)
+                .map(WorkspaceRole::isManager)
                 .orElse(false);
-        if (!isAuthor && !isAdmin) {
-            throw new ForbiddenException("Solo el autor o un administrador pueden borrar el comentario");
+        if (!isAuthor && !isManager) {
+            throw new ForbiddenException("Solo el autor o el project manager pueden borrar el comentario");
         }
         commentRepository.delete(comment);
     }

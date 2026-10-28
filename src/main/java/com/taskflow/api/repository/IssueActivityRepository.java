@@ -1,10 +1,15 @@
 package com.taskflow.api.repository;
 
 import com.taskflow.api.entity.IssueActivity;
+import com.taskflow.api.entity.enums.ActivityField;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -12,4 +17,47 @@ public interface IssueActivityRepository extends JpaRepository<IssueActivity, UU
 
     @Query("select a from IssueActivity a left join fetch a.actor where a.issue.id = :issueId order by a.createdAt asc")
     List<IssueActivity> findAllByIssueIdWithActor(@Param("issueId") UUID issueId);
+
+    /**
+     * Feed de actividad de varios proyectos, de lo más reciente a lo más antiguo, con la tarea, su proyecto y
+     * el autor ya cargados. {@code actorId} es opcional ({@code null} = cualquiera).
+     */
+    @Query(value = """
+            select a from IssueActivity a
+            join fetch a.issue i
+            join fetch i.project p
+            left join fetch a.actor
+            where p.id in :projectIds
+              and a.field in :fields
+              and (:actorId is null or a.actor.id = :actorId)
+            order by a.createdAt desc, a.id desc
+            """,
+            countQuery = """
+            select count(a) from IssueActivity a
+            where a.issue.project.id in :projectIds
+              and a.field in :fields
+              and (:actorId is null or a.actor.id = :actorId)
+            """)
+    Page<IssueActivity> findFeed(@Param("projectIds") Collection<UUID> projectIds,
+                                 @Param("fields") Collection<ActivityField> fields,
+                                 @Param("actorId") UUID actorId,
+                                 Pageable pageable);
+
+    /** Entradas del historial por proyecto desde la fecha indicada, de más a menos. */
+    @Query("""
+            select new com.taskflow.api.repository.ProjectActivityCount(p.id, p.name, p.identifier, count(a))
+            from IssueActivity a join a.issue i join i.project p
+            where p.id in :projectIds and a.createdAt >= :since
+            group by p.id, p.name, p.identifier
+            order by count(a) desc, p.name asc
+            """)
+    List<ProjectActivityCount> countByProjectSince(@Param("projectIds") Collection<UUID> projectIds,
+                                                   @Param("since") Instant since);
+
+    @Query("""
+            select count(a) from IssueActivity a
+            where a.issue.project.id in :projectIds and a.field = :field and a.createdAt >= :since
+            """)
+    long countByFieldSince(@Param("projectIds") Collection<UUID> projectIds, @Param("field") ActivityField field,
+                           @Param("since") Instant since);
 }

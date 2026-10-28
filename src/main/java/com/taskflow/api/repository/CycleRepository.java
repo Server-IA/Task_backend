@@ -34,6 +34,9 @@ public interface CycleRepository extends JpaRepository<Cycle, UUID> {
     List<IssueProgress> findProgress(@Param("ids") Collection<UUID> ids,
                                      @Param("completed") StateGroup completed);
 
+    @Query("select i.id from Cycle c join c.issues i where c.id = :cycleId")
+    List<UUID> findIssueIds(@Param("cycleId") UUID cycleId);
+
     /** Saca los issues de cualquier otro ciclo, porque un issue solo puede estar en uno. */
     @Modifying
     @Query(value = "DELETE FROM cycle_issues WHERE issue_id IN (:issueIds) AND cycle_id <> :cycleId",

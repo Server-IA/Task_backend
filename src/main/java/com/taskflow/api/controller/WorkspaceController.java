@@ -41,7 +41,8 @@ public class WorkspaceController {
         return workspaceService.getMyWorkspaces(me.getId());
     }
 
-    @Operation(summary = "Crear workspace", description = "El creador queda como OWNER. Si no se envía slug, se genera.")
+    @Operation(summary = "Crear workspace",
+            description = "El creador queda como project manager (OWNER). Si no se envía slug, se genera.")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public WorkspaceResponse create(@AuthenticationPrincipal UserPrincipal me,
@@ -56,17 +57,17 @@ public class WorkspaceController {
         return workspaceService.get(slug, me.getId());
     }
 
-    @Operation(summary = "Editar workspace (ADMIN)")
+    @Operation(summary = "Editar workspace (project manager)")
     @PatchMapping("/{slug}")
-    @PreAuthorize("@workspaceSecurity.isAdmin(#slug)")
+    @PreAuthorize("@workspaceSecurity.isManager(#slug)")
     public WorkspaceResponse update(@PathVariable String slug, @AuthenticationPrincipal UserPrincipal me,
                                     @Valid @RequestBody UpdateWorkspaceRequest request) {
         return workspaceService.update(slug, me.getId(), request);
     }
 
-    @Operation(summary = "Eliminar workspace (OWNER)", description = "Borra también sus proyectos e issues.")
+    @Operation(summary = "Eliminar workspace (project manager)", description = "Borra también sus proyectos y tareas.")
     @DeleteMapping("/{slug}")
-    @PreAuthorize("@workspaceSecurity.isOwner(#slug)")
+    @PreAuthorize("@workspaceSecurity.isManager(#slug)")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable String slug) {
         workspaceService.delete(slug);
@@ -79,16 +80,19 @@ public class WorkspaceController {
         return workspaceService.getMembers(slug);
     }
 
-    @Operation(summary = "Cambiar rol de un miembro (ADMIN)", description = "Roles permitidos: ADMIN o MEMBER.")
+    @Operation(summary = "Cambiar rol de un miembro (project manager)",
+            description = "Roles: OWNER (project manager) o MEMBER. Puede haber varios project managers, pero "
+                    + "nunca menos de uno: degradar al último responde 409.")
     @PatchMapping("/{slug}/members/{userId}")
-    @PreAuthorize("@workspaceSecurity.isAdmin(#slug)")
+    @PreAuthorize("@workspaceSecurity.isManager(#slug)")
     public WorkspaceMemberResponse updateMemberRole(@PathVariable String slug, @PathVariable UUID userId,
                                                     @Valid @RequestBody UpdateMemberRoleRequest request) {
         return workspaceService.updateMemberRole(slug, userId, request);
     }
 
     @Operation(summary = "Quitar miembro o salir del workspace",
-            description = "Un ADMIN puede quitar a cualquiera menos al dueño; un miembro puede quitarse a sí mismo.")
+            description = "El project manager puede quitar a cualquiera; un miembro puede quitarse a sí mismo. "
+                    + "El último project manager no puede salir ni ser quitado (409).")
     @DeleteMapping("/{slug}/members/{userId}")
     @PreAuthorize("@workspaceSecurity.isMember(#slug)")
     @ResponseStatus(HttpStatus.NO_CONTENT)
