@@ -53,6 +53,7 @@ public class AuthServiceImpl implements AuthService {
 
     private static final String TOKEN_TYPE = "Bearer";
     static final String WRONG_CURRENT_PASSWORD = "La contraseña actual no es correcta";
+    static final String INVALID_RESET_TOKEN = "El enlace para restablecer la contraseña no es válido o ya expiró";
 
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
@@ -211,10 +212,19 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public void validateResetToken(String token) {
+        if (token == null || token.isBlank()) {
+            throw new BadRequestException(INVALID_RESET_TOKEN);
+        }
+        findUsableToken(token, VerificationTokenType.PASSWORD_RESET, INVALID_RESET_TOKEN);
+    }
+
+    @Override
     @Transactional
     public void resetPassword(ResetPasswordRequest request) {
         VerificationToken verification = findUsableToken(request.token(), VerificationTokenType.PASSWORD_RESET,
-                "El enlace para restablecer la contraseña no es válido o ya expiró");
+                INVALID_RESET_TOKEN);
         verification.setUsed(true);
 
         User user = verification.getUser();

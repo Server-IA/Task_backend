@@ -9,7 +9,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -19,7 +18,8 @@ import java.io.IOException;
 import java.util.Optional;
 
 /**
- * Limita los intentos en login, registro, olvidé mi contraseña y reenvío de verificación, por IP.
+ * Limita los intentos en login, registro, olvidé mi contraseña, reenvío de verificación y comprobar un enlace de
+ * restablecer la contraseña, por IP.
  * Se ejecuta antes del filtro JWT y responde 429 con la cabecera {@code Retry-After}.
  * <p>
  * La ruta se compara ya decodificada (como la resuelve Spring MVC): {@code /api/v1/auth/%6Cogin} también es el
@@ -38,9 +38,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        Optional<RateLimitRule> rule = HttpMethod.POST.matches(request.getMethod())
-                ? RateLimitRule.forPath(normalizedPath(request))
-                : Optional.empty();
+        Optional<RateLimitRule> rule = RateLimitRule.forRequest(request.getMethod(), normalizedPath(request));
 
         if (rule.isPresent()) {
             ConsumptionProbe probe = rateLimitService.tryConsume(rule.get(), ClientKeys.ip(request.getRemoteAddr()));

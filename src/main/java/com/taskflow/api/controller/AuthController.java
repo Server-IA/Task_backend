@@ -18,9 +18,11 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -78,6 +80,15 @@ public class AuthController {
     public MessageResponse forgotPassword(@Valid @RequestBody EmailRequest request) {
         authService.forgotPassword(request.email());
         return new MessageResponse("Si el correo está registrado, te enviamos un enlace para restablecer la contraseña");
+    }
+
+    @Operation(summary = "Comprobar el enlace para restablecer la contraseña",
+            description = "No usa el token: 204 si sirve; 400 (con el mismo mensaje que el restablecimiento) si falta, "
+                    + "no es válido, ya se usó o venció.")
+    @GetMapping("/reset-password/validate")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void validateResetToken(@RequestParam(defaultValue = "") String token) {
+        authService.validateResetToken(token);
     }
 
     @Operation(summary = "Restablecer la contraseña con el token del correo")

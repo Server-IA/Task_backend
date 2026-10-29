@@ -83,6 +83,7 @@ class ControllerPermissionsTest {
             "AuthController.refresh",
             "AuthController.logout",
             "AuthController.forgotPassword",
+            "AuthController.validateResetToken",
             "AuthController.resetPassword",
             "InvitationController.getDetails");
 

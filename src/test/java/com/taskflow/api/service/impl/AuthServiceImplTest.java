@@ -357,6 +357,44 @@ class AuthServiceImplTest {
         }
 
         @Test
+        void validateResetTokenNoGastaUnEnlaceVigente() {
+            VerificationToken token = new VerificationToken();
+            token.setUser(user("ana@test.com"));
+            token.setExpiresAt(Instant.now().plus(1, ChronoUnit.HOURS));
+            when(verificationTokenRepository.findByTokenHashAndType(
+                    TokenUtils.sha256("abc"), VerificationTokenType.PASSWORD_RESET)).thenReturn(Optional.of(token));
+
+            authService.validateResetToken("abc");
+
+            assertThat(token.isUsed()).isFalse();
+            verify(verificationTokenRepository, never()).save(any());
+            verifyNoInteractions(passwordEncoder, refreshTokenRepository, emailNotifier);
+        }
+
+        @Test
+        void validateResetTokenRechazaEnlacesUsadosVencidosODesconocidos() {
+            VerificationToken used = new VerificationToken();
+            used.setUser(user("ana@test.com"));
+            used.setExpiresAt(Instant.now().plus(1, ChronoUnit.HOURS));
+            used.setUsed(true);
+            VerificationToken expired = new VerificationToken();
+            expired.setUser(user("ana@test.com"));
+            expired.setExpiresAt(Instant.now().minus(1, ChronoUnit.MINUTES));
+            when(verificationTokenRepository.findByTokenHashAndType(
+                    TokenUtils.sha256("usado"), VerificationTokenType.PASSWORD_RESET)).thenReturn(Optional.of(used));
+            when(verificationTokenRepository.findByTokenHashAndType(
+                    TokenUtils.sha256("vencido"), VerificationTokenType.PASSWORD_RESET)).thenReturn(Optional.of(expired));
+            when(verificationTokenRepository.findByTokenHashAndType(
+                    TokenUtils.sha256("otro"), VerificationTokenType.PASSWORD_RESET)).thenReturn(Optional.empty());
+
+            for (String raw : new String[] {"usado", "vencido", "otro", "", "  "}) {
+                assertThatThrownBy(() -> authService.validateResetToken(raw))
+                        .isInstanceOf(BadRequestException.class)
+                        .hasMessage(AuthServiceImpl.INVALID_RESET_TOKEN);
+            }
+        }
+
+        @Test
         void resetPasswordInvalidaLosAccessTokensAnteriores() {
             User user = user("ana@test.com");
             VerificationToken token = new VerificationToken();

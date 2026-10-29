@@ -28,6 +28,9 @@ public interface AuthService {
     /** No revela si el correo existe: siempre termina sin error. */
     void forgotPassword(String email);
 
+    /** Comprueba que el enlace para restablecer la contraseña sirve, sin usarlo. */
+    void validateResetToken(String token);
+
     void resetPassword(ResetPasswordRequest request);
 
     /** Cambia la contraseña, cierra las demás sesiones y devuelve un par de tokens nuevo. */

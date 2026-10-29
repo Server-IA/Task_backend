@@ -33,8 +33,12 @@ class RateLimitTest {
     void laRutaSeComparaDecodificadaYSinBarraFinal() {
         assertThat(RateLimitFilter.normalizedPath(post("/api/v1/auth/%6Cogin"))).isEqualTo("/api/v1/auth/login");
         assertThat(RateLimitFilter.normalizedPath(post("/api/v1/auth/login/"))).isEqualTo("/api/v1/auth/login");
-        assertThat(RateLimitRule.forPath("/api/v1/auth/login")).contains(RateLimitRule.LOGIN);
-        assertThat(RateLimitRule.forPath("/api/v1/auth/refresh")).isEmpty();
+        assertThat(RateLimitRule.forRequest("POST", "/api/v1/auth/login")).contains(RateLimitRule.LOGIN);
+        assertThat(RateLimitRule.forRequest("GET", "/api/v1/auth/login")).isEmpty();
+        assertThat(RateLimitRule.forRequest("POST", "/api/v1/auth/refresh")).isEmpty();
+        assertThat(RateLimitRule.forRequest("GET", "/api/v1/auth/reset-password/validate"))
+                .contains(RateLimitRule.VALIDATE_RESET_TOKEN);
+        assertThat(RateLimitRule.forRequest("POST", "/api/v1/auth/reset-password/validate")).isEmpty();
     }
 
     @Test
@@ -54,6 +58,29 @@ class RateLimitTest {
         verify(chain, times(capacity)).doFilter(any(), any());
         assertThat(blocked.getStatus()).isEqualTo(429);
         assertThat(blocked.getHeader("Retry-After")).isNotBlank();
+    }
+
+    @Test
+    void comprobarEnlacesDeRestablecerTieneLimitePorIp() throws Exception {
+        RateLimitFilter filter = new RateLimitFilter(new RateLimitService(),
+                new JsonResponseWriter(JsonMapper.builder().build()));
+        FilterChain chain = mock(FilterChain.class);
+        int capacity = RateLimitRule.VALIDATE_RESET_TOKEN.getCapacity();
+
+        for (int i = 0; i < capacity; i++) {
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/auth/reset-password/validate");
+            request.setRemoteAddr("203.0.113.7");
+            request.setParameter("token", "intento-" + i);
+            filter.doFilter(request, new MockHttpServletResponse(), chain);
+        }
+        MockHttpServletRequest extra = new MockHttpServletRequest("GET", "/api/v1/auth/reset-password/validate");
+        extra.setRemoteAddr("203.0.113.7");
+        extra.setParameter("token", "uno-mas");
+        MockHttpServletResponse blocked = new MockHttpServletResponse();
+        filter.doFilter(extra, blocked, chain);
+
+        verify(chain, times(capacity)).doFilter(any(), any());
+        assertThat(blocked.getStatus()).isEqualTo(429);
     }
 
     @Test
