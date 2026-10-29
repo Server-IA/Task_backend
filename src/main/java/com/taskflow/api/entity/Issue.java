@@ -1,6 +1,7 @@
 package com.taskflow.api.entity;
 
 import com.taskflow.api.entity.enums.IssuePriority;
+import com.taskflow.api.entity.enums.IssueType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -37,6 +38,11 @@ public class Issue extends BaseEntity {
     /** Número del issue dentro del proyecto (el 12 de WEB-12). */
     @Column(name = "sequence_id", nullable = false, updatable = false)
     private int sequenceId;
+
+    /** Historia, tarea o bug (ver {@link IssueType}). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "issue_type", nullable = false, length = 10)
+    private IssueType type = IssueType.TASK;
 
     @Column(nullable = false)
     private String title;
@@ -115,6 +121,25 @@ public class Issue extends BaseEntity {
      */
     @Column(name = "checklist_updated_at")
     private Instant checklistUpdatedAt;
+
+    /**
+     * Historias: cuándo pasó a un estado cerrado (COMPLETED o CANCELLED); {@code null} mientras esté abierta. Se borra
+     * al reabrirla.
+     */
+    @Column(name = "closed_at")
+    private Instant closedAt;
+
+    /** Historias: quién la cerró. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "closed_by_id")
+    private User closedBy;
+
+    /**
+     * Historias: ya se avisó a los project managers de que está «lista para revisar». Vuelve a {@code false} cuando
+     * deja de estarlo, así el aviso sale una vez cada vez que pasa a estarlo.
+     */
+    @Column(name = "review_notified", nullable = false)
+    private boolean reviewNotified;
 
     @ManyToMany
     @JoinTable(name = "issue_assignees",
@@ -195,6 +220,48 @@ public class Issue extends BaseEntity {
             + "where c.issue_id = id and c.kind = 'CRITERION' and c.done)")
     private int criteriaDone;
 
+    // ----- Historias (solo se calculan si la tarea es una historia; en las demás valen 0) -----
+
+    /** Tareas ({@code TASK}) hijas de la historia, sin contar las canceladas: el «y» de «x de y tareas». */
+    @Formula("(case when issue_type = 'STORY' then (select count(*) from issues s join states st on st.id = s.state_id "
+            + "where s.parent_id = id and s.issue_type = 'TASK' and st.state_group <> 'CANCELLED') else 0 end)")
+    private int storyTaskCount;
+
+    /** Tareas hijas completadas: el «x» de «x de y tareas». */
+    @Formula("(case when issue_type = 'STORY' then (select count(*) from issues s join states st on st.id = s.state_id "
+            + "where s.parent_id = id and s.issue_type = 'TASK' and st.state_group = 'COMPLETED') else 0 end)")
+    private int storyTaskDoneCount;
+
+    /** Tareas hijas en curso (grupo STARTED), para la parte naranja de la barra de progreso. */
+    @Formula("(case when issue_type = 'STORY' then (select count(*) from issues s join states st on st.id = s.state_id "
+            + "where s.parent_id = id and s.issue_type = 'TASK' and st.state_group = 'STARTED') else 0 end)")
+    private int storyTaskStartedCount;
+
+    /** Bugs hijos abiertos (ni completados ni cancelados): «1 bug abierto». No cuentan en el progreso. */
+    @Formula("(case when issue_type = 'STORY' then (select count(*) from issues s join states st on st.id = s.state_id "
+            + "where s.parent_id = id and s.issue_type = 'BUG' "
+            + "and st.state_group not in ('COMPLETED', 'CANCELLED')) else 0 end)")
+    private int openBugCount;
+
+    /** Bugs hijos creados después de cerrar la historia: «1 bug después de cerrar» (0 si está abierta). */
+    @Formula("(case when issue_type = 'STORY' and closed_at is not null then (select count(*) from issues s "
+            + "where s.parent_id = id and s.issue_type = 'BUG' and s.created_at > closed_at) else 0 end)")
+    private int bugsAfterCloseCount;
+
+    /**
+     * «Lista para revisar»: una historia abierta con al menos una tarea, todas sus tareas completadas o canceladas y
+     * ningún bug ligado abierto. Es una marca calculada: el estado de la historia no cambia (sigue en In Progress) y
+     * solo el project manager la cierra. La misma regla que {@code StoryRules.isReady}.
+     */
+    @Formula("(issue_type = 'STORY' "
+            + "and exists (select 1 from states own where own.id = state_id "
+            + "and own.state_group not in ('COMPLETED', 'CANCELLED')) "
+            + "and exists (select 1 from issues s where s.parent_id = id and s.issue_type = 'TASK') "
+            + "and not exists (select 1 from issues s join states st on st.id = s.state_id "
+            + "where s.parent_id = id and s.issue_type in ('TASK', 'BUG') "
+            + "and st.state_group not in ('COMPLETED', 'CANCELLED')))")
+    private boolean readyForReview;
+
     /** Códigos de las tareas abiertas que la bloquean, ordenados (vacío si no está bloqueada). */
     public List<String> getBlockedByCodes() {
         return splitCodes(blockedByCodesText);
@@ -207,6 +274,11 @@ public class Issue extends BaseEntity {
 
     private static List<String> splitCodes(String text) {
         return text == null || text.isBlank() ? List.of() : List.of(text.split(","));
+    }
+
+    /** Es una historia. */
+    public boolean isStory() {
+        return type == IssueType.STORY;
     }
 
     /** Código legible, por ejemplo {@code WEB-12}. Se calcula para que siga al identificador del proyecto. */

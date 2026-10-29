@@ -1,20 +1,28 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.dto.request.CreateIssueRelationRequest;
 import com.taskflow.api.dto.request.CreateIssueRequest;
 import com.taskflow.api.dto.request.IssueFilter;
+import com.taskflow.api.dto.request.IssueRelationKind;
 import com.taskflow.api.dto.request.MoveIssueRequest;
+import com.taskflow.api.dto.request.SplitItemRequest;
+import com.taskflow.api.dto.request.SplitStoryRequest;
 import com.taskflow.api.dto.request.UpdateIssueRequest;
 import com.taskflow.api.dto.response.IssueResponse;
 import com.taskflow.api.dto.response.PageResponse;
+import com.taskflow.api.entity.Cycle;
 import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.IssueChecklistItem;
+import com.taskflow.api.entity.IssueTemplate;
 import com.taskflow.api.entity.Label;
 import com.taskflow.api.entity.Project;
+import com.taskflow.api.entity.ProjectModule;
 import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.enums.ActivityField;
 import com.taskflow.api.entity.enums.ChecklistItemKind;
 import com.taskflow.api.entity.enums.IssuePriority;
+import com.taskflow.api.entity.enums.IssueType;
 import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.entity.enums.WorkspaceRole;
 import com.taskflow.api.exception.BadRequestException;
@@ -51,6 +59,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -81,6 +90,7 @@ public class IssueServiceImpl implements IssueService {
     private final NotificationService notificationService;
     private final IssueRelationService relationService;
     private final IssueChecklistService checklistService;
+    private final StoryProgress storyProgress;
     private final ResourceLookup lookup;
     private final IssueMapper issueMapper;
 
@@ -97,6 +107,10 @@ public class IssueServiceImpl implements IssueService {
     @Transactional
     public IssueResponse create(String slug, UUID projectId, UUID userId, CreateIssueRequest request) {
         Project project = lookup.project(slug, projectId);
+        IssueType type = request.type() != null ? request.type() : IssueType.TASK;
+        if (type == IssueType.STORY && !isManager(slug, userId)) {
+            throw new ForbiddenException(StoryRules.CREATE_FORBIDDEN);
+        }
         State state = request.stateId() != null
                 ? findState(project, request.stateId())
                 : stateRepository.findFirstByProjectIdOrderByPositionAsc(project.getId())
@@ -108,25 +122,29 @@ public class IssueServiceImpl implements IssueService {
         }
 
         Instant now = Instant.now();
+        User actor = lookup.user(userId);
         Issue issue = new Issue();
         issue.setProject(project);
+        issue.setType(type);
         issue.setTitle(request.title().trim());
         issue.setDescription(blankToNull(request.description()));
         issue.setState(state);
         updateCompletedAt(issue, null, now);
         updateStartedAt(issue, now);
+        StoryRules.updateClosed(issue, null, actor, now);
         if (request.checklist() != null && !request.checklist().isEmpty()) {
             issue.setChecklistUpdatedAt(now);
         }
         issue.setPriority(request.priority() != null ? request.priority() : IssuePriority.NONE);
         if (request.parentId() != null) {
-            issue.setParent(findReferencedIssue(project, request.parentId(), "La tarea padre no existe en este proyecto"));
+            Issue parent = findReferencedIssue(project, request.parentId(), "La tarea padre no existe en este proyecto");
+            checkNewParent(slug, userId, actor, type, parent, Boolean.TRUE.equals(request.reopenParent()));
+            issue.setParent(parent);
         }
         issue.setStartDate(request.startDate());
         issue.setDueDate(request.dueDate());
         issue.getAssignees().addAll(resolveAssignees(project, request.assigneeIds()));
         issue.getLabels().addAll(resolveLabels(project, request.labelIds()));
-        User actor = lookup.user(userId);
         issue.setCreatedBy(actor);
         if (issue.getDescription() != null) {
             issue.setDescriptionUpdatedAt(now);
@@ -143,6 +161,13 @@ public class IssueServiceImpl implements IssueService {
         notificationService.notifyAssigned(issue, actor, issue.getAssignees());
         notificationService.notifyMentionedInDescription(issue, actor,
                 mentionable(project, actor, MentionParser.userIds(issue.getDescription())));
+        if (request.relatesToId() != null) {
+            relationService.create(slug, projectId, issue.getId(), userId,
+                    new CreateIssueRelationRequest(IssueRelationKind.RELATES, request.relatesToId()));
+        }
+        if (issue.getParent() != null) {
+            storyProgress.childChanged(issue, null, actor, state.getStateGroup() == StateGroup.STARTED);
+        }
         return issueMapper.toResponse(issue);
     }
 
@@ -173,6 +198,16 @@ public class IssueServiceImpl implements IssueService {
         User actor = lookup.user(userId);
         IssueChanges changes = new IssueChanges(issue, actor);
         boolean completed = false;
+        // Lo que puede mover a su historia: cambiar de estado, de padre o de tipo
+        Issue previousParent = issue.getParent();
+        boolean storyRelevant = false;
+        boolean started = false;
+
+        if (request.type() != null && request.type() != issue.getType()) {
+            changeType(slug, userId, project, issue, request.type(), actor, changes, request.description() == null);
+            storyRelevant = true;
+            started = request.type() == IssueType.TASK && issue.getState().getStateGroup() == StateGroup.STARTED;
+        }
 
         if (request.title() != null) {
             if (request.title().isBlank()) {
@@ -191,14 +226,18 @@ public class IssueServiceImpl implements IssueService {
         }
         if (request.stateId() != null && !request.stateId().equals(issue.getState().getId())) {
             State state = findState(project, request.stateId());
-            changes.track(ActivityField.STATE, issue.getState().getName(), state.getName());
             StateGroup previousGroup = issue.getState().getStateGroup();
+            ensureStoryStateChangeAllowed(slug, userId, issue, state);
+            changes.track(ActivityField.STATE, issue.getState().getName(), state.getName());
             issue.setState(state);
             Instant now = Instant.now();
             updateCompletedAt(issue, previousGroup, now);
             updateStartedAt(issue, now);
+            StoryRules.updateClosed(issue, previousGroup, actor, now);
             completed = becameCompleted(previousGroup, state.getStateGroup());
             issue.setSortOrder(SortOrderCalculator.endOfColumn(issueRepository.findMaxSortOrder(state.getId())));
+            storyRelevant = true;
+            started |= previousGroup != StateGroup.STARTED && state.getStateGroup() == StateGroup.STARTED;
         }
         if (request.priority() != null) {
             changes.track(ActivityField.PRIORITY, issue.getPriority().name(), request.priority().name());
@@ -207,11 +246,22 @@ public class IssueServiceImpl implements IssueService {
         if (Boolean.TRUE.equals(request.clearParent())) {
             changes.track(ActivityField.PARENT, codeOf(issue.getParent()), null);
             issue.setParent(null);
+            storyRelevant = true;
         } else if (request.parentId() != null) {
             Issue parent = findReferencedIssue(project, request.parentId(), "La tarea padre no existe en este proyecto");
             ensureNoCycle(issue, parent);
+            boolean newParent = issue.getParent() == null || !issue.getParent().getId().equals(parent.getId());
+            if (newParent) {
+                checkNewParent(slug, userId, actor, issue.getType(), parent,
+                        Boolean.TRUE.equals(request.reopenParent()));
+                started |= issue.getState().getStateGroup() == StateGroup.STARTED;
+                storyRelevant = true;
+            }
             changes.track(ActivityField.PARENT, codeOf(issue.getParent()), parent.getCode());
             issue.setParent(parent);
+        }
+        if (issue.isStory() && issue.getParent() != null) {
+            throw new BadRequestException(StoryRules.STORY_AS_CHILD);
         }
         if (Boolean.TRUE.equals(request.clearStartDate())) {
             changes.track(ActivityField.START_DATE, toText(issue.getStartDate()), null);
@@ -250,6 +300,9 @@ public class IssueServiceImpl implements IssueService {
         if (completed) {
             relationService.notifyUnblocked(saved, actor);
         }
+        if (storyRelevant) {
+            storyProgress.childChanged(saved, previousParent, actor, started);
+        }
         return issueMapper.toResponse(saved);
     }
 
@@ -260,7 +313,9 @@ public class IssueServiceImpl implements IssueService {
         Issue issue = findIssue(project, issueId);
         State target = findState(project, request.stateId());
         User actor = null;
-        if (!target.getId().equals(issue.getState().getId())) {
+        boolean stateChanged = !target.getId().equals(issue.getState().getId());
+        if (stateChanged) {
+            ensureStoryStateChangeAllowed(slug, userId, issue, target);
             actor = lookup.user(userId);
             activityService.record(issue, actor, ActivityField.STATE, issue.getState().getName(), target.getName());
         }
@@ -287,10 +342,15 @@ public class IssueServiceImpl implements IssueService {
         Instant now = Instant.now();
         updateCompletedAt(issue, previousGroup, now);
         updateStartedAt(issue, now);
+        StoryRules.updateClosed(issue, previousGroup, actor, now);
         Issue saved = issueRepository.saveAndFlush(issue);
         // Pasar de un grupo abierto a COMPLETED implica cambiar de estado, así que actor ya está cargado.
         if (becameCompleted(previousGroup, target.getStateGroup())) {
             relationService.notifyUnblocked(saved, actor);
+        }
+        if (stateChanged && saved.getParent() != null) {
+            storyProgress.childChanged(saved, null, actor,
+                    previousGroup != StateGroup.STARTED && target.getStateGroup() == StateGroup.STARTED);
         }
         return issueMapper.toResponse(saved);
     }
@@ -305,7 +365,231 @@ public class IssueServiceImpl implements IssueService {
             throw new ForbiddenException(DELETE_FORBIDDEN_MESSAGE);
         }
         // Los sub-issues no se borran: la base de datos les quita el padre (ON DELETE SET NULL).
+        Issue parent = issue.getParent();
         issueRepository.delete(issue);
+        if (parent != null && parent.isStory()) {
+            // Sin esta tarea (o bug), la historia puede quedar lista para revisar
+            issueRepository.flush();
+            storyProgress.reconcile(parent, lookup.user(userId), null, false);
+        }
+    }
+
+    @Override
+    @Transactional
+    public List<IssueResponse> split(String slug, UUID projectId, UUID storyId, UUID userId,
+                                     SplitStoryRequest request) {
+        Project project = lookup.project(slug, projectId);
+        Issue story = findIssue(project, storyId);
+        if (!story.isStory()) {
+            throw new BadRequestException("Solo se parten las historias");
+        }
+        User actor = lookup.user(userId);
+        boolean addsTasks = request.items().stream().anyMatch(item -> typeOf(item) == IssueType.TASK);
+        if (addsTasks && !story.getState().getStateGroup().isOpen()) {
+            if (!Boolean.TRUE.equals(request.reopen())) {
+                throw closedStoryConflict(story);
+            }
+            reopen(story, actor);
+        }
+        // Las tareas nuevas nacen en «Todo» (el primer estado sin empezar) o, si no hay, en el primer estado
+        State state = stateRepository.findFirstByProjectIdAndStateGroupOrderByPositionAsc(project.getId(),
+                        StateGroup.UNSTARTED)
+                .or(() -> stateRepository.findFirstByProjectIdOrderByPositionAsc(project.getId()))
+                .orElseThrow(() -> new ConflictException("El proyecto no tiene estados"));
+        // Heredan de la historia su ciclo (si sigue abierto), sus módulos y sus etiquetas
+        List<Cycle> cycles = story.getCycles().stream().filter(cycle -> !cycle.isClosed()).toList();
+        List<ProjectModule> modules = List.copyOf(story.getModules());
+        Instant now = Instant.now();
+
+        List<Issue> created = new ArrayList<>();
+        for (SplitItemRequest item : request.items()) {
+            IssueType type = typeOf(item);
+            if (type == IssueType.STORY) {
+                throw new BadRequestException(StoryRules.SPLIT_TYPE);
+            }
+            Issue child = new Issue();
+            child.setProject(project);
+            child.setType(type);
+            child.setTitle(item.title().trim());
+            child.setState(state);
+            updateCompletedAt(child, null, now);
+            updateStartedAt(child, now);
+            child.setPriority(item.priority() != null ? item.priority() : story.getPriority());
+            child.setParent(story);
+            child.getAssignees().addAll(resolveAssignees(project, item.assigneeIds()));
+            child.getLabels().addAll(story.getLabels());
+            child.setCreatedBy(actor);
+            child.setSequenceId(nextSequenceId(project));
+            child.setSortOrder(SortOrderCalculator.endOfColumn(issueRepository.findMaxSortOrder(state.getId())));
+            issueRepository.save(child);
+            for (Cycle cycle : cycles) {
+                cycle.getIssues().add(child);
+                child.getCycles().add(cycle);
+            }
+            for (ProjectModule module : modules) {
+                module.getIssues().add(child);
+                child.getModules().add(module);
+            }
+            activityService.record(child, actor, ActivityField.CREATED, null, child.getTitle());
+            notificationService.notifyAssigned(child, actor, child.getAssignees());
+            created.add(child);
+        }
+        issueRepository.flush();
+        storyProgress.reconcile(story, actor, null, false);
+        return created.stream().map(issueMapper::toResponse).toList();
+    }
+
+    @Override
+    @Transactional
+    public IssueResponse closeStory(String slug, UUID projectId, UUID storyId, UUID userId) {
+        Project project = lookup.project(slug, projectId);
+        Issue story = findStory(project, storyId);
+        if (!story.getState().getStateGroup().isOpen()) {
+            throw new ConflictException("La historia ya está cerrada");
+        }
+        State done = stateRepository.findFirstByProjectIdAndStateGroupOrderByPositionAsc(project.getId(),
+                        StateGroup.COMPLETED)
+                .orElseThrow(() -> new ConflictException("El proyecto no tiene un estado completado"));
+        User actor = lookup.user(userId);
+        StateGroup previousGroup = story.getState().getStateGroup();
+        changeStoryState(story, done, actor);
+        Issue saved = issueRepository.saveAndFlush(story);
+        if (becameCompleted(previousGroup, done.getStateGroup())) {
+            relationService.notifyUnblocked(saved, actor);
+        }
+        return issueMapper.toResponse(saved);
+    }
+
+    @Override
+    @Transactional
+    public IssueResponse reopenStory(String slug, UUID projectId, UUID storyId, UUID userId) {
+        Project project = lookup.project(slug, projectId);
+        Issue story = findStory(project, storyId);
+        if (story.getState().getStateGroup().isOpen()) {
+            throw new ConflictException("La historia no está cerrada");
+        }
+        reopen(story, lookup.user(userId));
+        return issueMapper.toResponse(issueRepository.saveAndFlush(story));
+    }
+
+    private Issue findStory(Project project, UUID storyId) {
+        Issue story = findIssue(project, storyId);
+        if (!story.isStory()) {
+            throw new BadRequestException("La tarea no es una historia");
+        }
+        return story;
+    }
+
+    private static IssueType typeOf(SplitItemRequest item) {
+        return item.type() != null ? item.type() : IssueType.TASK;
+    }
+
+    /**
+     * Reabre una historia cerrada (solo el project manager llega aquí): vuelve al primer estado STARTED (o, si el
+     * proyecto no tiene, al primer estado abierto) y queda en su historial. No vuelve a avisar de «lista para revisar»
+     * hasta que deje de estarlo y lo vuelva a estar.
+     */
+    private void reopen(Issue story, User actor) {
+        UUID projectId = story.getProject().getId();
+        State target = stateRepository.findFirstByProjectIdAndStateGroupOrderByPositionAsc(projectId,
+                        StateGroup.STARTED)
+                .or(() -> stateRepository.findFirstByProjectIdAndStateGroupOrderByPositionAsc(projectId,
+                        StateGroup.UNSTARTED))
+                .or(() -> stateRepository.findFirstByProjectIdAndStateGroupOrderByPositionAsc(projectId,
+                        StateGroup.BACKLOG))
+                .orElseThrow(() -> new ConflictException("El proyecto no tiene un estado abierto"));
+        changeStoryState(story, target, actor);
+        story.setReviewNotified(true);
+    }
+
+    /** Cambia el estado de una historia con su historial, sus fechas y quién la cerró. */
+    private void changeStoryState(Issue story, State target, User actor) {
+        StateGroup previousGroup = story.getState().getStateGroup();
+        activityService.record(story, actor, ActivityField.STATE, story.getState().getName(), target.getName());
+        story.setState(target);
+        Instant now = Instant.now();
+        updateCompletedAt(story, previousGroup, now);
+        updateStartedAt(story, now);
+        StoryRules.updateClosed(story, previousGroup, actor, now);
+        story.setSortOrder(SortOrderCalculator.endOfColumn(issueRepository.findMaxSortOrder(target.getId())));
+    }
+
+    /**
+     * Cerrar o reabrir una historia (entrar a un estado cerrado, salir de uno o moverse entre dos) es solo del project
+     * manager, por cualquier camino: el selector de estado, el tablero o la API.
+     */
+    private void ensureStoryStateChangeAllowed(String slug, UUID userId, Issue issue, State target) {
+        if (!issue.isStory()) {
+            return;
+        }
+        String message = StoryRules.managerOnlyMessage(issue.getState().getStateGroup(), target.getStateGroup());
+        if (message != null && !isManager(slug, userId)) {
+            throw new ForbiddenException(message);
+        }
+    }
+
+    /**
+     * Reglas del padre nuevo de una tarea: una historia no puede ser hija de nada, y agregar una tarea ({@code TASK})
+     * a una historia cerrada exige reabrirla ({@code reopenParent}, solo el project manager). Un bug se liga a una
+     * historia cerrada sin reabrirla («bug después de cerrar»).
+     */
+    private void checkNewParent(String slug, UUID userId, User actor, IssueType type, Issue parent, boolean reopen) {
+        if (type == IssueType.STORY) {
+            throw new BadRequestException(StoryRules.STORY_AS_CHILD);
+        }
+        if (!parent.isStory() || parent.getState().getStateGroup().isOpen() || type != IssueType.TASK) {
+            return;
+        }
+        if (!reopen) {
+            throw closedStoryConflict(parent);
+        }
+        if (!isManager(slug, userId)) {
+            throw new ForbiddenException(StoryRules.REOPEN_FORBIDDEN);
+        }
+        reopen(parent, actor);
+    }
+
+    private static ConflictException closedStoryConflict(Issue story) {
+        return new ConflictException(story.getCode() + " está cerrada. Reábrela o crea la tarea suelta relacionada",
+                ConflictException.STORY_CLOSED);
+    }
+
+    /**
+     * Cambia el tipo. Convertir en historia o dejar de serlo es del project manager; una historia con tareas no puede
+     * dejar de serlo. Al pasar a bug con la descripción vacía, se agregan las secciones del reporte.
+     *
+     * @param mayFillDescription la petición no trae descripción (si la trae, se respeta)
+     */
+    private void changeType(String slug, UUID userId, Project project, Issue issue, IssueType type, User actor,
+                            IssueChanges changes, boolean mayFillDescription) {
+        IssueType previous = issue.getType();
+        if ((previous == IssueType.STORY || type == IssueType.STORY) && !isManager(slug, userId)) {
+            throw new ForbiddenException(StoryRules.TYPE_FORBIDDEN);
+        }
+        if (previous == IssueType.STORY && issueRepository.existsByParentId(issue.getId())) {
+            throw new ConflictException(StoryRules.TYPE_WITH_CHILDREN);
+        }
+        changes.track(ActivityField.TYPE, previous.name(), type.name());
+        issue.setType(type);
+        issue.setReviewNotified(false);
+        if (previous == IssueType.STORY) {
+            issue.setClosedAt(null);
+            issue.setClosedBy(null);
+        } else if (type == IssueType.STORY) {
+            StoryRules.updateClosed(issue, null, actor, Instant.now());
+        }
+        if (type == IssueType.BUG && mayFillDescription && issue.getDescription() == null) {
+            String skeleton = templateRepository
+                    .findFirstByProjectIdAndTypeOrderByPositionAscCreatedAtAsc(project.getId(), IssueType.BUG)
+                    .map(IssueTemplate::getDescription)
+                    .filter(text -> text != null && !text.isBlank())
+                    .orElse(DefaultTemplates.BUG_REPORT_DESCRIPTION);
+            activityService.recordDescriptionEdit(issue, actor);
+            issue.setDescription(skeleton);
+            issue.setDescriptionVersion(issue.getDescriptionVersion() + 1);
+            issue.setDescriptionUpdatedAt(Instant.now());
+            issue.setDescriptionUpdatedBy(actor);
+        }
     }
 
     @Override

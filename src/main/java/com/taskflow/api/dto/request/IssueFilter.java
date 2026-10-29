@@ -1,6 +1,7 @@
 package com.taskflow.api.dto.request;
 
 import com.taskflow.api.entity.enums.IssuePriority;
+import com.taskflow.api.entity.enums.IssueType;
 import io.swagger.v3.oas.annotations.Parameter;
 
 import java.util.List;
@@ -34,6 +35,9 @@ public record IssueFilter(
 
         @Parameter(description = "true = solo las bloqueadas (con al menos un bloqueo abierto, de cualquier proyecto); "
                 + "false = solo las que no lo están")
-        Boolean blocked
+        Boolean blocked,
+
+        @Parameter(description = "Tipo(s): STORY, TASK o BUG (sin él, todos). El tablero y la lista piden TASK y BUG")
+        List<IssueType> type
 ) {
 }

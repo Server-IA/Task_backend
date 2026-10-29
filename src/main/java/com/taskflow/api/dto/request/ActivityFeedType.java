@@ -14,8 +14,11 @@ import java.util.Set;
 public enum ActivityFeedType {
     /** Todas las entradas del historial. */
     ALL(EnumSet.allOf(ActivityField.class)),
-    /** Cambios de estado (incluye completar una tarea, que es pasarla a un estado completado). */
-    STATE(EnumSet.of(ActivityField.STATE)),
+    /**
+     * Cambios de estado (incluye completar una tarea, que es pasarla a un estado completado, y los que TaskFlow hace
+     * solo en una historia).
+     */
+    STATE(EnumSet.of(ActivityField.STATE, ActivityField.STORY_AUTO_STATE)),
     COMMENTS(EnumSet.of(ActivityField.COMMENT)),
     ASSIGNMENTS(EnumSet.of(ActivityField.ASSIGNEES));
 

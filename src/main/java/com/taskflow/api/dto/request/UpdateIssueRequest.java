@@ -1,6 +1,7 @@
 package com.taskflow.api.dto.request;
 
 import com.taskflow.api.entity.enums.IssuePriority;
+import com.taskflow.api.entity.enums.IssueType;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
@@ -18,6 +19,10 @@ import java.util.UUID;
  *   <li>{@code baseDescriptionVersion}: la {@code descriptionVersion} de la que partió quien cambia la descripción.
  *       Si la descripción cambió después (otra persona la guardó), responde 409 con la actual
  *       ({@code DescriptionConflictResponse}) y no cambia nada. Sin ella, gana el último que guarda.</li>
+ *   <li>{@code type}: cambia el tipo. Una historia con tareas no puede dejar de serlo (409) y solo el project manager
+ *       convierte en historia o deja de serlo.</li>
+ *   <li>{@code reopenParent}: con {@code parentId} de una historia cerrada, la reabre para agregar esta tarea (solo el
+ *       project manager); sin él, 409 con {@code code: STORY_CLOSED}.</li>
  * </ul>
  */
 public record UpdateIssueRequest(
@@ -50,6 +55,10 @@ public record UpdateIssueRequest(
         Boolean clearDueDate,
 
         @PositiveOrZero(message = "La versión de la descripción no es válida")
-        Integer baseDescriptionVersion
+        Integer baseDescriptionVersion,
+
+        IssueType type,
+
+        Boolean reopenParent
 ) {
 }

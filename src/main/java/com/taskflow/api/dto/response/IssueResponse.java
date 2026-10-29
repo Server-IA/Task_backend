@@ -1,6 +1,7 @@
 package com.taskflow.api.dto.response;
 
 import com.taskflow.api.entity.enums.IssuePriority;
+import com.taskflow.api.entity.enums.IssueType;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -14,6 +15,8 @@ public record IssueResponse(
         UUID projectId,
         /** Proyecto de la tarea con su identificador y su color (para la pastilla en búsquedas y «Mi trabajo»). */
         ProjectRefResponse project,
+        /** Historia, tarea o bug. */
+        IssueType type,
         String title,
         String description,
         /**
@@ -65,6 +68,25 @@ public record IssueResponse(
          */
         Instant startedAt,
         /** Cuándo se completó (entró a un estado del grupo COMPLETED); {@code null} si no está completada. */
-        Instant completedAt
+        Instant completedAt,
+        /**
+         * Historias: tareas ({@code TASK}) hijas sin contar las canceladas, completadas y en curso («3 de 5 tareas» y
+         * la barra). Los bugs no cuentan. 0 en las tareas y los bugs.
+         */
+        int storyTaskCount,
+        int storyTaskDoneCount,
+        int storyTaskStartedCount,
+        /** Historias: bugs hijos abiertos («1 bug abierto»). */
+        int openBugCount,
+        /** Historias cerradas: bugs hijos creados después de cerrarla («1 bug después de cerrar»). */
+        int bugsAfterCloseCount,
+        /**
+         * Historias: «lista para revisar» (abierta, con al menos una tarea, todas completadas o canceladas y ningún bug
+         * ligado abierto). Es una marca: el estado no cambia; la cierra el project manager.
+         */
+        boolean readyForReview,
+        /** Historias: cuándo y quién la cerró («Cerrada por Ana · 12 nov»); {@code null} mientras esté abierta. */
+        Instant closedAt,
+        UserSummaryResponse closedBy
 ) {
 }

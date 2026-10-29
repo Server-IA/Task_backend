@@ -1,6 +1,7 @@
 package com.taskflow.api.dto.request;
 
 import com.taskflow.api.entity.enums.IssuePriority;
+import com.taskflow.api.entity.enums.IssueType;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
@@ -16,6 +17,7 @@ import java.util.UUID;
  *       vacía).</li>
  *   <li>{@code stateId} cambia el estado por defecto y {@code clearState: true} lo quita.</li>
  *   <li>{@code position} es el nuevo índice (desde 0) entre las plantillas del proyecto.</li>
+ *   <li>{@code type} cambia el tipo de la tarea que crea.</li>
  * </ul>
  */
 public record UpdateIssueTemplateRequest(
@@ -44,6 +46,8 @@ public record UpdateIssueTemplateRequest(
         Boolean clearState,
 
         @Size(max = 20, message = "Máximo 20 asignados")
-        List<UUID> assigneeIds
+        List<UUID> assigneeIds,
+
+        IssueType type
 ) {
 }

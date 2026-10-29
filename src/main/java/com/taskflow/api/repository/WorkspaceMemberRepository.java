@@ -51,4 +51,13 @@ public interface WorkspaceMemberRepository extends JpaRepository<WorkspaceMember
                                              @Param("excludedUserId") UUID excludedUserId);
 
     boolean existsByWorkspaceIdAndUserEmail(UUID workspaceId, String email);
+
+    /** Usuarios con ese rol en el workspace (por ejemplo, los project managers), por nombre. */
+    @Query("""
+            select m.user from WorkspaceMember m
+            where m.workspace.id = :workspaceId and m.role = :role
+            order by m.user.fullName
+            """)
+    List<com.taskflow.api.entity.User> findUsersWithRole(@Param("workspaceId") UUID workspaceId,
+                                                         @Param("role") WorkspaceRole role);
 }

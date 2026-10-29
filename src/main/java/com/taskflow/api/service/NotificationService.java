@@ -62,4 +62,10 @@ public interface NotificationService {
      * ({@code RETRO_STARTED}). Solo en la app: no envía correo.
      */
     void notifyRetroStarted(Cycle cycle, User actor);
+
+    /**
+     * Avisa a los project managers ({@code managers}) de que la historia quedó «lista para revisar»
+     * ({@code STORY_READY}). Lo manda TaskFlow (sin autor); no se avisa a quien hizo el cambio que la dejó lista.
+     */
+    void notifyStoryReady(Issue story, Collection<User> managers, User actor);
 }

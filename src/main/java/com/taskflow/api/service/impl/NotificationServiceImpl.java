@@ -149,6 +149,25 @@ public class NotificationServiceImpl implements NotificationService {
         });
     }
 
+    @Override
+    @Transactional
+    public void notifyStoryReady(Issue story, Collection<User> managers, User actor) {
+        String message = story.getCode() + " está lista para revisar: " + shortTitle(story);
+        Collection<User> recipients = actor == null ? distinct(managers) : distinctExcept(managers, actor);
+        recipients.forEach(user -> {
+            // Sin autor: el aviso lo manda TaskFlow
+            Notification notification = notification(user, null, NotificationType.STORY_READY, message);
+            notification.setIssue(story);
+            notificationRepository.save(notification);
+        });
+    }
+
+    private static Collection<User> distinct(Collection<User> users) {
+        Map<UUID, User> byId = new LinkedHashMap<>();
+        users.forEach(user -> byId.putIfAbsent(user.getId(), user));
+        return byId.values();
+    }
+
     /** Usuarios sin repetir (por id) y sin quien hizo la acción. */
     private static Collection<User> distinctExcept(Collection<User> users, User actor) {
         Map<UUID, User> byId = new LinkedHashMap<>();
@@ -176,10 +195,11 @@ public class NotificationServiceImpl implements NotificationService {
 
     /** «WEB-12: Diseñar login», recortando títulos muy largos. */
     private static String describe(Issue issue) {
+        return issue.getCode() + ": " + shortTitle(issue);
+    }
+
+    private static String shortTitle(Issue issue) {
         String title = issue.getTitle();
-        if (title.length() > MAX_TITLE_IN_MESSAGE) {
-            title = title.substring(0, MAX_TITLE_IN_MESSAGE) + "…";
-        }
-        return issue.getCode() + ": " + title;
+        return title.length() > MAX_TITLE_IN_MESSAGE ? title.substring(0, MAX_TITLE_IN_MESSAGE) + "…" : title;
     }
 }

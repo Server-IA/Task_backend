@@ -21,9 +21,10 @@ class GlobalExceptionHandlerTest {
     void elConflictoDeDescripcionTraeLaVersionActualQuienYCuando() {
         UserSummaryResponse luis = new UserSummaryResponse(UUID.randomUUID(), "luis@test.com", "Luis Muñoz", null);
         Instant at = Instant.parse("2026-10-29T10:15:00Z");
-        IssueResponse current = new IssueResponse(UUID.randomUUID(), "WEB-4", 4, UUID.randomUUID(), null, "Título",
+        IssueResponse current = new IssueResponse(UUID.randomUUID(), "WEB-4", 4, UUID.randomUUID(), null, null, "Título",
                 "Lo que guardó Luis", 7, at, luis, null, null, null, null, null, 0, List.of(), List.of(), null,
-                List.of(), 0, 0, 0, List.of(), List.of(), 0, 0, 0, 0, null, null, null, null, null, null);
+                List.of(), 0, 0, 0, List.of(), List.of(), 0, 0, 0, 0, null, null, null, null, null, null, 0, 0, 0, 0, 0,
+                false, null, null);
 
         ResponseEntity<DescriptionConflictResponse> response =
                 handler.handleDescriptionConflict(new DescriptionConflictException(current));

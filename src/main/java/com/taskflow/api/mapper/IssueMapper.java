@@ -5,6 +5,7 @@ import com.taskflow.api.dto.response.IssueResponse;
 import com.taskflow.api.dto.response.IssueSummaryResponse;
 import com.taskflow.api.dto.response.PlanningRefResponse;
 import com.taskflow.api.dto.response.RelatedIssueResponse;
+import com.taskflow.api.dto.response.StoryChildResponse;
 import com.taskflow.api.entity.Cycle;
 import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.IssueChecklistItem;
@@ -37,7 +38,18 @@ public interface IssueMapper {
         RelatedIssueResponse full = toRelated(issue);
         return new RelatedIssueResponse(full.id(), full.code(), null, full.state(), List.of(), full.project(),
                 full.dueDate(), full.blockedByCount(), full.subIssueCount(), full.completedSubIssueCount(),
-                full.checklistTotal(), full.checklistDone());
+                full.checklistTotal(), full.checklistDone(), full.type());
+    }
+
+    /** Tarea o bug de una historia (sin la marca «después de cerrar»; ver {@link #toStoryChild(Issue, boolean)}). */
+    @Mapping(target = "afterClose", ignore = true)
+    StoryChildResponse toStoryChildBase(Issue issue);
+
+    /** Tarea o bug de una historia para «Historias». Necesita su estado y sus asignados. */
+    default StoryChildResponse toStoryChild(Issue issue, boolean afterClose) {
+        StoryChildResponse base = toStoryChildBase(issue);
+        return new StoryChildResponse(base.id(), base.code(), base.title(), base.type(), base.state(),
+                base.priority(), base.assignees(), base.createdAt(), afterClose);
     }
 
     ChecklistItemResponse toChecklistItemResponse(IssueChecklistItem item);

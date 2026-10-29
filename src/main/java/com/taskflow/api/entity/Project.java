@@ -47,19 +47,36 @@ public class Project extends BaseEntity {
     @Column(name = "issue_counter", nullable = false, insertable = false, updatable = false)
     private int issueCounter;
 
-    /** Issues actuales del proyecto; se calcula con una subconsulta en el mismo SELECT (solo lectura). */
-    @Formula("(select count(*) from issues i where i.project_id = id)")
+    /**
+     * Tareas y bugs actuales del proyecto (las historias no cuentan); se calcula con una subconsulta en el mismo SELECT
+     * (solo lectura).
+     */
+    @Formula("(select count(*) from issues i where i.project_id = id and i.issue_type <> 'STORY')")
     private int issueCount;
 
-    /** Issues que no están completados ni cancelados. */
+    /** Historias abiertas (ni completadas ni canceladas). */
     @Formula("(select count(*) from issues i join states st on st.id = i.state_id "
-            + "where i.project_id = id and st.state_group not in ('COMPLETED', 'CANCELLED'))")
+            + "where i.project_id = id and i.issue_type = 'STORY' "
+            + "and st.state_group not in ('COMPLETED', 'CANCELLED'))")
+    private int openStoryCount;
+
+    /** Historias abiertas «sin partir»: sin ninguna tarea ({@code TASK}) hija. */
+    @Formula("(select count(*) from issues i join states st on st.id = i.state_id "
+            + "where i.project_id = id and i.issue_type = 'STORY' "
+            + "and st.state_group not in ('COMPLETED', 'CANCELLED') "
+            + "and not exists (select 1 from issues c where c.parent_id = i.id and c.issue_type = 'TASK'))")
+    private int unsplitStoryCount;
+
+    /** Tareas y bugs que no están completados ni cancelados (las historias no cuentan: avanzan con sus tareas). */
+    @Formula("(select count(*) from issues i join states st on st.id = i.state_id "
+            + "where i.project_id = id and i.issue_type <> 'STORY' "
+            + "and st.state_group not in ('COMPLETED', 'CANCELLED'))")
     private int openIssueCount;
 
-    /** Issues abiertos con la fecha límite ya pasada. */
+    /** Tareas y bugs abiertos con la fecha límite ya pasada. */
     @Formula("(select count(*) from issues i join states st on st.id = i.state_id "
-            + "where i.project_id = id and st.state_group not in ('COMPLETED', 'CANCELLED') "
-            + "and i.due_date < current_date)")
+            + "where i.project_id = id and i.issue_type <> 'STORY' "
+            + "and st.state_group not in ('COMPLETED', 'CANCELLED') and i.due_date < current_date)")
     private int overdueIssueCount;
 
     /**

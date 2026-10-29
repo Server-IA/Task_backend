@@ -37,6 +37,19 @@ public interface IssueRelationRepository extends JpaRepository<IssueRelation, UU
 
     boolean existsBySourceIdAndTargetIdAndType(UUID sourceId, UUID targetId, IssueRelationType type);
 
+    /**
+     * Relaciones {@code RELATES} de las tareas indicadas (en cualquier lado), con ambas tareas y sus proyectos
+     * cargados: los chips «relacionada: WEB-52» de «Historias».
+     */
+    @Query("""
+            select r from IssueRelation r
+            join fetch r.source s join fetch s.project
+            join fetch r.target t join fetch t.project
+            where r.type = com.taskflow.api.entity.enums.IssueRelationType.RELATES
+              and (s.id in :issueIds or t.id in :issueIds)
+            """)
+    List<IssueRelation> findRelatesOf(@Param("issueIds") Collection<UUID> issueIds);
+
     /** Tareas que bloquea la indicada, con su estado y su proyecto cargados. */
     @Query("""
             select i from Issue i join fetch i.state join fetch i.project

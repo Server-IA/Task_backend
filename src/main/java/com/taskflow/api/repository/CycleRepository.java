@@ -36,12 +36,15 @@ public interface CycleRepository extends JpaRepository<Cycle, UUID> {
     @Query("select c from Cycle c where c.id = :id and c.project.id = :projectId")
     Optional<Cycle> findForUpdate(@Param("id") UUID id, @Param("projectId") UUID projectId);
 
-    /** Avance de los ciclos indicados; un ciclo sin issues no aparece en el resultado. */
+    /**
+     * Avance de los ciclos indicados; un ciclo sin issues no aparece en el resultado. Cuenta el trabajo
+     * (tareas y bugs): las historias no.
+     */
     @Query("""
             select c.id as id, count(i) as total,
                    coalesce(sum(case when i.state.stateGroup = :completed then 1 else 0 end), 0) as completed
             from Cycle c join c.issues i
-            where c.id in :ids
+            where c.id in :ids and i.type <> com.taskflow.api.entity.enums.IssueType.STORY
             group by c.id
             """)
     List<IssueProgress> findProgress(@Param("ids") Collection<UUID> ids,

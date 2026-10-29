@@ -91,7 +91,8 @@ final class ProjectStatsCalculator {
                 .filter(this::isOverdue)
                 .sorted(Comparator.comparing(IssueStatsRow::dueDate).thenComparingInt(IssueStatsRow::sequenceId))
                 .limit(MAX_OVERDUE)
-                .map(issue -> new IssueSummaryResponse(issue.id(), code(identifier, issue), issue.title()))
+                .map(issue -> new IssueSummaryResponse(issue.id(), code(identifier, issue), issue.title(),
+                        issue.type()))
                 .toList();
     }
 

@@ -17,12 +17,15 @@ public interface ProjectModuleRepository extends JpaRepository<ProjectModule, UU
 
     Optional<ProjectModule> findByIdAndProjectId(UUID id, UUID projectId);
 
-    /** Avance de los módulos indicados; un módulo sin issues no aparece en el resultado. */
+    /**
+     * Avance de los módulos indicados; un módulo sin issues no aparece en el resultado. Cuenta el trabajo
+     * (tareas y bugs): las historias no.
+     */
     @Query("""
             select m.id as id, count(i) as total,
                    coalesce(sum(case when i.state.stateGroup = :completed then 1 else 0 end), 0) as completed
             from ProjectModule m join m.issues i
-            where m.id in :ids
+            where m.id in :ids and i.type <> com.taskflow.api.entity.enums.IssueType.STORY
             group by m.id
             """)
     List<IssueProgress> findProgress(@Param("ids") Collection<UUID> ids,

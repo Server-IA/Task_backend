@@ -118,7 +118,13 @@ class ControllerPermissionsTest {
                 arguments(MyWorkController.class, "getMyWork", MEMBER),
                 arguments(WorkspaceActivityController.class, "getFeed", MEMBER),
                 arguments(WorkspaceActivityController.class, "getSummary", MEMBER),
-                arguments(SearchController.class, "search", MEMBER));
+                arguments(SearchController.class, "search", MEMBER),
+                // Historias: las ve cualquier miembro del proyecto; partirlas, cerrarlas y reabrirlas es del project
+                // manager (cerrar o reabrir por otros caminos, como el tablero, se valida en el servicio)
+                arguments(StoryController.class, "getStories", ACCESS),
+                arguments(StoryController.class, "split", MANAGE),
+                arguments(StoryController.class, "close", MANAGE),
+                arguments(StoryController.class, "reopen", MANAGE));
     }
 
     @ParameterizedTest(name = "{0}.{1}")

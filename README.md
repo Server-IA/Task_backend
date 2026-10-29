@@ -236,6 +236,10 @@ Base: `/workspaces/{slug}/projects/{projectId}/issues`.
 | DELETE | `/issues/{issueId}/relations/{relationId}` | Quitar dependencia |
 | GET / POST | `/issues/{issueId}/checklist` | Criterios y checklist / agregar `{ kind, text }` |
 | PATCH / DELETE | `/issues/{issueId}/checklist/{itemId}` | Editar, marcar o reordenar `{ text?, done?, position? }` / eliminar |
+| GET | `/stories` | Historias del proyecto con su progreso, personas, tareas, bugs y relacionadas |
+| POST | `/issues/{issueId}/split` | «Partir en tareas» (PM): `{ items: [{ title, type?, priority?, assigneeIds? }], reopen? }` |
+| POST | `/issues/{issueId}/close` | «Cerrar historia» (PM): al primer estado completado |
+| POST | `/issues/{issueId}/reopen` | «Reabrir» (PM): al primer estado en curso |
 
 **Crear** — solo `title` es obligatorio:
 
@@ -274,6 +278,33 @@ mostrar «bloqueada»), `checklistTotal`/`checklistDone` y `criteriaTotal`/`crit
   «bloquea WEB-7» (o «bloquea 2» si hay varias).
 - `checklistUpdatedAt`: último cambio de los criterios o la checklist («actualizado hace…»); `null` si
   nunca tuvo. Cambiar la checklist no modifica `updatedAt`.
+
+**Tipos** (`type`): `STORY` (historia), `TASK` (tarea, por defecto) o `BUG`. Una historia se parte en
+tareas (sus hijas por `parentId`); los bugs hijos de una historia son sus «bugs ligados».
+
+- Solo el project manager crea historias, convierte una tarea en historia o al revés (403) y las parte,
+  cierra o reabre. Una historia con hijas no cambia de tipo (409) y no puede ser hija de otra tarea (400).
+  Pasar a `BUG` con la descripción vacía agrega las secciones del reporte.
+- Progreso en la historia: `storyTaskCount` (tareas sin las canceladas), `storyTaskDoneCount`,
+  `storyTaskStartedCount`, `openBugCount` y `bugsAfterCloseCount`; los bugs no cuentan en «x de y».
+- **Avance automático**: cuando una de sus tareas entra a un estado `STARTED` y la historia sigue en
+  Backlog o Todo, pasa sola al primer estado `STARTED` (historial `STORY_AUTO_STATE` sin autor, con
+  `oldValue: "Luis empezó WEB-41"` y `newValue` el estado nuevo).
+- `readyForReview` («lista para revisar»): abierta, con al menos una tarea, todas completadas o canceladas
+  y ningún bug ligado abierto. El estado no cambia; se avisa una vez a los project managers con
+  `STORY_READY` (sin autor) y la marca se borra si se reabre una tarea o llega una tarea o un bug abierto.
+- Cerrar (pasar a `COMPLETED`/`CANCELLED`) o reabrir una historia es del project manager por cualquier
+  camino (`PATCH`, `/move`, `/close`, `/reopen`; si no, 403 «Solo el project manager cierra la historia»).
+  Se guarda `closedAt` y `closedBy`.
+- Agregar una `TASK` a una historia cerrada (crear con `parentId` o cambiar el padre) responde **409** con
+  `code: "STORY_CLOSED"` salvo que llegue `reopenParent: true` (solo PM: la reabre). Un `BUG` se liga sin
+  reabrirla. `relatesToId` en el `POST /issues` deja la tarea nueva relacionada (`RELATES`) con esa tarea
+  en la misma transacción («crear tarea relacionada»).
+- Listado: `?type=TASK&type=BUG` (sin `type`, todos). Las vistas guardadas sin `type` muestran tareas y
+  bugs; `groupBy` acepta además `type` (lista) y `story` (carriles del tablero).
+- Las tareas de un proyecto que cuentan (`issueCount`, `openIssueCount`, `overdueIssueCount`, el avance de
+  ciclos y módulos, las estadísticas y la daily) son el trabajo: tareas y bugs, no las historias. El
+  proyecto trae además `openStoryCount` y `unsplitStoryCount` («2 sin partir»).
 
 **Dependencias** (`relations`): `type` = `BLOCKS` (esta tarea bloquea a `issueId`), `BLOCKED_BY`
 (`issueId` bloquea a esta; se guarda como el `BLOCKS` inverso) o `RELATES` (simétrica). La otra tarea
@@ -636,6 +667,8 @@ comentario se borró). Tipos (`type`):
   (`"WEB-15 ya no está bloqueada: WEB-12 se completó"`).
 - `RETRO_STARTED`: se abrió la retrospectiva de un ciclo de un proyecto del que eres miembro
   (`"Ana abrió la retrospectiva de «Sprint 1»: agrega tus notas"`). Solo en la app (sin correo).
+- `STORY_READY`: una historia quedó lista para revisar (a los project managers, sin `actor`:
+  `"WEB-15 está lista para revisar: Pantalla de perfil de usuario"`). Solo en la app.
 
 | Método | Ruta | Descripción |
 |---|---|---|
@@ -666,7 +699,12 @@ explicación en el historial toman su último cambio de estado; las demás queda
 y cuándo marcó cada elemento de la checklist (`checked_by_id`, `checked_at`; los ya marcados toman
 `checked_at = updated_at`) e `issues.checklist_updated_at`, `V18` `issue_templates.usage_count` y
 `retro_notes.owner_id`, y `V19` el tipo `RETRO_STARTED` con `notifications.cycle_id` y
-`notifications.comment_id` (rellenado para las notificaciones de comentarios ya enviadas).
+`notifications.comment_id` (rellenado para las notificaciones de comentarios ya enviadas). `V24` agrega
+`issues.issue_type` (`STORY`, `TASK`, `BUG`; las que existían quedan como tareas, salvo títulos que empiezan
+con «[Bug]», que pasan a bugs, y descripciones con la cita «> **Como**» de la historia de usuario, que pasan a
+historias), `issues.closed_at`/`closed_by_id` y `issues.review_notified`, el tipo de cada plantilla
+(`issue_templates.issue_type`: «Reporte de bug» → bug, «Historia de usuario» → historia) y la notificación
+`STORY_READY`.
 Las entidades usan **UUID** y `created_at`/`updated_at`. Las tablas intermedias puras
 (`issue_assignees`, `issue_labels`, `cycle_issues`, `module_issues`, `issue_template_labels`,
 `retro_note_votes`) usan clave compuesta.

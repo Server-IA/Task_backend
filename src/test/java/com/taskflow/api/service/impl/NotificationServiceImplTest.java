@@ -213,6 +213,21 @@ class NotificationServiceImplTest {
     }
 
     @Test
+    void historiaListaParaRevisarAvisaALosProjectManagersSinAutorNiAQuienLaDejoLista() {
+        issue.setTitle("Pantalla de perfil de usuario");
+        issue.setSequenceId(15);
+        User pm2 = user("Marta");
+
+        notificationService.notifyStoryReady(issue, List.of(ana, pm2, ana), ana);
+
+        assertThat(saved())
+                .extracting(n -> n.getRecipient().getFullName(), Notification::getType, Notification::getMessage,
+                        Notification::getActor, Notification::getIssue)
+                .containsExactly(tuple("Marta", NotificationType.STORY_READY,
+                        "WEB-15 está lista para revisar: Pantalla de perfil de usuario", null, issue));
+    }
+
+    @Test
     void contadoresDeLaBandeja() {
         UUID me = UUID.randomUUID();
         when(notificationRepository.countByRecipientIdAndReadFalse(me)).thenReturn(3L);

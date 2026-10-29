@@ -9,6 +9,7 @@ import com.taskflow.api.entity.Project;
 import com.taskflow.api.entity.SavedView;
 import com.taskflow.api.entity.SavedViewFilters;
 import com.taskflow.api.entity.User;
+import com.taskflow.api.entity.enums.IssueType;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.exception.ResourceNotFoundException;
@@ -143,11 +144,15 @@ public class SavedViewServiceImpl implements SavedViewService {
         return visible(project, userId);
     }
 
-    /** Las mismas reglas que el listado de tareas ({@code GET /issues}) con los filtros de la vista. */
+    /**
+     * Las mismas reglas que el listado de tareas ({@code GET /issues}) con los filtros de la vista. Sin tipos, los que
+     * muestran el tablero y la lista por defecto (tareas y bugs); con los tres, todos.
+     */
     static IssueFilter issueFilter(SavedViewFilters filters) {
         SavedViewFilters f = filters == null ? SavedViewFilters.empty() : filters;
+        List<IssueType> types = f.type() == null || f.type().isEmpty() ? SavedViewFilters.DEFAULT_TYPES : f.type();
         return new IssueFilter(f.state(), f.priority(), f.assignee(), f.label(), f.search(), f.cycle(), f.module(),
-                f.blocked());
+                f.blocked(), types);
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.taskflow.api.entity;
 
 import com.taskflow.api.entity.enums.IssuePriority;
+import com.taskflow.api.entity.enums.IssueType;
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
 import jakarta.persistence.ElementCollection;
@@ -41,6 +42,11 @@ public class IssueTemplate extends BaseEntity {
 
     @Column(nullable = false, length = 60)
     private String name;
+
+    /** Tipo de la tarea que crea: «Historia de usuario» crea historias y «Reporte de bug», bugs. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "issue_type", nullable = false, length = 10)
+    private IssueType type = IssueType.TASK;
 
     /** Se antepone al título de la tarea, por ejemplo «[Bug] » (se guarda tal cual, con su espacio final). */
     @Column(name = "title_prefix", length = 40)

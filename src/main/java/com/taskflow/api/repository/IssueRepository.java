@@ -35,6 +35,36 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
     @EntityGraph(attributePaths = {"project", "state"})
     List<Issue> findAllByParentIdOrderBySequenceIdAsc(UUID parentId);
 
+    boolean existsByParentId(UUID parentId);
+
+    // ----- Historias -----
+
+    /**
+     * Hijas de la historia contadas por tipo y grupo de estado (una fila por combinación). Con esto se decide si está
+     * «lista para revisar» ({@code StoryRules.isReady}).
+     */
+    @Query("""
+            select new com.taskflow.api.repository.StoryChildCount(i.type, s.stateGroup, count(i))
+            from Issue i join i.state s
+            where i.parent.id = :storyId
+            group by i.type, s.stateGroup
+            """)
+    List<StoryChildCount> countChildrenOf(@Param("storyId") UUID storyId);
+
+    /** Historias del proyecto, de la más nueva a la más vieja. */
+    @EntityGraph(attributePaths = {"project", "state", "closedBy"})
+    @Query("""
+            select i from Issue i
+            where i.project.id = :projectId and i.type = com.taskflow.api.entity.enums.IssueType.STORY
+            order by i.sequenceId desc
+            """)
+    List<Issue> findStories(@Param("projectId") UUID projectId);
+
+    /** Tareas y bugs de las historias indicadas, con su estado y sus asignados (las filas desplegadas). */
+    @EntityGraph(attributePaths = {"project", "state", "assignees", "parent"})
+    @Query("select i from Issue i where i.parent.id in :storyIds order by i.sequenceId asc")
+    List<Issue> findChildrenOf(@Param("storyIds") Collection<UUID> storyIds);
+
     /** Issues de una columna del Kanban en orden; se usa para renumerar {@code sort_order}. */
     List<Issue> findAllByStateIdOrderBySortOrderAsc(UUID stateId);
 
@@ -66,20 +96,20 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
     @Query("update Issue i set i.checklistUpdatedAt = :now where i.id = :issueId")
     int touchChecklist(@Param("issueId") UUID issueId, @Param("now") Instant now);
 
-    // ----- Estadísticas del proyecto -----
+    // ----- Estadísticas del proyecto (cuentan el trabajo: tareas y bugs, no las historias) -----
 
     @Query("""
             select new com.taskflow.api.repository.IssueStatsRow(i.id, i.sequenceId, i.title, s.id, s.stateGroup,
-                   i.dueDate, i.createdAt, i.updatedAt, i.startedAt, i.completedAt)
+                   i.dueDate, i.createdAt, i.updatedAt, i.startedAt, i.completedAt, i.type)
             from Issue i join i.state s
-            where i.project.id = :projectId
+            where i.project.id = :projectId and i.type <> com.taskflow.api.entity.enums.IssueType.STORY
             """)
     List<IssueStatsRow> findStatsRows(@Param("projectId") UUID projectId);
 
     /** Ids de las tareas del proyecto asignadas a alguno de los usuarios (el filtro por persona de las estadísticas). */
     @Query("""
             select distinct i.id from Issue i join i.assignees u
-            where i.project.id = :projectId and u.id in :userIds
+            where i.project.id = :projectId and u.id in :userIds and i.type <> com.taskflow.api.entity.enums.IssueType.STORY
             """)
     List<UUID> findIdsAssignedToAny(@Param("projectId") UUID projectId, @Param("userIds") Collection<UUID> userIds);
 
@@ -87,7 +117,7 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
     @Query("""
             select new com.taskflow.api.repository.IssueAssigneeRow(i.id, u)
             from Issue i join i.assignees u
-            where i.project.id = :projectId and i.state.stateGroup not in :excludedGroups
+            where i.project.id = :projectId and i.state.stateGroup not in :excludedGroups and i.type <> com.taskflow.api.entity.enums.IssueType.STORY
             """)
     List<IssueAssigneeRow> findAssignees(@Param("projectId") UUID projectId,
                                          @Param("excludedGroups") Collection<StateGroup> excludedGroups);
@@ -145,27 +175,28 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
     long countAssignedCompletedSince(@Param("projectIds") Collection<UUID> projectIds, @Param("userId") UUID userId,
                                      @Param("since") Instant since);
 
-    // ----- Daily -----
+    // ----- Daily (el trabajo de cada persona: tareas y bugs, no las historias, que avanzan solas) -----
 
     /** Tareas del proyecto que no están en los grupos excluidos y tienen algún asignado, con sus asignados. */
     @EntityGraph(attributePaths = {"project", "state", "assignees"})
     @Query("""
             select i from Issue i
             where i.project.id = :projectId and i.state.stateGroup not in :excludedGroups
-              and i.assignees is not empty
+              and i.assignees is not empty and i.type <> com.taskflow.api.entity.enums.IssueType.STORY
             """)
     List<Issue> findAssignedInProject(@Param("projectId") UUID projectId,
                                       @Param("excludedGroups") Collection<StateGroup> excludedGroups);
 
     /** Tareas de un ciclo con su estado y sus asignados. */
     @EntityGraph(attributePaths = {"state", "assignees"})
-    @Query("select i from Issue i where i.id in (select ci.id from Cycle c join c.issues ci where c.id = :cycleId)")
+    @Query("select i from Issue i where i.id in (select ci.id from Cycle c join c.issues ci where c.id = :cycleId) "
+            + "and i.type <> com.taskflow.api.entity.enums.IssueType.STORY")
     List<Issue> findAllInCycle(@Param("cycleId") UUID cycleId);
 
     /** Tareas del proyecto que empezaron (entraron por primera vez a un estado STARTED) en {@code [from, to)}. */
     @Query("""
             select count(i) from Issue i
-            where i.project.id = :projectId and i.startedAt >= :from and i.startedAt < :to
+            where i.project.id = :projectId and i.startedAt >= :from and i.startedAt < :to and i.type <> com.taskflow.api.entity.enums.IssueType.STORY
             """)
     long countStartedBetween(@Param("projectId") UUID projectId, @Param("from") Instant from,
                              @Param("to") Instant to);
@@ -173,7 +204,7 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
     /** Tareas del proyecto completadas en {@code [from, to)} (y que siguen completadas). */
     @Query("""
             select count(i) from Issue i
-            where i.project.id = :projectId and i.completedAt >= :from and i.completedAt < :to
+            where i.project.id = :projectId and i.completedAt >= :from and i.completedAt < :to and i.type <> com.taskflow.api.entity.enums.IssueType.STORY
             """)
     long countCompletedBetween(@Param("projectId") UUID projectId, @Param("from") Instant from,
                                @Param("to") Instant to);

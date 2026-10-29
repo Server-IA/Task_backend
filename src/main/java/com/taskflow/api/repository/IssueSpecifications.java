@@ -42,6 +42,9 @@ public final class IssueSpecifications {
             if (hasValues(filter.priority())) {
                 predicates.add(root.get("priority").in(filter.priority()));
             }
+            if (hasValues(filter.type())) {
+                predicates.add(root.get("type").in(filter.type()));
+            }
             // Asignados y etiquetas van en subconsultas para no duplicar filas (y no romper la paginación).
             if (hasValues(filter.assignee())) {
                 predicates.add(root.get("id").in(issuesRelatedTo(query, cb, "assignees", filter.assignee())));

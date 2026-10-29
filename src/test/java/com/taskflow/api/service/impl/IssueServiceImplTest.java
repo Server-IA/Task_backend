@@ -98,6 +98,8 @@ class IssueServiceImplTest {
     @Mock
     private IssueChecklistService checklistService;
     @Mock
+    private StoryProgress storyProgress;
+    @Mock
     private ResourceLookup lookup;
     @Mock
     private IssueMapper issueMapper;
@@ -139,7 +141,7 @@ class IssueServiceImplTest {
     }
 
     private static CreateIssueRequest createRequest(String title) {
-        return new CreateIssueRequest(title, null, null, null, null, null, null, null, null, null, null);
+        return new CreateIssueRequest(title, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     @Nested
@@ -191,7 +193,7 @@ class IssueServiceImplTest {
             when(userRepository.findAllById(Set.of(outsider.getId()))).thenReturn(List.of(outsider));
             when(projectMemberRepository.countMembers(eq(project.getId()), anyCollection())).thenReturn(0L);
             CreateIssueRequest request = new CreateIssueRequest("Tarea", null, null, null, null, null, null,
-                    List.of(outsider.getId()), null, null, null);
+                    List.of(outsider.getId()), null, null, null, null, null, null);
 
             assertThatThrownBy(() -> issueService.create(SLUG, project.getId(), author.getId(), request))
                     .isInstanceOf(BadRequestException.class)
@@ -212,7 +214,7 @@ class IssueServiceImplTest {
                         .toList();
             });
             CreateIssueRequest request = new CreateIssueRequest("[Bug] Login", null, null, null, null, null, null,
-                    null, null, checklist, null);
+                    null, null, checklist, null, null, null, null);
 
             issueService.create(SLUG, project.getId(), author.getId(), request);
 
@@ -231,7 +233,7 @@ class IssueServiceImplTest {
             UUID templateId = UUID.randomUUID();
             when(templateRepository.incrementUsage(templateId, project.getId())).thenReturn(1);
             CreateIssueRequest request = new CreateIssueRequest("[Bug] Login", null, null, null, null, null, null,
-                    null, null, null, templateId);
+                    null, null, null, templateId, null, null, null);
 
             issueService.create(SLUG, project.getId(), author.getId(), request);
 
@@ -244,7 +246,7 @@ class IssueServiceImplTest {
             UUID templateId = UUID.randomUUID();
             when(templateRepository.incrementUsage(templateId, project.getId())).thenReturn(0);
             CreateIssueRequest request = new CreateIssueRequest("Tarea", null, null, null, null, null, null,
-                    null, null, null, templateId);
+                    null, null, null, templateId, null, null, null);
 
             assertThatThrownBy(() -> issueService.create(SLUG, project.getId(), author.getId(), request))
                     .isInstanceOf(BadRequestException.class)
@@ -269,7 +271,7 @@ class IssueServiceImplTest {
         @Test
         void rechazaFechaLimiteAnteriorAlInicio() {
             CreateIssueRequest request = new CreateIssueRequest("Tarea", null, null, null, null,
-                    LocalDate.of(2026, 10, 20), LocalDate.of(2026, 10, 10), null, null, null, null);
+                    LocalDate.of(2026, 10, 20), LocalDate.of(2026, 10, 10), null, null, null, null, null, null, null);
 
             assertThatThrownBy(() -> issueService.create(SLUG, project.getId(), author.getId(), request))
                     .isInstanceOf(BadRequestException.class);
@@ -353,7 +355,7 @@ class IssueServiceImplTest {
     class CompletedAt {
 
         private UpdateIssueRequest updateState(UUID stateId) {
-            return new UpdateIssueRequest(null, null, stateId, null, null, null, null, null, null, null, null, null, null);
+            return new UpdateIssueRequest(null, null, stateId, null, null, null, null, null, null, null, null, null, null, null, null);
         }
 
         @BeforeEach
@@ -370,7 +372,7 @@ class IssueServiceImplTest {
         @Test
         void unaTareaCreadaEnUnEstadoCompletadoQuedaCompletada() {
             CreateIssueRequest request = new CreateIssueRequest("Tarea", null, done.getId(), null, null, null, null,
-                    null, null, null, null);
+                    null, null, null, null, null, null, null);
 
             issueService.create(SLUG, project.getId(), author.getId(), request);
 
@@ -425,7 +427,7 @@ class IssueServiceImplTest {
             Instant completedAt = Instant.parse("2026-10-20T15:00:00Z");
             issue.setCompletedAt(completedAt);
             UpdateIssueRequest priorityOnly = new UpdateIssueRequest(null, null, null, IssuePriority.HIGH, null,
-                    null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null);
 
             issueService.update(SLUG, project.getId(), issue.getId(), author.getId(), priorityOnly);
 
@@ -455,13 +457,13 @@ class IssueServiceImplTest {
         }
 
         private UpdateIssueRequest updateState(UUID stateId) {
-            return new UpdateIssueRequest(null, null, stateId, null, null, null, null, null, null, null, null, null, null);
+            return new UpdateIssueRequest(null, null, stateId, null, null, null, null, null, null, null, null, null, null, null, null);
         }
 
         @Test
         void unaTareaCreadaEnCursoEmpiezaAlCrearse() {
             CreateIssueRequest request = new CreateIssueRequest("Tarea", null, inProgress.getId(), null, null, null,
-                    null, null, null, null, null);
+                    null, null, null, null, null, null, null, null);
 
             issueService.create(SLUG, project.getId(), author.getId(), request);
 
@@ -519,7 +521,7 @@ class IssueServiceImplTest {
         }
 
         private UpdateIssueRequest updateState(UUID stateId) {
-            return new UpdateIssueRequest(null, null, stateId, null, null, null, null, null, null, null, null, null, null);
+            return new UpdateIssueRequest(null, null, stateId, null, null, null, null, null, null, null, null, null, null, null, null);
         }
 
         @Test
@@ -621,7 +623,7 @@ class IssueServiceImplTest {
             when(issueRepository.findAll(any(Specification.class), pageable.capture()))
                     .thenReturn(Page.empty());
 
-            issueService.getIssues(SLUG, project.getId(), new IssueFilter(null, null, null, null, null, null, null, null),
+            issueService.getIssues(SLUG, project.getId(), new IssueFilter(null, null, null, null, null, null, null, null, null),
                     PageRequest.of(1, 50, Sort.by(Sort.Direction.ASC, "priorityRank")));
 
             assertThat(pageable.getValue().getPageNumber()).isEqualTo(1);
@@ -636,7 +638,7 @@ class IssueServiceImplTest {
             when(issueRepository.findAll(any(Specification.class), eq(requested)))
                     .thenReturn(new PageImpl<>(List.of(), requested, 0));
 
-            issueService.getIssues(SLUG, project.getId(), new IssueFilter(null, null, null, null, null, null, null, null), requested);
+            issueService.getIssues(SLUG, project.getId(), new IssueFilter(null, null, null, null, null, null, null, null, null), requested);
 
             verify(issueRepository).findAll(any(Specification.class), eq(requested));
         }
@@ -651,7 +653,7 @@ class IssueServiceImplTest {
             Issue child = issue(todo, 2);
             child.setParent(parent);
             UpdateIssueRequest request = new UpdateIssueRequest(null, null, null, null, child.getId(),
-                    null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null);
 
             assertThatThrownBy(() -> issueService.update(SLUG, project.getId(), parent.getId(), author.getId(), request))
                     .isInstanceOf(BadRequestException.class);
@@ -663,7 +665,7 @@ class IssueServiceImplTest {
 
         private UpdateIssueRequest description(String description, Integer baseVersion) {
             return new UpdateIssueRequest(null, description, null, null, null, null, null, null, null, null, null, null,
-                    baseVersion);
+                    baseVersion, null, null);
         }
 
         @Test
@@ -753,7 +755,7 @@ class IssueServiceImplTest {
             issue.setDescriptionVersion(6);
             issue.setPriority(IssuePriority.LOW);
             UpdateIssueRequest mine = new UpdateIssueRequest(null, "Lo mío", null, IssuePriority.HIGH, null, null,
-                    null, null, null, null, null, null, 5);
+                    null, null, null, null, null, null, 5, null, null);
 
             assertThatThrownBy(() -> issueService.update(SLUG, project.getId(), issue.getId(), author.getId(), mine))
                     .isInstanceOf(DescriptionConflictException.class)
@@ -805,7 +807,7 @@ class IssueServiceImplTest {
             when(lookup.user(author.getId())).thenReturn(author);
             when(issueRepository.saveAndFlush(issue)).thenReturn(issue);
             UpdateIssueRequest priorityOnly = new UpdateIssueRequest(null, null, null, IssuePriority.HIGH, null,
-                    null, null, null, null, null, null, null, 1);
+                    null, null, null, null, null, null, null, 1, null, null);
 
             issueService.update(SLUG, project.getId(), issue.getId(), author.getId(), priorityOnly);
 

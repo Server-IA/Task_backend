@@ -1,5 +1,7 @@
 package com.taskflow.api.dto.response;
 
+import com.taskflow.api.entity.enums.IssueType;
+
 import java.util.UUID;
 
 /**
@@ -8,6 +10,13 @@ import java.util.UUID;
 public record IssueSummaryResponse(
         UUID id,
         String code,
-        String title
+        String title,
+        /** Tipo (para el icono y el chip «↰ WEB-15» de la historia). */
+        IssueType type
 ) {
+
+    /** Una tarea ({@code TASK}). */
+    public IssueSummaryResponse(UUID id, String code, String title) {
+        this(id, code, title, IssueType.TASK);
+    }
 }

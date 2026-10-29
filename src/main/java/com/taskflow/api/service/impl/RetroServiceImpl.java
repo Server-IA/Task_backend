@@ -199,7 +199,7 @@ public class RetroServiceImpl implements RetroService {
                 : null;
         IssueResponse issue = issueService.create(slug, projectId, userId, new CreateIssueRequest(
                 title, issueDescription(cycle, note.getText(), title), stateId,
-                null, null, null, null, assigneeIds, null, null, null));
+                null, null, null, null, assigneeIds, null, null, null, null, null, null));
         note.setIssue(issueRepository.getReferenceById(issue.id()));
         noteRepository.save(note);
         return issue;

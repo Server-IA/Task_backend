@@ -47,7 +47,7 @@ class NestedValidationTest {
     }
 
     private static SavedViewFilters filters(String view, String sort, String groupBy) {
-        return new SavedViewFilters(null, null, null, null, null, view, sort, null, null, null, groupBy);
+        return new SavedViewFilters(null, null, null, null, null, view, sort, null, null, null, groupBy, null);
     }
 
     @Test
@@ -55,7 +55,7 @@ class NestedValidationTest {
         CreateIssueRequest request = new CreateIssueRequest("Tarea", null, null, null, null, null, null, null, null,
                 List.of(new ChecklistItemRequest(ChecklistItemKind.CHECK, "Bien"),
                         new ChecklistItemRequest(null, "  "),
-                        new ChecklistItemRequest(ChecklistItemKind.CRITERION, "x".repeat(501))), null);
+                        new ChecklistItemRequest(ChecklistItemKind.CRITERION, "x".repeat(501))), null, null, null, null);
 
         assertThat(paths(validator.validate(request)))
                 .containsExactly("checklist[1].kind", "checklist[1].text", "checklist[2].text");
@@ -64,7 +64,7 @@ class NestedValidationTest {
     @Test
     void validaLaChecklistDeLasPlantillas() {
         IssueTemplateRequest request = new IssueTemplateRequest("Bug", null, null, null, null,
-                List.of(new ChecklistItemRequest(ChecklistItemKind.CHECK, "")), null, null);
+                List.of(new ChecklistItemRequest(ChecklistItemKind.CHECK, "")), null, null, null);
 
         assertThat(paths(validator.validate(request))).containsExactly("checklist[0].text");
     }

@@ -34,7 +34,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ErrorResponse> handleApi(ApiException ex) {
-        return build(ex.getStatus(), ex.getMessage());
+        return ResponseEntity.status(ex.getStatus())
+                .body(ErrorResponse.of(ex.getStatus().value(), ex.getMessage(), null, ex.getCode()));
     }
 
     /** 409 al guardar una descripción que otra persona cambió: con la versión actual para resolver el conflicto. */

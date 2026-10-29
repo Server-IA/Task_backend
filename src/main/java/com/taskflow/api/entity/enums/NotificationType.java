@@ -8,5 +8,10 @@ public enum NotificationType {
     /** Alguien mencionó al usuario en un comentario (con {@code @[Nombre](id)}). */
     ISSUE_MENTIONED,
     /** Se abrió la retrospectiva de un ciclo (la notificación lleva el ciclo, no una tarea). */
-    RETRO_STARTED
+    RETRO_STARTED,
+    /**
+     * Una historia quedó «lista para revisar» (todas sus tareas terminadas y ningún bug ligado abierto). Lo manda
+     * TaskFlow (sin autor) a los project managers del workspace.
+     */
+    STORY_READY
 }

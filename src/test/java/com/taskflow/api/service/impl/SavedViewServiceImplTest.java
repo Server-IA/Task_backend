@@ -156,14 +156,15 @@ class SavedViewServiceImplTest {
         UUID state = UUID.randomUUID();
         UUID cycle = UUID.randomUUID();
         SavedViewFilters filters = new SavedViewFilters(List.of(state), List.of(IssuePriority.HIGH), List.of(),
-                List.of(), "login", "board", "priority", cycle, null, true, "assignee");
+                List.of(), "login", "board", "priority", cycle, null, true, "assignee", null);
 
         IssueFilter issueFilter = SavedViewServiceImpl.issueFilter(filters);
 
         assertThat(issueFilter).isEqualTo(new IssueFilter(List.of(state), List.of(IssuePriority.HIGH), List.of(),
-                List.of(), "login", cycle, null, true));
+                List.of(), "login", cycle, null, true, SavedViewFilters.DEFAULT_TYPES));
         assertThat(SavedViewServiceImpl.issueFilter(null))
-                .isEqualTo(new IssueFilter(List.of(), List.of(), List.of(), List.of(), null, null, null, null));
+                .isEqualTo(new IssueFilter(List.of(), List.of(), List.of(), List.of(), null, null, null, null,
+                        SavedViewFilters.DEFAULT_TYPES));
     }
 
     @Nested
@@ -235,7 +236,7 @@ class SavedViewServiceImplTest {
             personalGroup(member, view(member, false, 0));
             UUID cycleId = UUID.randomUUID();
             SavedViewFilters filters = new SavedViewFilters(null, List.of(IssuePriority.HIGH, IssuePriority.HIGH),
-                    null, null, "  login ", "board", "dueDate,asc", cycleId, null, true, "assignee");
+                    null, null, "  login ", "board", "dueDate,asc", cycleId, null, true, "assignee", null);
 
             SavedViewResponse response = viewService.create(SLUG, project.getId(), member.getId(),
                     new CreateSavedViewRequest("  Mis urgentes ", null, filters));
@@ -249,7 +250,7 @@ class SavedViewServiceImplTest {
             // Filtros normalizados: listas sin repetidos ([] si no vienen) y búsqueda recortada
             assertThat(saved.getValue().getFilters()).isEqualTo(new SavedViewFilters(List.of(),
                     List.of(IssuePriority.HIGH), List.of(), List.of(), "login", "board", "dueDate,asc", cycleId, null,
-                    true, "assignee"));
+                    true, "assignee", null));
             assertThat(response.mine()).isTrue();
         }
 
@@ -327,7 +328,7 @@ class SavedViewServiceImplTest {
         void elProjectManagerEditaLasCompartidas() {
             SavedView shared = view(otherMember, true, 0);
             SavedViewFilters filters = new SavedViewFilters(null, null, List.of(member.getId()), null, null,
-                    "list", null, null, null, null, null);
+                    "list", null, null, null, null, null, null);
 
             SavedViewResponse response = viewService.update(SLUG, project.getId(), shared.getId(), pm.getId(),
                     new UpdateSavedViewRequest("Del equipo", filters, null, null));

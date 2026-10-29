@@ -11,6 +11,7 @@ import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.TemplateChecklistItem;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.enums.IssuePriority;
+import com.taskflow.api.entity.enums.IssueType;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ResourceNotFoundException;
@@ -64,6 +65,7 @@ public class IssueTemplateServiceImpl implements IssueTemplateService {
         IssueTemplate template = new IssueTemplate();
         template.setProject(project);
         template.setName(name);
+        template.setType(request.type() != null ? request.type() : IssueType.TASK);
         template.setTitlePrefix(blankToNull(request.titlePrefix(), false));
         template.setDescription(blankToNull(request.description(), true));
         template.setPriority(priorityOrNull(request.priority()));
@@ -93,6 +95,9 @@ public class IssueTemplateServiceImpl implements IssueTemplateService {
         }
         if (request.titlePrefix() != null) {
             template.setTitlePrefix(blankToNull(request.titlePrefix(), false));
+        }
+        if (request.type() != null) {
+            template.setType(request.type());
         }
         if (request.description() != null) {
             template.setDescription(blankToNull(request.description(), true));

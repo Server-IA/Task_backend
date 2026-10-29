@@ -138,7 +138,7 @@ class IssueTemplateServiceImplTest {
             IssueTemplateRequest request = new IssueTemplateRequest("  Incidente  ", "[Incidente] ",
                     "  ## Impacto  ", IssuePriority.URGENT, List.of(ui.getId(), backend.getId()),
                     List.of(new ChecklistItemRequest(ChecklistItemKind.CHECK, " Avisar al equipo "),
-                            new ChecklistItemRequest(ChecklistItemKind.CRITERION, "Dado …")), null, null);
+                            new ChecklistItemRequest(ChecklistItemKind.CRITERION, "Dado …")), null, null, null);
 
             templateService.create(SLUG, project.getId(), request);
 
@@ -163,7 +163,7 @@ class IssueTemplateServiceImplTest {
         void sinPrioridadOConNoneNoFijaPrioridadYSinPrefijoQuedaNull() {
             existing();
             IssueTemplateRequest request = new IssueTemplateRequest("Spike", "   ", null, IssuePriority.NONE,
-                    null, null, null, null);
+                    null, null, null, null, null);
 
             templateService.create(SLUG, project.getId(), request);
 
@@ -188,7 +188,7 @@ class IssueTemplateServiceImplTest {
             users(List.of(luis, ana), 2);
 
             templateService.create(SLUG, project.getId(), new IssueTemplateRequest("Bug", null, null, null, null,
-                    null, todo.getId(), List.of(luis.getId(), ana.getId(), luis.getId())));
+                    null, todo.getId(), List.of(luis.getId(), ana.getId(), luis.getId()), null));
 
             ArgumentCaptor<IssueTemplate> saved = ArgumentCaptor.forClass(IssueTemplate.class);
             verify(templateRepository).save(saved.capture());
@@ -202,7 +202,7 @@ class IssueTemplateServiceImplTest {
             when(stateRepository.findByIdAndProjectId(otherState, project.getId())).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> templateService.create(SLUG, project.getId(),
-                    new IssueTemplateRequest("Bug", null, null, null, null, null, otherState, null)))
+                    new IssueTemplateRequest("Bug", null, null, null, null, null, otherState, null, null)))
                     .isInstanceOf(BadRequestException.class)
                     .hasMessage("El estado debe pertenecer al proyecto");
             verify(templateRepository, never()).save(any());
@@ -214,7 +214,7 @@ class IssueTemplateServiceImplTest {
             users(List.of(outsider), 0);
 
             assertThatThrownBy(() -> templateService.create(SLUG, project.getId(),
-                    new IssueTemplateRequest("Bug", null, null, null, null, null, null, List.of(outsider.getId()))))
+                    new IssueTemplateRequest("Bug", null, null, null, null, null, null, List.of(outsider.getId()), null)))
                     .isInstanceOf(BadRequestException.class)
                     .hasMessage("Los asignados deben ser miembros del proyecto");
             verify(templateRepository, never()).save(any());
@@ -225,7 +225,7 @@ class IssueTemplateServiceImplTest {
             users(List.of(), 0);
 
             assertThatThrownBy(() -> templateService.create(SLUG, project.getId(),
-                    new IssueTemplateRequest("Bug", null, null, null, null, null, null, List.of(UUID.randomUUID()))))
+                    new IssueTemplateRequest("Bug", null, null, null, null, null, null, List.of(UUID.randomUUID()), null)))
                     .isInstanceOf(BadRequestException.class)
                     .hasMessage("Los asignados deben ser miembros del proyecto");
         }
@@ -236,7 +236,7 @@ class IssueTemplateServiceImplTest {
                     .thenReturn(true);
 
             assertThatThrownBy(() -> templateService.create(SLUG, project.getId(),
-                    new IssueTemplateRequest("reporte de bug", null, null, null, null, null, null, null)))
+                    new IssueTemplateRequest("reporte de bug", null, null, null, null, null, null, null, null)))
                     .isInstanceOf(ConflictException.class)
                     .hasMessage("Ya existe una plantilla llamada 'reporte de bug'");
             verify(templateRepository, never()).save(any());
@@ -247,7 +247,7 @@ class IssueTemplateServiceImplTest {
             when(labelRepository.findAllByProjectIdAndIdIn(eq(project.getId()), anyCollection())).thenReturn(List.of());
 
             assertThatThrownBy(() -> templateService.create(SLUG, project.getId(),
-                    new IssueTemplateRequest("Bug", null, null, null, List.of(UUID.randomUUID()), null, null, null)))
+                    new IssueTemplateRequest("Bug", null, null, null, List.of(UUID.randomUUID()), null, null, null, null)))
                     .isInstanceOf(BadRequestException.class)
                     .hasMessage("Las etiquetas deben pertenecer al proyecto");
         }
@@ -269,7 +269,7 @@ class IssueTemplateServiceImplTest {
             bug.getAssignees().add(ana);
 
             templateService.update(SLUG, project.getId(), bug.getId(), new UpdateIssueTemplateRequest(null, null,
-                    "## Pasos para reproducir", null, null, null, null, null, null, null));
+                    "## Pasos para reproducir", null, null, null, null, null, null, null, null));
 
             assertThat(bug.getName()).isEqualTo("Reporte de bug");
             assertThat(bug.getState()).isSameAs(todo);
@@ -289,7 +289,7 @@ class IssueTemplateServiceImplTest {
 
             templateService.update(SLUG, project.getId(), bug.getId(), new UpdateIssueTemplateRequest(null, "",
                     null, IssuePriority.NONE, null,
-                    List.of(new ChecklistItemRequest(ChecklistItemKind.CRITERION, "Dado …")), null, null, null, null));
+                    List.of(new ChecklistItemRequest(ChecklistItemKind.CRITERION, "Dado …")), null, null, null, null, null));
 
             assertThat(bug.getTitlePrefix()).isNull();
             assertThat(bug.getPriority()).isNull();
@@ -307,7 +307,7 @@ class IssueTemplateServiceImplTest {
             users(List.of(luis), 1);
 
             templateService.update(SLUG, project.getId(), bug.getId(), new UpdateIssueTemplateRequest(null, null,
-                    null, null, null, null, null, review.getId(), null, List.of(luis.getId())));
+                    null, null, null, null, null, review.getId(), null, List.of(luis.getId()), null));
 
             assertThat(bug.getState()).isSameAs(review);
             assertThat(bug.getAssignees()).containsExactly(luis);
@@ -320,7 +320,7 @@ class IssueTemplateServiceImplTest {
             bug.getAssignees().add(user("Ana"));
 
             templateService.update(SLUG, project.getId(), bug.getId(), new UpdateIssueTemplateRequest(null, null,
-                    null, null, null, null, null, UUID.randomUUID(), true, List.of()));
+                    null, null, null, null, null, UUID.randomUUID(), true, List.of(), null));
 
             assertThat(bug.getState()).isNull();
             assertThat(bug.getAssignees()).isEqualTo(Set.of());
@@ -334,7 +334,7 @@ class IssueTemplateServiceImplTest {
             when(stateRepository.findByIdAndProjectId(otherState, project.getId())).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> templateService.update(SLUG, project.getId(), bug.getId(),
-                    new UpdateIssueTemplateRequest(null, null, null, null, null, null, null, otherState, null, null)))
+                    new UpdateIssueTemplateRequest(null, null, null, null, null, null, null, otherState, null, null, null)))
                     .isInstanceOf(BadRequestException.class)
                     .hasMessage("El estado debe pertenecer al proyecto");
         }
@@ -345,7 +345,7 @@ class IssueTemplateServiceImplTest {
 
             templateService.update(SLUG, project.getId(), bug.getId(),
                     new UpdateIssueTemplateRequest("Reporte de Bug", null, null, null, null, null, null, null, null,
-                            null));
+                            null, null));
 
             assertThat(bug.getName()).isEqualTo("Reporte de Bug");
             verify(templateRepository, never()).existsByProjectIdAndNameIgnoreCase(any(), anyString());
@@ -359,7 +359,7 @@ class IssueTemplateServiceImplTest {
 
             assertThatThrownBy(() -> templateService.update(SLUG, project.getId(), bug.getId(),
                     new UpdateIssueTemplateRequest("Tarea técnica", null, null, null, null, null, null, null, null,
-                            null)))
+                            null, null)))
                     .isInstanceOf(ConflictException.class);
         }
 
@@ -371,7 +371,7 @@ class IssueTemplateServiceImplTest {
             existing(bug, story, tech);
 
             templateService.update(SLUG, project.getId(), tech.getId(),
-                    new UpdateIssueTemplateRequest(null, null, null, null, null, null, 0, null, null, null));
+                    new UpdateIssueTemplateRequest(null, null, null, null, null, null, 0, null, null, null, null));
 
             assertThat(List.of(tech.getPosition(), bug.getPosition(), story.getPosition())).containsExactly(0, 1, 2);
         }

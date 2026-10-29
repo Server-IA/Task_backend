@@ -95,7 +95,7 @@ class ActivityServiceImplTest {
         @Test
         void filtraPorTipo() {
             feed(ActivityFeedType.STATE, null, null, 0, 30);
-            assertThat(fields.getValue()).containsExactly(ActivityField.STATE);
+            assertThat(fields.getValue()).containsExactlyInAnyOrder(ActivityField.STATE, ActivityField.STORY_AUTO_STATE);
         }
 
         @Test
