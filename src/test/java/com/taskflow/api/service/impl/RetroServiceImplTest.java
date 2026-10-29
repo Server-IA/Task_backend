@@ -652,4 +652,15 @@ class RetroServiceImplTest {
             assertThat(cycle.getRetroFinishedAt()).isNull();
         }
     }
+
+    @Test
+    void elTituloDeUnaAccionLargaConEmojisNoParteUnEmoji() {
+        // 253 letras y emojis: el corte en 254 caía en medio de un emoji y la tarea quedaba con «?…» en el título
+        String text = "a".repeat(253) + "😀".repeat(100);
+
+        String title = RetroServiceImpl.issueTitle(text);
+
+        assertThat(title).isEqualTo("a".repeat(253) + "…");
+        assertThat(title.chars().noneMatch(c -> Character.isSurrogate((char) c))).isTrue();
+    }
 }

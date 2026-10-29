@@ -29,6 +29,7 @@ import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.service.IssueService;
 import com.taskflow.api.service.NotificationService;
 import com.taskflow.api.service.RetroService;
+import com.taskflow.api.util.TextCut;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -227,7 +228,7 @@ public class RetroServiceImpl implements RetroService {
         String title = text.strip().replaceAll("\\s+", " ");
         return title.length() <= MAX_TITLE_LENGTH
                 ? title
-                : title.substring(0, MAX_TITLE_LENGTH - 1).stripTrailing() + "…";
+                : TextCut.prefix(title, MAX_TITLE_LENGTH - 1).stripTrailing() + "…";
     }
 
     /** Descripción (markdown) que apunta a la retrospectiva; si el título no es el texto completo, lo incluye. */

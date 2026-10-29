@@ -175,6 +175,9 @@ public class DailyServiceImpl implements DailyService {
     public Optional<DailyNoteResponse> saveNote(String slug, UUID projectId, UUID userId, LocalDate date,
                                                 DailyNoteRequest request) {
         Project project = lookup.project(slug, projectId);
+        // Dos personas que guardan la primera nota del día a la vez: la segunda espera y edita la que creó la primera
+        // (antes, las dos la creaban y una recibía 409 por la restricción uk_daily_notes_day)
+        lookup.lockProject(project);
         LocalDate day = date != null ? date : LocalDate.now(ZoneId.of(properties.timezone()));
         String text = request.text() == null ? "" : request.text().strip();
         Optional<DailyNote> existing = noteRepository.findByProjectIdAndDate(project.getId(), day);

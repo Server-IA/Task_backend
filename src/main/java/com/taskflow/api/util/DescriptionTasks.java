@@ -122,6 +122,6 @@ public final class DescriptionTasks {
     }
 
     private static String shorten(String text) {
-        return text.length() <= MAX_TEXT ? text : text.substring(0, MAX_TEXT - 1).stripTrailing() + "…";
+        return text.length() <= MAX_TEXT ? text : TextCut.prefix(text, MAX_TEXT - 1).stripTrailing() + "…";
     }
 }

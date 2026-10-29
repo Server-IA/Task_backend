@@ -19,6 +19,7 @@ import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.service.NotificationService;
 import com.taskflow.api.util.PageCursor;
+import com.taskflow.api.util.TextCut;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
@@ -256,6 +257,6 @@ public class NotificationServiceImpl implements NotificationService {
 
     private static String shortTitle(Issue issue) {
         String title = issue.getTitle();
-        return title.length() > MAX_TITLE_IN_MESSAGE ? title.substring(0, MAX_TITLE_IN_MESSAGE) + "…" : title;
+        return title.length() > MAX_TITLE_IN_MESSAGE ? TextCut.prefix(title, MAX_TITLE_IN_MESSAGE) + "…" : title;
     }
 }

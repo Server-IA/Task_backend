@@ -108,4 +108,25 @@ class GlobalExceptionHandlerTest {
         assertThat(GlobalExceptionHandler.constraintName(ex)).isEqualTo("uk_users_email").doesNotContain("@");
         assertThat(handler.handleDataIntegrity(ex).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
     }
+
+    @Test
+    void unValorQuePostgresNoAceptaEs400YNoUnConflicto() {
+        // «invalid byte sequence for encoding "UTF8": 0x00» (un carácter nulo en un título) llega como
+        // DataIntegrityViolationException con SQLState 22021; antes respondía 409 «conflicto con datos existentes»
+        DataIntegrityViolationException nul = new DataIntegrityViolationException("could not execute statement",
+                new java.sql.SQLException("ERROR: invalid byte sequence for encoding \"UTF8\": 0x00", "22021"));
+        DataIntegrityViolationException tooLong = new DataIntegrityViolationException("could not execute statement",
+                new java.sql.SQLException("ERROR: value too long for type character varying(255)", "22001"));
+
+        for (DataIntegrityViolationException ex : List.of(nul, tooLong)) {
+            ResponseEntity<ErrorResponse> response = handler.handleDataIntegrity(ex);
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+            assertThat(response.getBody()).isNotNull();
+            assertThat(response.getBody().message()).isEqualTo(GlobalExceptionHandler.INVALID_TEXT_MESSAGE);
+        }
+        // Una restricción violada (23505, clave duplicada) sigue siendo un conflicto
+        DataIntegrityViolationException duplicate = new DataIntegrityViolationException("duplicado",
+                new java.sql.SQLException("duplicate key value violates unique constraint", "23505"));
+        assertThat(handler.handleDataIntegrity(duplicate).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+    }
 }

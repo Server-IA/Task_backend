@@ -33,7 +33,7 @@ public final class MentionParser {
         String text = MENTION.matcher(body).replaceAll(match -> Matcher.quoteReplacement("@" + match.group(1)))
                 .replaceAll("\\s+", " ")
                 .strip();
-        return text.length() <= maxLength ? text : text.substring(0, maxLength).stripTrailing() + "…";
+        return text.length() <= maxLength ? text : TextCut.prefix(text, maxLength).stripTrailing() + "…";
     }
 
     /** Ids mencionados, sin repetir y en orden de aparición (como máximo {@link #MAX_MENTIONS}). */

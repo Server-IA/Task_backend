@@ -84,6 +84,15 @@ public interface ProjectRepository extends JpaRepository<Project, UUID> {
      * Incrementa el contador de issues con un UPDATE atómico. La fila queda bloqueada hasta el final de la
      * transacción, así dos issues creados a la vez nunca reciben el mismo número.
      */
+    /**
+     * Bloquea la fila del proyecto hasta el final de la transacción. Lo usan los cambios que comprueban algo del
+     * proyecto antes de escribir y que la base de datos no garantiza sola: que no haya dos estados o etiquetas con el
+     * mismo nombre sin importar mayúsculas («Bug» y «bug» a la vez) y que la primera nota de la daily de un día no se
+     * cree dos veces. {@code NO KEY UPDATE}: no choca con las filas que solo apuntan al proyecto.
+     */
+    @Query(value = "SELECT 1 FROM projects WHERE id = :id FOR NO KEY UPDATE", nativeQuery = true)
+    List<Integer> lockById(@Param("id") UUID id);
+
     @Modifying
     @Query(value = "UPDATE projects SET issue_counter = issue_counter + 1 WHERE id = :id", nativeQuery = true)
     int incrementIssueCounter(@Param("id") UUID id);

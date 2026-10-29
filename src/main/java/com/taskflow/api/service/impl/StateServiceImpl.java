@@ -54,6 +54,7 @@ public class StateServiceImpl implements StateService {
     @Transactional
     public StateResponse create(String slug, UUID projectId, CreateStateRequest request) {
         Project project = lookup.project(slug, projectId);
+        lookup.lockProject(project);
         String name = request.name().trim();
         ensureNameAvailable(project, name);
 
@@ -68,6 +69,9 @@ public class StateServiceImpl implements StateService {
     @Transactional
     public StateResponse update(String slug, UUID projectId, UUID stateId, UUID userId, UpdateStateRequest request) {
         Project project = lookup.project(slug, projectId);
+        if (request.name() != null) {
+            lookup.lockProject(project);
+        }
         State state = findState(project, stateId);
         if (request.name() != null) {
             String name = request.name().trim();

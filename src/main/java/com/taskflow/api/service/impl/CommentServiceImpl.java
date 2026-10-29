@@ -19,6 +19,7 @@ import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.service.CommentService;
 import com.taskflow.api.service.NotificationService;
 import com.taskflow.api.util.MentionParser;
+import com.taskflow.api.util.TextCut;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -131,6 +132,6 @@ public class CommentServiceImpl implements CommentService {
     }
 
     private static String excerpt(String body) {
-        return body.length() <= ACTIVITY_EXCERPT_LENGTH ? body : body.substring(0, ACTIVITY_EXCERPT_LENGTH) + "…";
+        return body.length() <= ACTIVITY_EXCERPT_LENGTH ? body : TextCut.prefix(body, ACTIVITY_EXCERPT_LENGTH) + "…";
     }
 }

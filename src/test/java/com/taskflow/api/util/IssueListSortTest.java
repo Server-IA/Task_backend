@@ -1,11 +1,15 @@
 package com.taskflow.api.util;
 
+import com.taskflow.api.exception.BadRequestException;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class IssueListSortTest {
 
@@ -49,5 +53,17 @@ class IssueListSortTest {
 
         assertThat(describe(result)).isEqualTo("sequenceId,desc");
         assertThat(IssueListSort.withTieBreakers(Pageable.unpaged())).isEqualTo(Pageable.unpaged());
+    }
+
+    @Test
+    void noOrdenaPorCamposDeOtrasEntidades() {
+        // sort=createdBy.passwordHash hacía un join a users y ordenaba por el hash de la contraseña de cada autor
+        for (String property : List.of("createdBy.passwordHash", "assignees.email", "project.workspace.name")) {
+            assertThatThrownBy(() -> IssueListSort.withTieBreakers(PageRequest.of(0, 20, Sort.by(property))))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessageContaining(property);
+        }
+        assertThat(describe(IssueListSort.withTieBreakers(PageRequest.of(0, 20, Sort.by("title")))))
+                .isEqualTo("title,asc sequenceId,asc");
     }
 }

@@ -38,4 +38,13 @@ class ResourceLookup {
         return projectRepository.findInWorkspace(projectId, slug)
                 .orElseThrow(() -> new ResourceNotFoundException("Proyecto no encontrado"));
     }
+
+    /**
+     * Bloquea la fila del proyecto hasta el final de la transacción ({@link ProjectRepository#lockById}): las
+     * comprobaciones que hace quien lo llama (nombre libre sin importar mayúsculas, la nota de un día que aún no existe)
+     * no se cruzan con las de otra petición simultánea.
+     */
+    void lockProject(Project project) {
+        projectRepository.lockById(project.getId());
+    }
 }

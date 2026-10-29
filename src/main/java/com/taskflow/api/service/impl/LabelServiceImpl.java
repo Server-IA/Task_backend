@@ -38,6 +38,7 @@ public class LabelServiceImpl implements LabelService {
     @Transactional
     public LabelResponse create(String slug, UUID projectId, LabelRequest request) {
         Project project = lookup.project(slug, projectId);
+        lookup.lockProject(project);
         String name = request.name().trim();
         ensureNameAvailable(project, name);
 
@@ -52,6 +53,7 @@ public class LabelServiceImpl implements LabelService {
     @Transactional
     public LabelResponse update(String slug, UUID projectId, UUID labelId, LabelRequest request) {
         Project project = lookup.project(slug, projectId);
+        lookup.lockProject(project);
         Label label = labelRepository.findByIdAndProjectId(labelId, project.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Etiqueta no encontrada"));
         String name = request.name().trim();

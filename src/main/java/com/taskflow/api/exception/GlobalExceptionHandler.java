@@ -38,6 +38,9 @@ import java.util.Map;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    static final String INVALID_TEXT_MESSAGE =
+            "Datos inválidos: el texto tiene caracteres no permitidos o es demasiado largo";
+
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ErrorResponse> handleApi(ApiException ex) {
         ResponseEntity.BodyBuilder response = ResponseEntity.status(ex.getStatus());
@@ -157,6 +160,12 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ErrorResponse> handleDataIntegrity(DataIntegrityViolationException ex) {
+        if (isInvalidData(ex)) {
+            // PostgreSQL rechazó el valor en sí (un carácter nulo U+0000 en un texto, un texto demasiado largo…): es un
+            // dato inválido de la petición, no un conflicto con datos existentes
+            log.warn("Dato rechazado por la base de datos: SQLState {}", sqlState(ex));
+            return build(HttpStatus.BAD_REQUEST, INVALID_TEXT_MESSAGE);
+        }
         // Solo la restricción: el detalle de PostgreSQL trae los valores («Key (email)=(…)»), datos personales
         log.warn("Violación de integridad de datos: {}", constraintName(ex));
         return build(HttpStatus.CONFLICT, "La operación entra en conflicto con datos existentes");
@@ -181,6 +190,21 @@ public class GlobalExceptionHandler {
         }
         log.error("Error inesperado", ex);
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "Ocurrió un error inesperado");
+    }
+
+    /** Clase 22 de SQLState (data exception): el valor no es válido para la columna, no viola ninguna restricción. */
+    static boolean isInvalidData(DataIntegrityViolationException ex) {
+        String state = sqlState(ex);
+        return state != null && state.startsWith("22");
+    }
+
+    private static String sqlState(Throwable ex) {
+        for (Throwable cause = ex; cause != null; cause = cause.getCause()) {
+            if (cause instanceof java.sql.SQLException sql && sql.getSQLState() != null) {
+                return sql.getSQLState();
+            }
+        }
+        return null;
     }
 
     /** Nombre de la restricción violada (por ejemplo {@code uk_users_email}), o el tipo de error si no se conoce. */

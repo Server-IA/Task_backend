@@ -52,7 +52,7 @@ public class IssueChecklistServiceImpl implements IssueChecklistService {
     @Override
     @Transactional
     public ChecklistItemResponse create(String slug, UUID projectId, UUID issueId, ChecklistItemRequest request) {
-        Issue issue = findIssue(slug, projectId, issueId);
+        Issue issue = findLockedIssue(slug, projectId, issueId);
         if (itemRepository.countByIssueId(issue.getId()) >= MAX_ITEMS_PER_ISSUE) {
             throw new ConflictException("Una tarea admite como máximo " + MAX_ITEMS_PER_ISSUE
                     + " criterios y pasos de checklist");
@@ -69,7 +69,7 @@ public class IssueChecklistServiceImpl implements IssueChecklistService {
     @Transactional
     public ChecklistItemResponse update(String slug, UUID projectId, UUID issueId, UUID itemId, UUID userId,
                                         UpdateChecklistItemRequest request) {
-        Issue issue = findIssue(slug, projectId, issueId);
+        Issue issue = findLockedIssue(slug, projectId, issueId);
         IssueChecklistItem item = findItem(issue, itemId);
         Instant now = Instant.now();
         if (request.text() != null) {
@@ -97,7 +97,7 @@ public class IssueChecklistServiceImpl implements IssueChecklistService {
     @Override
     @Transactional
     public void delete(String slug, UUID projectId, UUID issueId, UUID itemId) {
-        Issue issue = findIssue(slug, projectId, issueId);
+        Issue issue = findLockedIssue(slug, projectId, issueId);
         IssueChecklistItem item = findItem(issue, itemId);
         itemRepository.delete(item);
         // Los que quedan se renumeran para que la posición siga siendo su índice.
@@ -142,6 +142,16 @@ public class IssueChecklistServiceImpl implements IssueChecklistService {
         for (int i = 0; i < ordered.size(); i++) {
             ordered.get(i).setPosition(i);
         }
+    }
+
+    /**
+     * La tarea, con su fila bloqueada antes de leer la checklist: los cambios de la checklist de una misma tarea van en
+     * fila, así el máximo de {@value #MAX_ITEMS_PER_ISSUE} se respeta con peticiones simultáneas y las posiciones no se
+     * repiten ni quedan huecos.
+     */
+    private Issue findLockedIssue(String slug, UUID projectId, UUID issueId) {
+        issueRepository.lockById(issueId);
+        return findIssue(slug, projectId, issueId);
     }
 
     private Issue findIssue(String slug, UUID projectId, UUID issueId) {
