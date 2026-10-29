@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="es"
+      th:replace="~{email/layout :: layout('~/correo/verificar', 'Confirma tu correo para activar tu cuenta de TaskFlow.', ~{::content})}">
+<body>
+<div th:fragment="content">
+    <div th:replace="~{email/parts :: heading('@', 'accent', 'Verifica tu correo')}"></div>
+    <p class="tf-muted" style="margin:12px 0 0;color:#67615A;">
+        Hola <strong class="tf-ink" style="color:#23201B;" th:text="${name}">Ana</strong>, gracias por registrarte.
+        Confirma tu correo para activar tu cuenta.
+    </p>
+
+    <!--/* Mismo progreso que la pantalla de verificación: aquí falta el correo y el workspace */-->
+    <table role="presentation" aria-label="Progreso" width="100%" cellpadding="0" cellspacing="0" border="0"
+           style="margin-top:22px;font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;">
+        <tr>
+            <td width="33%" valign="top" style="padding-right:4px;">
+                <div class="tf-bar-ok" style="height:4px;line-height:4px;font-size:0;background-color:#2E9E6A;border-radius:999px;">&nbsp;</div>
+                <div class="tf-ink" style="margin-top:6px;color:#23201B;">✓ cuenta</div>
+            </td>
+            <td width="33%" valign="top" style="padding:0 2px;">
+                <div class="tf-bar" style="height:4px;line-height:4px;font-size:0;background-color:#EAE7E1;border-radius:999px;">&nbsp;</div>
+                <div class="tf-muted" style="margin-top:6px;color:#67615A;">○ correo</div>
+            </td>
+            <td width="33%" valign="top" style="padding-left:4px;">
+                <div class="tf-bar" style="height:4px;line-height:4px;font-size:0;background-color:#EAE7E1;border-radius:999px;">&nbsp;</div>
+                <div class="tf-muted" style="margin-top:6px;color:#67615A;">○ workspace</div>
+            </td>
+        </tr>
+    </table>
+
+    <div th:replace="~{email/parts :: button(${link}, 'Verificar mi correo', |vence en ${hours} h · solo sirve una vez|)}"></div>
+    <div th:replace="~{email/parts :: footnote('Si no creaste esta cuenta, ignora este correo.', ${link})}"></div>
+</div>
+</body>
+</html>

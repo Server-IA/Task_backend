@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<!--/*
+    Plantilla base de los correos, con el estilo de la app («Fusión B + C», color crema):
+    logo y ruta en monoespaciada arriba, tarjeta blanca y pie. Cada correo pone la ruta (meta),
+    el texto de vista previa de la bandeja (preheader) y el contenido de la tarjeta.
+
+    Los clientes de correo solo respetan estilos en línea y tablas. El bloque <style> agrega el modo
+    oscuro y el ajuste para celulares donde se soporta (Apple Mail, iOS, Outlook…); en el resto el
+    correo se ve en modo claro. Las fuentes de Google Fonts tienen respaldo en fuentes del sistema.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org" lang="es" th:fragment="layout(meta, preheader, content)">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <meta name="supported-color-schemes" content="light dark">
+    <title>TaskFlow</title>
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,800&family=Geist:wght@400;600&family=Geist+Mono:wght@400;600&display=swap"
+          rel="stylesheet">
+    <style>
+        @media (max-width: 600px) {
+            .tf-outer { padding: 20px 12px !important; }
+            .tf-pad { padding: 24px 20px !important; }
+            .tf-title { font-size: 28px !important; }
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .tf-bg { background-color: #12110F !important; }
+            .tf-card { background-color: #1B1917 !important; border-color: #2E2B27 !important; }
+            .tf-ink { color: #F0ECE4 !important; }
+            .tf-muted { color: #A59E93 !important; }
+            .tf-line { border-color: #2E2B27 !important; }
+            .tf-btn { background-color: #EAD9B0 !important; }
+            .tf-btn a { color: #12110F !important; }
+            .tf-soft { background-color: #2E281C !important; color: #E6D3A3 !important; }
+            .tf-ok { background-color: #12291D !important; color: #86EFAC !important; }
+            .tf-panel { background-color: #171513 !important; border-color: #2E2B27 !important; }
+            .tf-dash { background-color: #171513 !important; border-color: #45403A !important; }
+            .tf-link { color: #E6D3A3 !important; }
+            .tf-bar { background-color: #2E2B27 !important; }
+            .tf-bar-ok { background-color: #7EE2A8 !important; }
+            .tf-avatar { background-color: #EAD9B0 !important; color: #12110F !important; }
+        }
+    </style>
+</head>
+<body class="tf-bg" style="margin:0;padding:0;background-color:#F4F2EE;">
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;opacity:0;"
+     th:text="${preheader}">Texto de vista previa</div>
+<table role="presentation" class="tf-bg" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="background-color:#F4F2EE;">
+    <tr>
+        <td class="tf-outer" align="center" style="padding:32px 16px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;">
+                <tr>
+                    <td style="padding:0 4px 18px;">
+                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                            <tr>
+                                <td valign="middle">
+                                    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                                        <tr>
+                                            <td width="32" height="32" style="width:32px;height:32px;background-color:#23201B;border-radius:9px;">
+                                                <a th:href="${appUrl}" href="#">
+                                                    <img th:src="|${appUrl}/email/logo.png|" src="logo.png" width="32" height="32" alt=""
+                                                         style="display:block;width:32px;height:32px;border:0;border-radius:9px;">
+                                                </a>
+                                            </td>
+                                            <td style="padding-left:10px;">
+                                                <a class="tf-ink" th:href="${appUrl}" href="#"
+                                                   style="font-family:'Bricolage Grotesque','Geist','Segoe UI',Helvetica,Arial,sans-serif;font-size:20px;font-weight:800;letter-spacing:-0.01em;color:#23201B;text-decoration:none;">TaskFlow</a>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                                <td class="tf-muted" align="right" valign="middle"
+                                    style="font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:#67615A;"
+                                    th:text="${meta}">~/correo</td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="tf-card tf-pad tf-ink"
+                        style="padding:30px;background-color:#FFFFFF;border:1px solid #E6E2DA;border-radius:22px;font-family:'Geist','Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#23201B;">
+                        <div th:replace="${content}">Contenido</div>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="tf-muted" style="padding:18px 4px 0;font-family:'Geist','Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:#67615A;">
+                        Recibiste este correo porque tienes una cuenta en TaskFlow o alguien te invitó.
+                        <div style="margin-top:6px;font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;">© 2026 TaskFlow</div>
+                    </td>
+                </tr>
+            </table>
+        </td>
+    </tr>
+</table>
+</body>
+</html>

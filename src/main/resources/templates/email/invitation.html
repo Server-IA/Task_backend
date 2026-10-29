@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="es"
+      th:replace="~{email/layout :: layout('~/correo/invitacion', |${inviter} te invitó a ${workspace} en TaskFlow.|, ~{::content})}">
+<body>
+<div th:fragment="content">
+    <div th:replace="~{email/parts :: heading('+', 'accent', 'Te invitaron a un workspace')}"></div>
+    <p class="tf-muted" style="margin:12px 0 0;color:#67615A;">
+        <strong class="tf-ink" style="color:#23201B;" th:text="${inviter}">Ana</strong> te invitó a unirte a su
+        workspace en TaskFlow.
+    </p>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:18px;">
+        <tr>
+            <td class="tf-panel" style="padding:14px 16px;background-color:#F8F7F4;border:1px solid #E6E2DA;border-radius:12px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                        <td class="tf-avatar" width="40" height="40" align="center" valign="middle"
+                            style="width:40px;height:40px;background-color:#E4CF9C;border-radius:10px;font-size:17px;font-weight:600;color:#23201B;"
+                            th:text="${#strings.toUpperCase(#strings.substring(workspace, 0, 1))}">M</td>
+                        <td style="padding-left:12px;">
+                            <div class="tf-ink" style="font-size:15px;font-weight:600;line-height:1.3;color:#23201B;" th:text="${workspace}">Mi equipo</div>
+                            <div class="tf-muted"
+                                 style="margin-top:2px;font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:#67615A;"
+                                 th:text="|workspace · invita ${inviter}|">workspace · invita Ana</div>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+
+    <div th:replace="~{email/parts :: button(${link}, 'Ver invitación', |vence en ${days} días|)}"></div>
+    <div th:replace="~{email/parts :: footnote('Si aún no tienes cuenta, regístrate con este mismo correo para poder aceptarla.', ${link})}"></div>
+</div>
+</body>
+</html>
