@@ -29,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -40,6 +41,8 @@ public class ActivityServiceImpl implements ActivityService {
     static final int MAX_SUMMARY_DAYS = 365;
     /** Una edición de la descripción dentro de este tiempo desde la anterior sigue en la misma entrada. */
     static final Duration DESCRIPTION_SESSION = Duration.ofMinutes(10);
+    /** Marcar y desmarcar la misma casilla dentro de este tiempo no deja nada en el historial. */
+    static final Duration TASK_UNDO = Duration.ofMinutes(10);
 
     private final IssueActivityRepository activityRepository;
     private final IssueRepository issueRepository;
@@ -84,15 +87,33 @@ public class ActivityServiceImpl implements ActivityService {
         record(issue, actor, ActivityField.DESCRIPTION, null, null);
     }
 
+    @Override
+    @Transactional
+    public void recordDescriptionTask(Issue issue, User actor, String text, boolean checked) {
+        ActivityField field = checked ? ActivityField.DESCRIPTION_CHECKED : ActivityField.DESCRIPTION_UNCHECKED;
+        ActivityField opposite = checked ? ActivityField.DESCRIPTION_UNCHECKED : ActivityField.DESCRIPTION_CHECKED;
+        Optional<IssueActivity> last = activityRepository.findFirstByIssueIdOrderByCreatedAtDescIdDesc(issue.getId());
+        if (last.isPresent() && last.get().getField() == opposite && Objects.equals(last.get().getNewValue(), text)
+                && sameActor(last.get(), actor)
+                && last.get().getCreatedAt() != null
+                && last.get().getCreatedAt().isAfter(Instant.now().minus(TASK_UNDO))) {
+            activityRepository.delete(last.get());
+            return;
+        }
+        record(issue, actor, field, null, text);
+    }
+
+    private static boolean sameActor(IssueActivity entry, User actor) {
+        return actor != null && entry.getActor() != null && entry.getActor().getId().equals(actor.getId());
+    }
+
     /**
      * Si {@code last} (la última entrada del historial de la tarea) es una edición de la descripción de
      * {@code actor} actualizada hace menos de {@link #DESCRIPTION_SESSION}.
      */
     static boolean continuesDescriptionSession(IssueActivity last, User actor, Instant now) {
         return last.getField() == ActivityField.DESCRIPTION
-                && actor != null
-                && last.getActor() != null
-                && last.getActor().getId().equals(actor.getId())
+                && sameActor(last, actor)
                 && last.getUpdatedAt() != null
                 && last.getUpdatedAt().isAfter(now.minus(DESCRIPTION_SESSION));
     }

@@ -28,6 +28,13 @@ public interface ActivityService {
     void recordDescriptionEdit(Issue issue, User actor);
 
     /**
+     * Registra que {@code actor} marcó ({@code checked}) o desmarcó la casilla {@code text} de la descripción. Si lo
+     * último del historial es lo contrario sobre la misma casilla, de la misma persona y hace menos de
+     * {@code TASK_UNDO}, se anulan: se borra esa entrada y no se registra nada.
+     */
+    void recordDescriptionTask(Issue issue, User actor, String text, boolean checked);
+
+    /**
      * Feed de actividad del workspace (lo más reciente primero), solo de los proyectos a los que el usuario
      * tiene acceso. {@code projectId} y {@code actorId} son filtros opcionales.
      */

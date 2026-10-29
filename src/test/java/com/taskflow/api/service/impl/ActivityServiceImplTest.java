@@ -39,6 +39,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -294,6 +296,86 @@ class ActivityServiceImplTest {
             IssueActivity saved = savedEntry();
             assertThat(saved).isNotSameAs(last);
             assertThat(saved.getField()).isEqualTo(ActivityField.DESCRIPTION);
+        }
+    }
+
+    /** Marcar o desmarcar una casilla de la descripción deja su propia entrada («marcó «…» en la descripción»). */
+    @Nested
+    class DescriptionTasks {
+
+        private final Issue issue = new Issue();
+        private final User luis = new User();
+        private final User ana = new User();
+
+        @BeforeEach
+        void setUpIssue() {
+            issue.setId(UUID.randomUUID());
+            luis.setId(UUID.randomUUID());
+            ana.setId(UUID.randomUUID());
+        }
+
+        private IssueActivity last(ActivityField field, User actor, String text, Instant createdAt) {
+            IssueActivity entry = new IssueActivity();
+            entry.setIssue(issue);
+            entry.setField(field);
+            entry.setActor(actor);
+            entry.setNewValue(text);
+            entry.setCreatedAt(createdAt);
+            entry.setUpdatedAt(createdAt);
+            when(activityRepository.findFirstByIssueIdOrderByCreatedAtDescIdDesc(issue.getId()))
+                    .thenReturn(Optional.of(entry));
+            return entry;
+        }
+
+        @Test
+        void marcarRegistraLaCasillaConSuTexto() {
+            when(activityRepository.findFirstByIssueIdOrderByCreatedAtDescIdDesc(issue.getId()))
+                    .thenReturn(Optional.empty());
+
+            activityService.recordDescriptionTask(issue, luis, "Plantilla del correo", true);
+
+            ArgumentCaptor<IssueActivity> saved = ArgumentCaptor.forClass(IssueActivity.class);
+            verify(activityRepository).save(saved.capture());
+            assertThat(saved.getValue().getField()).isEqualTo(ActivityField.DESCRIPTION_CHECKED);
+            assertThat(saved.getValue().getNewValue()).isEqualTo("Plantilla del correo");
+            assertThat(saved.getValue().getActor()).isSameAs(luis);
+        }
+
+        @Test
+        void desmarcarEsOtraEntrada() {
+            last(ActivityField.DESCRIPTION, luis, null, Instant.now());
+
+            activityService.recordDescriptionTask(issue, luis, "Enviar", false);
+
+            ArgumentCaptor<IssueActivity> saved = ArgumentCaptor.forClass(IssueActivity.class);
+            verify(activityRepository).save(saved.capture());
+            assertThat(saved.getValue().getField()).isEqualTo(ActivityField.DESCRIPTION_UNCHECKED);
+        }
+
+        @Test
+        void marcarYDesmarcarEnseguidaSeAnulan() {
+            IssueActivity checked = last(ActivityField.DESCRIPTION_CHECKED, luis, "Enviar",
+                    Instant.now().minus(Duration.ofMinutes(1)));
+
+            activityService.recordDescriptionTask(issue, luis, "Enviar", false);
+
+            verify(activityRepository).delete(checked);
+            verify(activityRepository, never()).save(any());
+        }
+
+        @Test
+        void noSeAnulaSiEsOtraCasillaOtraPersonaOPasoElTiempo() {
+            last(ActivityField.DESCRIPTION_CHECKED, ana, "Enviar", Instant.now());
+            activityService.recordDescriptionTask(issue, luis, "Enviar", false);
+
+            last(ActivityField.DESCRIPTION_CHECKED, luis, "Otra", Instant.now());
+            activityService.recordDescriptionTask(issue, luis, "Enviar", false);
+
+            last(ActivityField.DESCRIPTION_CHECKED, luis, "Enviar", Instant.now().minus(Duration.ofMinutes(11)));
+            activityService.recordDescriptionTask(issue, luis, "Enviar", false);
+
+            verify(activityRepository, never()).delete(any());
+            verify(activityRepository, times(3)).save(any());
         }
     }
 }

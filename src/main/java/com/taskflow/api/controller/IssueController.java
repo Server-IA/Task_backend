@@ -5,12 +5,16 @@ import com.taskflow.api.dto.request.IssueFilter;
 import com.taskflow.api.dto.request.MoveIssueRequest;
 import com.taskflow.api.dto.request.UpdateIssueRequest;
 import com.taskflow.api.dto.response.ActivityResponse;
+import com.taskflow.api.dto.response.DescriptionConflictResponse;
 import com.taskflow.api.dto.response.IssueResponse;
 import com.taskflow.api.dto.response.PageResponse;
 import com.taskflow.api.security.UserPrincipal;
 import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.service.IssueService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -73,7 +77,14 @@ public class IssueController {
         return issueService.get(slug, projectId, issueId);
     }
 
-    @Operation(summary = "Editar issue", description = "Edición parcial: los campos nulos no se modifican.")
+    @Operation(summary = "Editar issue", description = "Edición parcial: los campos nulos no se modifican. "
+            + "Con description y baseDescriptionVersion (la descriptionVersion de la que partió quien edita): si la "
+            + "descripción cambió después, responde 409 con code DESCRIPTION_CONFLICT, la descripción actual, su "
+            + "versión, quién la cambió y cuándo (DescriptionConflictResponse), y no cambia nada. Sin "
+            + "baseDescriptionVersion gana el último que guarda.")
+    @ApiResponse(responseCode = "200", description = "OK")
+    @ApiResponse(responseCode = "409", description = "La descripción cambió después de baseDescriptionVersion",
+            content = @Content(schema = @Schema(implementation = DescriptionConflictResponse.class)))
     @PatchMapping("/{issueId}")
     public IssueResponse update(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID issueId,
                                 @AuthenticationPrincipal UserPrincipal me,

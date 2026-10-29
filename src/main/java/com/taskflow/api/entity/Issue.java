@@ -44,6 +44,22 @@ public class Issue extends BaseEntity {
     @Column(columnDefinition = "text")
     private String description;
 
+    /**
+     * Sube en 1 con cada cambio de la descripción (y solo de la descripción). Quien edita la manda como
+     * {@code baseDescriptionVersion} para no pisar un cambio ajeno que no vio.
+     */
+    @Column(name = "description_version", nullable = false)
+    private int descriptionVersion;
+
+    /** Último cambio de la descripción; {@code null} si nunca tuvo. */
+    @Column(name = "description_updated_at")
+    private Instant descriptionUpdatedAt;
+
+    /** Quién hizo el último cambio de la descripción. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "description_updated_by_id")
+    private User descriptionUpdatedBy;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "state_id", nullable = false)
     private State state;

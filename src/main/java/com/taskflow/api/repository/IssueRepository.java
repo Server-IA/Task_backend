@@ -20,6 +20,14 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
     @EntityGraph(attributePaths = {"project", "state"})
     Optional<Issue> findByIdAndProjectId(UUID id, UUID projectId);
 
+    /**
+     * Bloquea la fila de la tarea hasta el final de la transacción ({@code SELECT … FOR UPDATE}). Se llama antes de
+     * leer la tarea: dos guardados de la descripción a la vez se ejecutan en fila y el segundo ve la versión que
+     * dejó el primero.
+     */
+    @Query(value = "SELECT 1 FROM issues WHERE id = :id FOR UPDATE", nativeQuery = true)
+    List<Integer> lockById(@Param("id") UUID id);
+
     /** Tarea de cualquier proyecto del workspace (para las dependencias entre proyectos). */
     @EntityGraph(attributePaths = {"project", "state"})
     Optional<Issue> findByIdAndProjectWorkspaceId(UUID id, UUID workspaceId);

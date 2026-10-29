@@ -16,6 +16,14 @@ public record IssueResponse(
         ProjectRefResponse project,
         String title,
         String description,
+        /**
+         * Sube con cada cambio de la descripción (no con los de otros campos). Se manda como
+         * {@code baseDescriptionVersion} al guardar la descripción para no pisar un cambio ajeno.
+         */
+        int descriptionVersion,
+        /** Último cambio de la descripción y quién lo hizo; {@code null} si nunca tuvo. */
+        Instant descriptionUpdatedAt,
+        UserSummaryResponse descriptionUpdatedBy,
         StateResponse state,
         IssuePriority priority,
         IssueSummaryResponse parent,

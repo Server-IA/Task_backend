@@ -19,6 +19,7 @@ import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.entity.enums.WorkspaceRole;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
+import com.taskflow.api.exception.DescriptionConflictException;
 import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.IssueMapper;
@@ -36,6 +37,7 @@ import com.taskflow.api.service.IssueChecklistService;
 import com.taskflow.api.service.IssueRelationService;
 import com.taskflow.api.service.IssueService;
 import com.taskflow.api.service.NotificationService;
+import com.taskflow.api.util.DescriptionTasks;
 import com.taskflow.api.util.IssueListSort;
 import com.taskflow.api.util.MentionParser;
 import com.taskflow.api.util.SortOrderCalculator;
@@ -126,6 +128,10 @@ public class IssueServiceImpl implements IssueService {
         issue.getLabels().addAll(resolveLabels(project, request.labelIds()));
         User actor = lookup.user(userId);
         issue.setCreatedBy(actor);
+        if (issue.getDescription() != null) {
+            issue.setDescriptionUpdatedAt(now);
+            issue.setDescriptionUpdatedBy(actor);
+        }
         // Primero el contador: su UPDATE bloquea la fila del proyecto y así las creaciones simultáneas
         // se ejecutan en fila y no leen el mismo «final de la columna».
         issue.setSequenceId(nextSequenceId(project));
@@ -151,7 +157,19 @@ public class IssueServiceImpl implements IssueService {
     @Transactional
     public IssueResponse update(String slug, UUID projectId, UUID issueId, UUID userId, UpdateIssueRequest request) {
         Project project = lookup.project(slug, projectId);
+        if (request.description() != null) {
+            // Antes de leerla: los guardados de la descripción de la misma tarea van en fila (la versión no se salta)
+            issueRepository.lockById(issueId);
+        }
         Issue issue = findIssue(project, issueId);
+        String description = blankToNull(request.description());
+        boolean descriptionChanged = request.description() != null
+                && !Objects.equals(issue.getDescription(), description);
+        if (descriptionChanged && request.baseDescriptionVersion() != null
+                && request.baseDescriptionVersion() != issue.getDescriptionVersion()) {
+            // Alguien la cambió después de la versión de la que partió quien guarda: no se pisa (no cambia nada)
+            throw new DescriptionConflictException(issueMapper.toResponse(issue));
+        }
         User actor = lookup.user(userId);
         IssueChanges changes = new IssueChanges(issue, actor);
         boolean completed = false;
@@ -164,18 +182,12 @@ public class IssueServiceImpl implements IssueService {
             changes.track(ActivityField.TITLE, issue.getTitle(), title);
             issue.setTitle(title);
         }
-        if (request.description() != null) {
-            String description = blankToNull(request.description());
-            if (!Objects.equals(issue.getDescription(), description)) {
-                // El historial solo indica que la descripción cambió (una entrada por sesión de edición), sin el
-                // texto. Las personas mencionadas por primera vez reciben el aviso.
-                activityService.recordDescriptionEdit(issue, actor);
-                Set<UUID> newMentions = new LinkedHashSet<>(MentionParser.userIds(description));
-                newMentions.removeAll(MentionParser.userIds(issue.getDescription()));
-                notificationService.notifyMentionedInDescription(issue, actor,
-                        mentionable(project, actor, newMentions));
-            }
+        if (descriptionChanged) {
+            recordDescriptionChange(project, issue, actor, description);
             issue.setDescription(description);
+            issue.setDescriptionVersion(issue.getDescriptionVersion() + 1);
+            issue.setDescriptionUpdatedAt(Instant.now());
+            issue.setDescriptionUpdatedBy(actor);
         }
         if (request.stateId() != null && !request.stateId().equals(issue.getState().getId())) {
             State state = findState(project, request.stateId());
@@ -432,6 +444,23 @@ public class IssueServiceImpl implements IssueService {
             return List.of();
         }
         return userRepository.findMentionable(ids, project.getId(), project.getWorkspace().getId());
+    }
+
+    /**
+     * Historial y avisos de un cambio de la descripción. Marcar o desmarcar casillas («- [ ] …») deja una entrada por
+     * casilla («marcó «…» en la descripción»); cualquier otro cambio, «editó la descripción» (una entrada por sesión
+     * de edición, sin el texto). Las personas mencionadas por primera vez reciben el aviso.
+     */
+    private void recordDescriptionChange(Project project, Issue issue, User actor, String description) {
+        DescriptionTasks.Diff tasks = DescriptionTasks.diff(issue.getDescription(), description);
+        if (!tasks.onlyToggles()) {
+            activityService.recordDescriptionEdit(issue, actor);
+        }
+        tasks.toggles().forEach(toggle ->
+                activityService.recordDescriptionTask(issue, actor, toggle.text(), toggle.checked()));
+        Set<UUID> newMentions = new LinkedHashSet<>(MentionParser.userIds(description));
+        newMentions.removeAll(MentionParser.userIds(issue.getDescription()));
+        notificationService.notifyMentionedInDescription(issue, actor, mentionable(project, actor, newMentions));
     }
 
     private Issue findIssue(Project project, UUID issueId) {

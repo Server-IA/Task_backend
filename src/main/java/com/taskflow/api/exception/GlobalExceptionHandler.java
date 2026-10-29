@@ -1,5 +1,6 @@
 package com.taskflow.api.exception;
 
+import com.taskflow.api.dto.response.DescriptionConflictResponse;
 import com.taskflow.api.dto.response.ErrorResponse;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
@@ -34,6 +35,13 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ErrorResponse> handleApi(ApiException ex) {
         return build(ex.getStatus(), ex.getMessage());
+    }
+
+    /** 409 al guardar una descripción que otra persona cambió: con la versión actual para resolver el conflicto. */
+    @ExceptionHandler(DescriptionConflictException.class)
+    public ResponseEntity<DescriptionConflictResponse> handleDescriptionConflict(DescriptionConflictException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(DescriptionConflictResponse.of(ex.getMessage(), ex.getCurrent()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

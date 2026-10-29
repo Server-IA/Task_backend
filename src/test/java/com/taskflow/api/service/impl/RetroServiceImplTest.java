@@ -479,8 +479,8 @@ class RetroServiceImplTest {
         }
 
         private IssueResponse issueResponse() {
-            return new IssueResponse(issueId, "WEB-42", 42, project.getId(), null, "Automatizar el deploy", null, null,
-                    null, null, null, null, 0, List.of(), List.of(), null, List.of(), 0, 0, 0, List.of(), List.of(), 0, 0,
+            return new IssueResponse(issueId, "WEB-42", 42, project.getId(), null, "Automatizar el deploy", null, 0, null,
+                    null, null, null, null, null, null, 0, List.of(), List.of(), null, List.of(), 0, 0, 0, List.of(), List.of(), 0, 0,
                     0, 0, null, null, null, null, null, null);
         }
 

@@ -17,6 +17,7 @@ import com.taskflow.api.entity.enums.IssuePriority;
 import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.entity.enums.WorkspaceRole;
 import com.taskflow.api.exception.BadRequestException;
+import com.taskflow.api.exception.DescriptionConflictException;
 import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.mapper.IssueMapper;
 import com.taskflow.api.repository.IssueRepository;
@@ -352,7 +353,7 @@ class IssueServiceImplTest {
     class CompletedAt {
 
         private UpdateIssueRequest updateState(UUID stateId) {
-            return new UpdateIssueRequest(null, null, stateId, null, null, null, null, null, null, null, null, null);
+            return new UpdateIssueRequest(null, null, stateId, null, null, null, null, null, null, null, null, null, null);
         }
 
         @BeforeEach
@@ -424,7 +425,7 @@ class IssueServiceImplTest {
             Instant completedAt = Instant.parse("2026-10-20T15:00:00Z");
             issue.setCompletedAt(completedAt);
             UpdateIssueRequest priorityOnly = new UpdateIssueRequest(null, null, null, IssuePriority.HIGH, null,
-                    null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null);
 
             issueService.update(SLUG, project.getId(), issue.getId(), author.getId(), priorityOnly);
 
@@ -454,7 +455,7 @@ class IssueServiceImplTest {
         }
 
         private UpdateIssueRequest updateState(UUID stateId) {
-            return new UpdateIssueRequest(null, null, stateId, null, null, null, null, null, null, null, null, null);
+            return new UpdateIssueRequest(null, null, stateId, null, null, null, null, null, null, null, null, null, null);
         }
 
         @Test
@@ -518,7 +519,7 @@ class IssueServiceImplTest {
         }
 
         private UpdateIssueRequest updateState(UUID stateId) {
-            return new UpdateIssueRequest(null, null, stateId, null, null, null, null, null, null, null, null, null);
+            return new UpdateIssueRequest(null, null, stateId, null, null, null, null, null, null, null, null, null, null);
         }
 
         @Test
@@ -650,14 +651,19 @@ class IssueServiceImplTest {
             Issue child = issue(todo, 2);
             child.setParent(parent);
             UpdateIssueRequest request = new UpdateIssueRequest(null, null, null, null, child.getId(),
-                    null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null);
 
             assertThatThrownBy(() -> issueService.update(SLUG, project.getId(), parent.getId(), author.getId(), request))
                     .isInstanceOf(BadRequestException.class);
         }
 
         private UpdateIssueRequest description(String description) {
-            return new UpdateIssueRequest(null, description, null, null, null, null, null, null, null, null, null, null);
+            return description(description, null);
+        }
+
+        private UpdateIssueRequest description(String description, Integer baseVersion) {
+            return new UpdateIssueRequest(null, description, null, null, null, null, null, null, null, null, null, null,
+                    baseVersion);
         }
 
         @Test
@@ -708,6 +714,135 @@ class IssueServiceImplTest {
                     description("Con @[Ana](" + ana + ") y @[Luis](" + luis + ")"));
 
             verify(notificationService).notifyMentionedInDescription(issue, author, List.of(luisUser));
+        }
+
+        @Test
+        void cambiarLaDescripcionSubeSuVersionYGuardaQuienYCuando() {
+            Issue issue = issue(todo, 1);
+            issue.setDescription("Antes");
+            issue.setDescriptionVersion(4);
+            when(lookup.user(author.getId())).thenReturn(author);
+            when(issueRepository.saveAndFlush(issue)).thenReturn(issue);
+            Instant before = Instant.now();
+
+            issueService.update(SLUG, project.getId(), issue.getId(), author.getId(), description("Después", 4));
+
+            assertThat(issue.getDescription()).isEqualTo("Después");
+            assertThat(issue.getDescriptionVersion()).isEqualTo(5);
+            assertThat(issue.getDescriptionUpdatedBy()).isSameAs(author);
+            assertThat(issue.getDescriptionUpdatedAt()).isAfterOrEqualTo(before);
+        }
+
+        @Test
+        void bloqueaLaFilaAntesDeLeerLaTareaCuandoCambiaLaDescripcion() {
+            Issue issue = issue(todo, 1);
+            when(lookup.user(author.getId())).thenReturn(author);
+            when(issueRepository.saveAndFlush(issue)).thenReturn(issue);
+
+            issueService.update(SLUG, project.getId(), issue.getId(), author.getId(), description("Nueva", 0));
+
+            InOrder order = inOrder(issueRepository);
+            order.verify(issueRepository).lockById(issue.getId());
+            order.verify(issueRepository).findByIdAndProjectId(issue.getId(), project.getId());
+        }
+
+        @Test
+        void siOtraPersonaLaCambioDespuesDeLaVersionBaseResponde409SinCambiarNada() {
+            Issue issue = issue(todo, 1);
+            issue.setDescription("Lo que guardó Luis");
+            issue.setDescriptionVersion(6);
+            issue.setPriority(IssuePriority.LOW);
+            UpdateIssueRequest mine = new UpdateIssueRequest(null, "Lo mío", null, IssuePriority.HIGH, null, null,
+                    null, null, null, null, null, null, 5);
+
+            assertThatThrownBy(() -> issueService.update(SLUG, project.getId(), issue.getId(), author.getId(), mine))
+                    .isInstanceOf(DescriptionConflictException.class)
+                    .hasMessage(DescriptionConflictException.MESSAGE);
+
+            // La respuesta lleva la tarea como está (el mapper la arma antes de lanzar) y nada cambió
+            verify(issueMapper).toResponse(issue);
+            assertThat(issue.getDescription()).isEqualTo("Lo que guardó Luis");
+            assertThat(issue.getDescriptionVersion()).isEqualTo(6);
+            assertThat(issue.getPriority()).isEqualTo(IssuePriority.LOW);
+            verify(issueRepository, never()).saveAndFlush(any());
+            verifyNoInteractions(activityService, notificationService);
+        }
+
+        @Test
+        void sinVersionBaseGanaElUltimoQueGuarda() {
+            Issue issue = issue(todo, 1);
+            issue.setDescription("Lo que guardó Luis");
+            issue.setDescriptionVersion(6);
+            when(lookup.user(author.getId())).thenReturn(author);
+            when(issueRepository.saveAndFlush(issue)).thenReturn(issue);
+
+            issueService.update(SLUG, project.getId(), issue.getId(), author.getId(), description("Lo mío"));
+
+            assertThat(issue.getDescription()).isEqualTo("Lo mío");
+            assertThat(issue.getDescriptionVersion()).isEqualTo(7);
+        }
+
+        @Test
+        void conUnaVersionViejaPeroElMismoTextoNoHayConflicto() {
+            // Las dos personas dejaron el mismo texto: no hay nada que pisar
+            Issue issue = issue(todo, 1);
+            issue.setDescription("Igual");
+            issue.setDescriptionVersion(6);
+            when(lookup.user(author.getId())).thenReturn(author);
+            when(issueRepository.saveAndFlush(issue)).thenReturn(issue);
+
+            issueService.update(SLUG, project.getId(), issue.getId(), author.getId(), description("Igual", 2));
+
+            assertThat(issue.getDescriptionVersion()).isEqualTo(6);
+            verifyNoInteractions(activityService);
+        }
+
+        @Test
+        void cambiarOtrosCamposNoSubeLaVersionDeLaDescripcion() {
+            Issue issue = issue(todo, 1);
+            issue.setDescription("Texto");
+            issue.setDescriptionVersion(3);
+            when(lookup.user(author.getId())).thenReturn(author);
+            when(issueRepository.saveAndFlush(issue)).thenReturn(issue);
+            UpdateIssueRequest priorityOnly = new UpdateIssueRequest(null, null, null, IssuePriority.HIGH, null,
+                    null, null, null, null, null, null, null, 1);
+
+            issueService.update(SLUG, project.getId(), issue.getId(), author.getId(), priorityOnly);
+
+            // Sin descripción, la versión base no se mira y la fila no se bloquea
+            assertThat(issue.getDescriptionVersion()).isEqualTo(3);
+            assertThat(issue.getPriority()).isEqualTo(IssuePriority.HIGH);
+            verify(issueRepository, never()).lockById(any());
+        }
+
+        @Test
+        void marcarUnaCasillaLaRegistraSinEditoLaDescripcion() {
+            Issue issue = issue(todo, 1);
+            issue.setDescription(String.join("\n", "## Pasos", "- [ ] Plantilla del correo", "- [ ] Enviar"));
+            issue.setDescriptionVersion(2);
+            when(lookup.user(author.getId())).thenReturn(author);
+            when(issueRepository.saveAndFlush(issue)).thenReturn(issue);
+
+            issueService.update(SLUG, project.getId(), issue.getId(), author.getId(),
+                    description(String.join("\n", "## Pasos", "- [x] Plantilla del correo", "- [ ] Enviar"), 2));
+
+            verify(activityService).recordDescriptionTask(issue, author, "Plantilla del correo", true);
+            verify(activityService, never()).recordDescriptionEdit(any(), any());
+            assertThat(issue.getDescriptionVersion()).isEqualTo(3);
+        }
+
+        @Test
+        void editarYMarcarAlaVezRegistraLasDosCosas() {
+            Issue issue = issue(todo, 1);
+            issue.setDescription(String.join("\n", "- [x] Plantilla", "- [ ] Enviar"));
+            when(lookup.user(author.getId())).thenReturn(author);
+            when(issueRepository.saveAndFlush(issue)).thenReturn(issue);
+
+            issueService.update(SLUG, project.getId(), issue.getId(), author.getId(),
+                    description(String.join("\n", "Intro", "", "- [ ] Plantilla", "- [ ] Enviar"), 0));
+
+            verify(activityService).recordDescriptionEdit(issue, author);
+            verify(activityService).recordDescriptionTask(issue, author, "Plantilla", false);
         }
     }
 }
