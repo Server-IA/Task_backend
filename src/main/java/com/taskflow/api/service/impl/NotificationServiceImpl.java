@@ -119,6 +119,14 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     @Transactional
+    public void notifyMentionedInDescription(Issue issue, User actor, Collection<User> mentioned) {
+        String message = actor.getFullName() + " te mencionó en la descripción de " + describe(issue);
+        distinctExcept(mentioned, actor)
+                .forEach(user -> save(user, actor, NotificationType.ISSUE_MENTIONED, message, issue, null));
+    }
+
+    @Override
+    @Transactional
     public void notifyUnblocked(Issue blocked, Issue blocker, User actor) {
         String message = blocked.getCode() + " ya no está bloqueada: " + blocker.getCode() + " se completó";
         distinctExcept(blocked.getAssignees(), actor)

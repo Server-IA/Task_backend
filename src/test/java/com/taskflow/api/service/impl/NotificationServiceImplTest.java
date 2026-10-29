@@ -130,6 +130,20 @@ class NotificationServiceImplTest {
     }
 
     @Test
+    void laMencionEnLaDescripcionAvisaSinComentario() {
+        notificationService.notifyMentionedInDescription(issue, author, List.of(author, luis));
+
+        assertThat(saved())
+                .extracting(n -> n.getRecipient().getFullName(), Notification::getType, Notification::getMessage)
+                .containsExactly(tuple("Luis", NotificationType.ISSUE_MENTIONED,
+                        "Ana Autora te mencionó en la descripción de WEB-12: Rediseñar la portada"));
+        assertThat(saved()).allSatisfy(notification -> {
+            assertThat(notification.getComment()).isNull();
+            assertThat(notification.getIssue()).isSameAs(issue);
+        });
+    }
+
+    @Test
     void avisaALosAsignadosDeLaTareaDesbloqueada() {
         Issue blocker = new Issue();
         blocker.setProject(issue.getProject());

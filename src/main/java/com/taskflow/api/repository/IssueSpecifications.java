@@ -85,6 +85,20 @@ public final class IssueSpecifications {
                 cb.equal(root.get("sequenceId"), codeNumber(text)));
     }
 
+    /**
+     * Tareas cuyo código es alguno de los indicados (códigos completos, como «WEB-12»; sin importar mayúsculas), en
+     * los proyectos indicados.
+     */
+    public static Specification<Issue> codeIn(Collection<UUID> projectIds, Collection<String> codes) {
+        return (root, query, cb) -> cb.and(
+                root.get("project").get("id").in(projectIds),
+                cb.or(codes.stream()
+                        .map(code -> cb.and(
+                                cb.equal(cb.lower(root.get("project").get("identifier")), codePrefix(code.trim())),
+                                cb.equal(root.get("sequenceId"), codeNumber(code.trim()))))
+                        .toArray(Predicate[]::new)));
+    }
+
     /** Si el texto es un código completo con prefijo, como «WEB-12» (sin importar mayúsculas). */
     public static boolean isFullCode(String text) {
         return text != null && text.trim().matches(CODE_PATTERN) && text.trim().contains("-");

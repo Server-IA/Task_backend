@@ -10,6 +10,8 @@ import com.taskflow.api.entity.IssueChecklistItem;
 import com.taskflow.api.entity.Project;
 import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.User;
+import com.taskflow.api.entity.Workspace;
+import com.taskflow.api.entity.enums.ActivityField;
 import com.taskflow.api.entity.enums.ChecklistItemKind;
 import com.taskflow.api.entity.enums.IssuePriority;
 import com.taskflow.api.entity.enums.StateGroup;
@@ -652,6 +654,60 @@ class IssueServiceImplTest {
 
             assertThatThrownBy(() -> issueService.update(SLUG, project.getId(), parent.getId(), author.getId(), request))
                     .isInstanceOf(BadRequestException.class);
+        }
+
+        private UpdateIssueRequest description(String description) {
+            return new UpdateIssueRequest(null, description, null, null, null, null, null, null, null, null, null, null);
+        }
+
+        @Test
+        void cambiarLaDescripcionLaRegistraComoUnaEdicion() {
+            Issue issue = issue(todo, 1);
+            issue.setDescription("## Antes");
+            when(lookup.user(author.getId())).thenReturn(author);
+            when(issueRepository.saveAndFlush(issue)).thenReturn(issue);
+
+            issueService.update(SLUG, project.getId(), issue.getId(), author.getId(), description("## Después"));
+
+            // Una entrada por sesión de edición (la agrupación la hace el ActivityService), sin el texto
+            verify(activityService).recordDescriptionEdit(issue, author);
+            verify(activityService, never()).record(any(), any(), eq(ActivityField.DESCRIPTION), any(), any());
+            assertThat(issue.getDescription()).isEqualTo("## Después");
+        }
+
+        @Test
+        void guardarLaMismaDescripcionNoDejaHistorial() {
+            Issue issue = issue(todo, 1);
+            issue.setDescription("## Igual");
+            when(lookup.user(author.getId())).thenReturn(author);
+            when(issueRepository.saveAndFlush(issue)).thenReturn(issue);
+
+            issueService.update(SLUG, project.getId(), issue.getId(), author.getId(), description("  ## Igual  "));
+
+            verify(activityService, never()).recordDescriptionEdit(any(), any());
+            verify(notificationService, never()).notifyMentionedInDescription(any(), any(), anyCollection());
+        }
+
+        @Test
+        void avisaSoloALosMencionadosPorPrimeraVez() {
+            Workspace workspace = new Workspace();
+            workspace.setId(UUID.randomUUID());
+            project.setWorkspace(workspace);
+            UUID ana = UUID.randomUUID();
+            UUID luis = UUID.randomUUID();
+            Issue issue = issue(todo, 1);
+            issue.setDescription("Con @[Ana](" + ana + ")");
+            User luisUser = new User();
+            luisUser.setId(luis);
+            when(lookup.user(author.getId())).thenReturn(author);
+            when(issueRepository.saveAndFlush(issue)).thenReturn(issue);
+            when(userRepository.findMentionable(Set.of(luis), project.getId(), workspace.getId()))
+                    .thenReturn(List.of(luisUser));
+
+            issueService.update(SLUG, project.getId(), issue.getId(), author.getId(),
+                    description("Con @[Ana](" + ana + ") y @[Luis](" + luis + ")"));
+
+            verify(notificationService).notifyMentionedInDescription(issue, author, List.of(luisUser));
         }
     }
 }

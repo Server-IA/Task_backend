@@ -46,6 +46,12 @@ public interface NotificationService {
     void notifyMentioned(Issue issue, User actor, Comment comment, Collection<User> mentioned);
 
     /**
+     * Avisa con {@code ISSUE_MENTIONED} a quienes se mencionan en la descripción de la tarea (menos a quien la
+     * editó). Quien llama pasa solo las personas mencionadas por primera vez.
+     */
+    void notifyMentionedInDescription(Issue issue, User actor, Collection<User> mentioned);
+
+    /**
      * Avisa a los asignados de {@code blocked} (menos a quien hizo el cambio) de que ya no está bloqueada porque se
      * completó {@code blocker}.
      */

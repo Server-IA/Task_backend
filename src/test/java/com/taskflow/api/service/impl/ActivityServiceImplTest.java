@@ -3,6 +3,9 @@ package com.taskflow.api.service.impl;
 import com.taskflow.api.dto.request.ActivityFeedType;
 import com.taskflow.api.dto.response.ActivitySummaryResponse;
 import com.taskflow.api.dto.response.PageResponse;
+import com.taskflow.api.entity.Issue;
+import com.taskflow.api.entity.IssueActivity;
+import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.Workspace;
 import com.taskflow.api.entity.enums.ActivityField;
 import com.taskflow.api.entity.enums.ProjectColor;
@@ -22,10 +25,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -176,6 +181,119 @@ class ActivityServiceImplTest {
             assertThatThrownBy(() -> activityService.getWorkspaceSummary("otro", userId, 400))
                     .isInstanceOf(BadRequestException.class);
             verifyNoInteractions(activityRepository, issueRepository);
+        }
+    }
+
+    /** El editor guarda mientras se escribe: una sesión de edición de la descripción deja una sola entrada. */
+    @Nested
+    class DescriptionEdits {
+
+        private final Issue issue = new Issue();
+        private final User luis = user();
+        private final User ana = user();
+
+        @BeforeEach
+        void setUpIssue() {
+            issue.setId(UUID.randomUUID());
+        }
+
+        private static User user() {
+            User user = new User();
+            user.setId(UUID.randomUUID());
+            return user;
+        }
+
+        private IssueActivity entry(ActivityField field, User actor, Instant updatedAt) {
+            IssueActivity entry = new IssueActivity();
+            entry.setIssue(issue);
+            entry.setField(field);
+            entry.setActor(actor);
+            entry.setCreatedAt(updatedAt.minus(Duration.ofMinutes(3)));
+            entry.setUpdatedAt(updatedAt);
+            when(activityRepository.findFirstByIssueIdOrderByCreatedAtDescIdDesc(issue.getId()))
+                    .thenReturn(Optional.of(entry));
+            return entry;
+        }
+
+        private IssueActivity savedEntry() {
+            ArgumentCaptor<IssueActivity> saved = ArgumentCaptor.forClass(IssueActivity.class);
+            verify(activityRepository).save(saved.capture());
+            return saved.getValue();
+        }
+
+        @Test
+        void laPrimeraEdicionCreaLaEntrada() {
+            when(activityRepository.findFirstByIssueIdOrderByCreatedAtDescIdDesc(issue.getId()))
+                    .thenReturn(Optional.empty());
+
+            activityService.recordDescriptionEdit(issue, luis);
+
+            IssueActivity saved = savedEntry();
+            assertThat(saved.getField()).isEqualTo(ActivityField.DESCRIPTION);
+            assertThat(saved.getActor()).isSameAs(luis);
+            assertThat(saved.getIssue()).isSameAs(issue);
+            assertThat(saved.getOldValue()).isNull();
+            assertThat(saved.getNewValue()).isNull();
+        }
+
+        @Test
+        void losGuardadosSeguidosDeLaMismaPersonaVanEnLaMismaEntrada() {
+            Instant twoMinutesAgo = Instant.now().minus(Duration.ofMinutes(2));
+            IssueActivity last = entry(ActivityField.DESCRIPTION, luis, twoMinutesAgo);
+            Instant createdAt = last.getCreatedAt();
+
+            activityService.recordDescriptionEdit(issue, luis);
+
+            // No hay una entrada nueva: la misma se guarda con la hora de actualización al día
+            assertThat(savedEntry()).isSameAs(last);
+            assertThat(last.getUpdatedAt()).isAfter(twoMinutesAgo);
+            assertThat(last.getCreatedAt()).isEqualTo(createdAt);
+        }
+
+        @Test
+        void laSesionSigueMientrasNoPasenDiezMinutosDesdeElUltimoGuardado() {
+            Instant now = Instant.now();
+            IssueActivity entry = new IssueActivity();
+            entry.setField(ActivityField.DESCRIPTION);
+            entry.setActor(luis);
+            entry.setUpdatedAt(now.minus(Duration.ofMinutes(9)));
+            assertThat(ActivityServiceImpl.continuesDescriptionSession(entry, luis, now)).isTrue();
+            entry.setUpdatedAt(now.minus(Duration.ofMinutes(10)));
+            assertThat(ActivityServiceImpl.continuesDescriptionSession(entry, luis, now)).isFalse();
+        }
+
+        @Test
+        void despuesDeDiezMinutosEsOtraEntrada() {
+            IssueActivity last = entry(ActivityField.DESCRIPTION, luis, Instant.now().minus(Duration.ofMinutes(11)));
+
+            activityService.recordDescriptionEdit(issue, luis);
+
+            IssueActivity saved = savedEntry();
+            assertThat(saved).isNotSameAs(last);
+            assertThat(saved.getField()).isEqualTo(ActivityField.DESCRIPTION);
+        }
+
+        @Test
+        void siLaEditoOtraPersonaEsOtraEntrada() {
+            IssueActivity last = entry(ActivityField.DESCRIPTION, ana, Instant.now().minus(Duration.ofMinutes(1)));
+
+            activityService.recordDescriptionEdit(issue, luis);
+
+            IssueActivity saved = savedEntry();
+            assertThat(saved).isNotSameAs(last);
+            assertThat(saved.getActor()).isSameAs(luis);
+        }
+
+        @Test
+        void siHuboOtroCambioEnMedioEsOtraEntrada() {
+            // Luis comentó (o cambió el estado) después de editar: la edición siguiente va en una entrada nueva
+            IssueActivity last = entry(ActivityField.COMMENT, luis, Instant.now().minus(Duration.ofMinutes(1)));
+
+            activityService.recordDescriptionEdit(issue, luis);
+
+            IssueActivity saved = savedEntry();
+            assertThat(saved).isNotSameAs(last);
+            assertThat(saved.getField()).isEqualTo(ActivityField.DESCRIPTION);
         }
     }
 }

@@ -20,6 +20,14 @@ public interface ActivityService {
     void record(Issue issue, User actor, ActivityField field, String oldValue, String newValue);
 
     /**
+     * Registra que {@code actor} editó la descripción. El editor guarda solo mientras se escribe, así que una sesión
+     * de edición deja una sola entrada: si la última entrada del historial de la tarea ya es una edición de la
+     * descripción de la misma persona, de hace menos de {@code DESCRIPTION_SESSION}, solo se actualiza su hora de
+     * actualización (la entrada conserva la hora en que empezó).
+     */
+    void recordDescriptionEdit(Issue issue, User actor);
+
+    /**
      * Feed de actividad del workspace (lo más reciente primero), solo de los proyectos a los que el usuario
      * tiene acceso. {@code projectId} y {@code actorId} son filtros opcionales.
      */

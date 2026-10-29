@@ -120,4 +120,34 @@ class SearchServiceImplTest {
         assertThat(IssueSpecifications.isFullCode("pago")).isFalse();
         assertThat(IssueSpecifications.isFullCode("WEB-")).isFalse();
     }
+
+    @Test
+    void porCodigoSinCodigosValidosNoConsulta() {
+        assertThat(searchService.findByCodes(SLUG, userId, null)).isEmpty();
+        assertThat(searchService.findByCodes(SLUG, userId, List.of("12", "pago", "WEB-"))).isEmpty();
+        verifyNoInteractions(issueRepository, projectAccess, lookup);
+    }
+
+    @Test
+    void porCodigoBuscaUnaVezEnLosProyectosAccesibles() {
+        accessible(List.of(UUID.randomUUID()));
+        Issue web12 = issue();
+        Issue api3 = issue();
+        when(issueRepository.findAll(any(Specification.class))).thenReturn(List.of(web12, api3));
+
+        searchService.findByCodes(SLUG, userId, List.of("WEB-12", "web-12", " API-3 ", "nada"));
+
+        verify(issueRepository, times(1)).findAll(any(Specification.class));
+        ArgumentCaptor<Issue> mapped = ArgumentCaptor.forClass(Issue.class);
+        verify(issueMapper, times(2)).toResponse(mapped.capture());
+        assertThat(mapped.getAllValues()).containsExactly(web12, api3);
+    }
+
+    @Test
+    void porCodigoSinProyectosAccesiblesNoConsultaLasTareas() {
+        accessible(List.of());
+
+        assertThat(searchService.findByCodes(SLUG, userId, List.of("WEB-12"))).isEmpty();
+        verifyNoInteractions(issueRepository);
+    }
 }

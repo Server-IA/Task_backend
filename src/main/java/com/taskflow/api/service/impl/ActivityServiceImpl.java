@@ -29,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -37,6 +38,8 @@ public class ActivityServiceImpl implements ActivityService {
 
     static final int MAX_PAGE_SIZE = 100;
     static final int MAX_SUMMARY_DAYS = 365;
+    /** Una edición de la descripción dentro de este tiempo desde la anterior sigue en la misma entrada. */
+    static final Duration DESCRIPTION_SESSION = Duration.ofMinutes(10);
 
     private final IssueActivityRepository activityRepository;
     private final IssueRepository issueRepository;
@@ -65,6 +68,33 @@ public class ActivityServiceImpl implements ActivityService {
         activity.setOldValue(oldValue);
         activity.setNewValue(newValue);
         activityRepository.save(activity);
+    }
+
+    @Override
+    @Transactional
+    public void recordDescriptionEdit(Issue issue, User actor) {
+        Instant now = Instant.now();
+        Optional<IssueActivity> last = activityRepository.findFirstByIssueIdOrderByCreatedAtDescIdDesc(issue.getId());
+        if (last.isPresent() && continuesDescriptionSession(last.get(), actor, now)) {
+            // Misma sesión: la entrada se queda donde está y solo cambia su hora de actualización
+            last.get().setUpdatedAt(now);
+            activityRepository.save(last.get());
+            return;
+        }
+        record(issue, actor, ActivityField.DESCRIPTION, null, null);
+    }
+
+    /**
+     * Si {@code last} (la última entrada del historial de la tarea) es una edición de la descripción de
+     * {@code actor} actualizada hace menos de {@link #DESCRIPTION_SESSION}.
+     */
+    static boolean continuesDescriptionSession(IssueActivity last, User actor, Instant now) {
+        return last.getField() == ActivityField.DESCRIPTION
+                && actor != null
+                && last.getActor() != null
+                && last.getActor().getId().equals(actor.getId())
+                && last.getUpdatedAt() != null
+                && last.getUpdatedAt().isAfter(now.minus(DESCRIPTION_SESSION));
     }
 
     @Override

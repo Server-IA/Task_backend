@@ -10,6 +10,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static com.taskflow.api.entity.enums.ChecklistItemKind.CHECK;
 import static com.taskflow.api.entity.enums.ChecklistItemKind.CRITERION;
@@ -59,7 +61,8 @@ class DefaultTemplatesTest {
     void historiaDeUsuario() {
         IssueTemplate story = templates.get(1);
 
-        assertThat(story.getDescription()).isEqualTo("Como … quiero … para …");
+        // La cita «**Como** … **quiero** … **para** …» que el frontend dibuja como la tarjeta de la historia
+        assertThat(story.getDescription()).isEqualTo("> **Como**\n> **quiero**\n> **para**");
         assertThat(story.getChecklist()).hasSize(2).allSatisfy(item -> {
             assertThat(item.getKind()).isEqualTo(CRITERION);
             assertThat(item.getText()).startsWith("Dado").contains(", cuando ", ", entonces ");
@@ -76,20 +79,42 @@ class DefaultTemplatesTest {
                 .containsExactly(tuple(CHECK, "Implementar"), tuple(CHECK, "Pruebas"), tuple(CHECK, "Revisión de código"));
     }
 
-    /** La migración repite los textos en SQL (con los saltos de línea escritos como \n). */
     @Test
-    void laMigracionUsaLosMismosTextos() throws IOException {
-        String migration;
-        try (InputStream in = getClass().getResourceAsStream("/db/migration/V11__issue_templates.sql")) {
-            assertThat(in).isNotNull();
-            migration = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-        }
+    void losEsqueletosNoTienenTextoDeRelleno() {
+        assertThat(templates).allSatisfy(template -> assertThat(template.getDescription()).doesNotContain("…"));
+    }
+
+    /** Las migraciones repiten los textos en SQL (con los saltos de línea escritos como \n). */
+    @Test
+    void lasMigracionesUsanLosMismosTextos() throws IOException {
+        String v11 = migration("V11__issue_templates.sql");
+        String v22 = migration("V22__template_skeletons.sql");
         for (IssueTemplate template : templates) {
-            assertThat(migration)
-                    .contains("'" + template.getName() + "'")
-                    .contains("'" + template.getDescription().replace("\n", "\\n") + "'");
-            template.getChecklist().forEach(item -> assertThat(migration).contains("'" + item.getText() + "'"));
+            assertThat(v11).contains("'" + template.getName() + "'");
+            template.getChecklist().forEach(item -> assertThat(v11).contains("'" + item.getText() + "'"));
+            assertThat(v22).contains("'" + template.getDescription().replace("\n", "\\n") + "'");
         }
-        assertThat(migration).contains("'[Bug] '");
+        assertThat(v11).contains("'[Bug] '");
+    }
+
+    /** V22 solo cambia los esqueletos que siguen exactamente como los dejó V11. */
+    @Test
+    void v22SoloCambiaLosEsqueletosDeV11() throws IOException {
+        String v11 = migration("V11__issue_templates.sql");
+        String v22 = migration("V22__template_skeletons.sql");
+        Matcher where = Pattern.compile("WHERE description = (E?'[^;]*');").matcher(v22);
+        int count = 0;
+        while (where.find()) {
+            assertThat(v11).contains(where.group(1).replaceFirst("^E", ""));
+            count++;
+        }
+        assertThat(count).isEqualTo(templates.size());
+    }
+
+    private String migration(String name) throws IOException {
+        try (InputStream in = getClass().getResourceAsStream("/db/migration/" + name)) {
+            assertThat(in).isNotNull();
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 }

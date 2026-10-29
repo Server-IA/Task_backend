@@ -12,8 +12,10 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -22,6 +24,8 @@ import java.util.UUID;
 public class SearchServiceImpl implements SearchService {
 
     static final int MAX_LIMIT = 20;
+    /** Máximo de códigos distintos por consulta de referencias. */
+    static final int MAX_CODES = 50;
 
     private static final Sort RECENTLY_UPDATED = Sort.by(Sort.Direction.DESC, "updatedAt");
 
@@ -54,5 +58,29 @@ public class SearchServiceImpl implements SearchService {
                 .forEach(issue -> results.putIfAbsent(issue.getId(), issue));
 
         return results.values().stream().limit(max).map(issueMapper::toResponse).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<IssueResponse> findByCodes(String slug, UUID userId, Collection<String> codes) {
+        if (codes == null || codes.isEmpty()) {
+            return List.of();
+        }
+        List<String> valid = codes.stream()
+                .filter(IssueSpecifications::isFullCode)
+                .map(code -> code.trim().toUpperCase(Locale.ROOT))
+                .distinct()
+                .limit(MAX_CODES)
+                .toList();
+        if (valid.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> projectIds = projectAccess.projectIds(lookup.workspace(slug), userId);
+        if (projectIds.isEmpty()) {
+            return List.of();
+        }
+        return issueRepository.findAll(IssueSpecifications.codeIn(projectIds, valid)).stream()
+                .map(issueMapper::toResponse)
+                .toList();
     }
 }

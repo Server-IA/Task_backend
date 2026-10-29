@@ -37,6 +37,7 @@ import com.taskflow.api.service.IssueRelationService;
 import com.taskflow.api.service.IssueService;
 import com.taskflow.api.service.NotificationService;
 import com.taskflow.api.util.IssueListSort;
+import com.taskflow.api.util.MentionParser;
 import com.taskflow.api.util.SortOrderCalculator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -49,6 +50,7 @@ import java.time.LocalDate;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -133,6 +135,8 @@ public class IssueServiceImpl implements IssueService {
 
         activityService.record(issue, actor, ActivityField.CREATED, null, issue.getTitle());
         notificationService.notifyAssigned(issue, actor, issue.getAssignees());
+        notificationService.notifyMentionedInDescription(issue, actor,
+                mentionable(project, actor, MentionParser.userIds(issue.getDescription())));
         return issueMapper.toResponse(issue);
     }
 
@@ -162,9 +166,14 @@ public class IssueServiceImpl implements IssueService {
         }
         if (request.description() != null) {
             String description = blankToNull(request.description());
-            // El historial solo indica que la descripción cambió; no guarda el texto completo.
             if (!Objects.equals(issue.getDescription(), description)) {
-                changes.track(ActivityField.DESCRIPTION, null, null);
+                // El historial solo indica que la descripción cambió (una entrada por sesión de edición), sin el
+                // texto. Las personas mencionadas por primera vez reciben el aviso.
+                activityService.recordDescriptionEdit(issue, actor);
+                Set<UUID> newMentions = new LinkedHashSet<>(MentionParser.userIds(description));
+                newMentions.removeAll(MentionParser.userIds(issue.getDescription()));
+                notificationService.notifyMentionedInDescription(issue, actor,
+                        mentionable(project, actor, newMentions));
             }
             issue.setDescription(description);
         }
@@ -412,6 +421,19 @@ public class IssueServiceImpl implements IssueService {
         return new HashSet<>(labels);
     }
 
+    /**
+     * De los usuarios mencionados, los que pueden ver la tarea (miembros del proyecto o project managers del
+     * workspace), sin contar a quien escribió. Los ids de personas ajenas al proyecto se ignoran.
+     */
+    private List<User> mentionable(Project project, User author, Set<UUID> mentionedIds) {
+        Set<UUID> ids = new LinkedHashSet<>(mentionedIds);
+        ids.remove(author.getId());
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        return userRepository.findMentionable(ids, project.getId(), project.getWorkspace().getId());
+    }
+
     private Issue findIssue(Project project, UUID issueId) {
         return issueRepository.findByIdAndProjectId(issueId, project.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Tarea no encontrada"));
@@ -442,7 +464,7 @@ public class IssueServiceImpl implements IssueService {
         }
 
         void track(ActivityField field, String oldValue, String newValue) {
-            if (field == ActivityField.DESCRIPTION || !Objects.equals(oldValue, newValue)) {
+            if (!Objects.equals(oldValue, newValue)) {
                 activityService.record(issue, actor, field, oldValue, newValue);
             }
         }

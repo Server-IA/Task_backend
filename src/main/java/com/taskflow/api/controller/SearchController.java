@@ -37,4 +37,16 @@ public class SearchController {
             @Parameter(description = "Máximo de resultados (1 a 20)") @RequestParam(defaultValue = "8") int limit) {
         return searchService.searchIssues(slug, me.getId(), q, limit);
     }
+
+    @Operation(summary = "Tareas por código",
+            description = "Las tareas con esos códigos («WEB-12,API-3»), solo de los proyectos a los que tengo "
+                    + "acceso. Sirve para dibujar las referencias a tareas de una descripción o un comentario. Los "
+                    + "códigos que no existen no aparecen; como mucho 50 códigos distintos.")
+    @GetMapping("/codes")
+    @PreAuthorize("@workspaceSecurity.isMember(#slug)")
+    public List<IssueResponse> byCodes(
+            @PathVariable String slug, @AuthenticationPrincipal UserPrincipal me,
+            @Parameter(description = "Códigos separados por comas") @RequestParam(required = false) List<String> codes) {
+        return searchService.findByCodes(slug, me.getId(), codes);
+    }
 }
