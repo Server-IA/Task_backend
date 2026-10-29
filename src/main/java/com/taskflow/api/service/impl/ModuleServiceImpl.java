@@ -21,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -88,18 +89,13 @@ public class ModuleServiceImpl implements ModuleService {
         if (request.description() != null) {
             module.setDescription(PlanningSupport.blankToNull(request.description()));
         }
-        if (Boolean.TRUE.equals(request.clearDates())) {
-            module.setStartDate(null);
-            module.setTargetDate(null);
-        } else {
-            if (request.startDate() != null) {
-                module.setStartDate(request.startDate());
-            }
-            if (request.targetDate() != null) {
-                module.setTargetDate(request.targetDate());
-            }
-        }
-        PlanningSupport.validateDates(module.getStartDate(), module.getTargetDate(), INVALID_DATES);
+        LocalDate startDate = PlanningSupport.editedDate(module.getStartDate(), request.startDate(),
+                request.clearDates(), request.clearStartDate());
+        LocalDate targetDate = PlanningSupport.editedDate(module.getTargetDate(), request.targetDate(),
+                request.clearDates(), request.clearTargetDate());
+        PlanningSupport.validateDates(startDate, targetDate, INVALID_DATES);
+        module.setStartDate(startDate);
+        module.setTargetDate(targetDate);
         return toResponse(moduleRepository.saveAndFlush(module));
     }
 

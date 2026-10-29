@@ -61,7 +61,8 @@ public class CycleController {
 
     @Operation(summary = "Editar ciclo (project manager)",
             description = "En un ciclo cerrado solo se puede cambiar la descripción: cambiar el nombre o las fechas "
-                    + "responde 409.")
+                    + "responde 409. clearDates quita las dos fechas; clearStartDate y clearEndDate, solo una. Enviar "
+                    + "una fecha y pedir quitarla a la vez, o un fin anterior al inicio, responde 400.")
     @PatchMapping("/{cycleId}")
     @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     public CycleResponse update(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID cycleId,

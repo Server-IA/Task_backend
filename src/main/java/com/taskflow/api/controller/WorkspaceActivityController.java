@@ -33,7 +33,9 @@ public class WorkspaceActivityController {
     @Operation(summary = "Feed de actividad (lo más reciente primero)",
             description = "Historial de las tareas de los proyectos a los que tengo acceso. type: all (todo), "
                     + "state (cambios de estado, incluido completar), comments (comentarios: newValue trae el texto, "
-                    + "recortado a 240 caracteres) o assignments (cambios de asignados). Tamaño máximo de página: 100.")
+                    + "recortado a 240 caracteres) o assignments (cambios de asignados). Tamaño máximo de página: 100. "
+                    + "Paginación por cursor: nextCursor se pasa como before=<createdAt>,<id> para pedir lo siguiente; "
+                    + "con before se ignora page y totalElements y totalPages son -1.")
     @GetMapping
     public PageResponse<ActivityFeedItemResponse> getFeed(
             @PathVariable String slug, @AuthenticationPrincipal UserPrincipal me,
@@ -43,9 +45,11 @@ public class WorkspaceActivityController {
                     allowableValues = {"all", "state", "comments", "assignments"}, defaultValue = "all"))
             @RequestParam(defaultValue = "all") String type,
             @Parameter(description = "Solo este proyecto") @RequestParam(required = false) UUID projectId,
-            @Parameter(description = "Solo los cambios de esta persona") @RequestParam(required = false) UUID actorId) {
+            @Parameter(description = "Solo los cambios de esta persona") @RequestParam(required = false) UUID actorId,
+            @Parameter(description = "Cursor: el nextCursor de la página anterior (<createdAt>,<id>)")
+            @RequestParam(required = false) String before) {
         return activityService.getWorkspaceFeed(slug, me.getId(), ActivityFeedType.from(type), projectId, actorId,
-                page, size);
+                page, size, before);
     }
 
     @Operation(summary = "Resumen de actividad de los últimos días",

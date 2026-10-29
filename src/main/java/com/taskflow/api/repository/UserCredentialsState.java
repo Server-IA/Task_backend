@@ -1,9 +1,8 @@
 package com.taskflow.api.repository;
 
-import java.time.Instant;
-
 /**
- * Lo que decide si los access tokens de un usuario siguen valiendo: la cuenta activa y el último cambio de contraseña.
+ * Lo que decide si los access tokens de un usuario siguen valiendo: la cuenta activa y la versión de sus credenciales
+ * (sube con cada cambio de contraseña).
  */
-public record UserCredentialsState(boolean active, Instant credentialsChangedAt) {
+public record UserCredentialsState(boolean active, int credentialsVersion) {
 }

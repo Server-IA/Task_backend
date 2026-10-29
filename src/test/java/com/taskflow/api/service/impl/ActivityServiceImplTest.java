@@ -1,5 +1,9 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.dto.response.ActivityFeedItemResponse;
+
+import org.springframework.data.domain.Limit;
+
 import com.taskflow.api.dto.request.ActivityFeedType;
 import com.taskflow.api.dto.response.ActivitySummaryResponse;
 import com.taskflow.api.dto.response.PageResponse;
@@ -125,6 +129,54 @@ class ActivityServiceImplTest {
             activityService.getWorkspaceFeed(SLUG, userId, ActivityFeedType.ALL, app, actorId, 0, 30);
 
             verify(activityRepository).findFeed(eq(List.of(app)), any(), eq(actorId), any());
+        }
+
+        @Test
+        void conBeforePideLoSiguienteSinContar() {
+            Instant at = Instant.parse("2026-10-29T14:03:07.123456Z");
+            UUID afterId = UUID.randomUUID();
+            List<IssueActivity> rows = new java.util.ArrayList<>();
+            for (int i = 0; i < 3; i++) {
+                IssueActivity activity = new IssueActivity();
+                activity.setId(UUID.randomUUID());
+                activity.setCreatedAt(at.minusSeconds(i + 1));
+                rows.add(activity);
+            }
+            when(activityRepository.findFeedBefore(eq(List.of(web, app)), any(), eq(null), eq(at), eq(afterId),
+                    eq(Limit.of(3)))).thenReturn(rows);
+
+            PageResponse<ActivityFeedItemResponse> page = activityService.getWorkspaceFeed(SLUG, userId,
+                    ActivityFeedType.ALL, null, null, 4, 2, at + "," + afterId);
+
+            assertThat(page.content()).hasSize(2);
+            assertThat(page.nextCursor()).isEqualTo(rows.get(1).getCreatedAt() + "," + rows.get(1).getId());
+            assertThat(page.totalPages()).isEqualTo(PageResponse.UNKNOWN);
+            verify(activityRepository, never()).findFeed(any(), any(), any(), any());
+        }
+
+        @Test
+        void laPaginaNormalTraeElCursorDeSuUltimaSiHayMas() {
+            IssueActivity last = new IssueActivity();
+            last.setId(UUID.randomUUID());
+            last.setCreatedAt(Instant.parse("2026-10-29T14:03:07Z"));
+            when(activityRepository.findFeed(any(), any(), any(), any()))
+                    .thenAnswer(invocation -> new PageImpl<>(List.of(last), invocation.getArgument(3), 10));
+
+            PageResponse<ActivityFeedItemResponse> page = activityService.getWorkspaceFeed(SLUG, userId,
+                    ActivityFeedType.ALL, null, null, 0, 1);
+
+            assertThat(page.nextCursor()).isEqualTo("2026-10-29T14:03:07Z," + last.getId());
+            assertThat(page.totalElements()).isEqualTo(10);
+        }
+
+        @Test
+        void conBeforeYUnProyectoSinAccesoNoConsulta() {
+            PageResponse<?> page = activityService.getWorkspaceFeed(SLUG, userId, ActivityFeedType.ALL,
+                    UUID.randomUUID(), null, 0, 30, "2026-10-29T14:03:07Z," + UUID.randomUUID());
+
+            assertThat(page.content()).isEmpty();
+            assertThat(page.nextCursor()).isNull();
+            verifyNoInteractions(activityRepository);
         }
 
         @Test

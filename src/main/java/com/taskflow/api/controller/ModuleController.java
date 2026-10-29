@@ -56,7 +56,10 @@ public class ModuleController {
         return moduleService.get(slug, projectId, moduleId);
     }
 
-    @Operation(summary = "Editar módulo (project manager)")
+    @Operation(summary = "Editar módulo (project manager)",
+            description = "clearDates quita las dos fechas; clearStartDate y clearTargetDate (o clearEndDate), solo "
+                    + "una. Enviar una fecha y pedir quitarla a la vez, o una fecha objetivo anterior al inicio, "
+                    + "responde 400.")
     @PatchMapping("/{moduleId}")
     @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     public ModuleResponse update(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID moduleId,

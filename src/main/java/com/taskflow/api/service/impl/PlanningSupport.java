@@ -51,6 +51,21 @@ class PlanningSupport {
         return progressById(query.apply(List.of(id))).getOrDefault(id, ProgressResponse.of(0, 0));
     }
 
+    /**
+     * La fecha que queda tras una edición: {@code null} si se pide quitarla (con {@code clearAll} o {@code clearOne}),
+     * la nueva si viene, o la actual. Enviar una fecha y pedir quitarla a la vez es un error.
+     */
+    static LocalDate editedDate(LocalDate current, LocalDate requested, Boolean clearAll, Boolean clearOne) {
+        boolean clear = Boolean.TRUE.equals(clearAll) || Boolean.TRUE.equals(clearOne);
+        if (clear && requested != null) {
+            throw new BadRequestException("No se puede enviar una fecha y pedir quitarla a la vez");
+        }
+        if (clear) {
+            return null;
+        }
+        return requested != null ? requested : current;
+    }
+
     static void validateDates(LocalDate start, LocalDate end, String message) {
         if (start != null && end != null && end.isBefore(start)) {
             throw new BadRequestException(message);

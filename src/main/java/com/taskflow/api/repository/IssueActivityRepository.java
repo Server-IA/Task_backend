@@ -2,6 +2,7 @@ package com.taskflow.api.repository;
 
 import com.taskflow.api.entity.IssueActivity;
 import com.taskflow.api.entity.enums.ActivityField;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -46,6 +47,25 @@ public interface IssueActivityRepository extends JpaRepository<IssueActivity, UU
                                  @Param("fields") Collection<ActivityField> fields,
                                  @Param("actorId") UUID actorId,
                                  Pageable pageable);
+
+    /** Como {@link #findFeed}, por cursor: lo que va después de ({@code beforeAt}, {@code beforeId}), sin contar. */
+    @Query("""
+            select a from IssueActivity a
+            join fetch a.issue i
+            join fetch i.project p
+            left join fetch a.actor
+            where p.id in :projectIds
+              and a.field in :fields
+              and (:actorId is null or a.actor.id = :actorId)
+              and (a.createdAt < :beforeAt or (a.createdAt = :beforeAt and a.id < :beforeId))
+            order by a.createdAt desc, a.id desc
+            """)
+    List<IssueActivity> findFeedBefore(@Param("projectIds") Collection<UUID> projectIds,
+                                       @Param("fields") Collection<ActivityField> fields,
+                                       @Param("actorId") UUID actorId,
+                                       @Param("beforeAt") Instant beforeAt,
+                                       @Param("beforeId") UUID beforeId,
+                                       Limit limit);
 
     /**
      * Historial del proyecto en {@code [from, to)} con autor (las entradas sin autor no se incluyen), de la más

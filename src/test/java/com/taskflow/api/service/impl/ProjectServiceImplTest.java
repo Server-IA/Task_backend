@@ -9,11 +9,15 @@ import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.Workspace;
 import com.taskflow.api.entity.enums.ProjectColor;
 import com.taskflow.api.config.AppProperties;
+import com.taskflow.api.dto.response.UserSummaryResponse;
 import com.taskflow.api.mapper.ProjectMapper;
+import com.taskflow.api.mapper.UserMapper;
+import com.taskflow.api.mapper.UserMapperImpl;
 import com.taskflow.api.repository.IssueRepository;
 import com.taskflow.api.repository.ProjectCounts;
 import com.taskflow.api.repository.IssueTemplateRepository;
 import com.taskflow.api.repository.ProjectMemberRepository;
+import com.taskflow.api.repository.ProjectMemberSummary;
 import com.taskflow.api.repository.ProjectRepository;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
@@ -33,7 +37,9 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -61,6 +67,8 @@ class ProjectServiceImplTest {
     private ProjectMapper projectMapper;
     @Mock
     private IssueRepository issueRepository;
+    @Spy
+    private UserMapper userMapper = new UserMapperImpl();
     @Spy
     private AppProperties properties = new AppProperties(null, null, "http://localhost:5173", "America/Bogota", null);
 
@@ -177,8 +185,55 @@ class ProjectServiceImplTest {
 
         projectService.getProjects(SLUG, pmId);
 
-        verify(projectMapper).toResponse(web, new ProjectCounts(web.getId(), 7, 4, 1, 2, 1));
+        verify(projectMapper).toResponse(web, new ProjectCounts(web.getId(), 7, 4, 1, 2, 1),
+                ProjectMemberSummary.empty());
         // Sin tareas no aparece en la consulta: todo en cero
-        verify(projectMapper).toResponse(app, ProjectCounts.empty(app.getId()));
+        verify(projectMapper).toResponse(app, ProjectCounts.empty(app.getId()), ProjectMemberSummary.empty());
+    }
+
+    @Test
+    void elResumenDeMiembrosDeTodosLosProyectosSaleDeUnaConsulta() {
+        Workspace workspace = new Workspace();
+        workspace.setId(UUID.randomUUID());
+        Project web = new Project();
+        web.setId(UUID.randomUUID());
+        Project app = new Project();
+        app.setId(UUID.randomUUID());
+        when(lookup.workspace(SLUG)).thenReturn(workspace);
+        UUID pmId = UUID.randomUUID();
+        when(projectAccess.projects(workspace, pmId)).thenReturn(List.of(web, app));
+        UUID ana = UUID.randomUUID();
+        UUID luis = UUID.randomUUID();
+        // Filas: proyecto, total de miembros y uno de los primeros cinco (por nombre)
+        when(projectMemberRepository.findMemberPreviews(List.of(web.getId(), app.getId()),
+                ProjectMemberRepository.MEMBER_PREVIEW)).thenReturn(List.of(
+                new Object[] {web.getId(), 7L, ana, "ana@test.com", "Ana", null},
+                new Object[] {web.getId(), 7L, luis, "luis@test.com", "Luis", "https://img/luis.png"}));
+
+        projectService.getProjects(SLUG, pmId);
+
+        verify(projectMemberRepository).findMemberPreviews(anyList(), anyInt());
+        verify(projectMapper).toResponse(web, ProjectCounts.empty(web.getId()), new ProjectMemberSummary(7, List.of(
+                new UserSummaryResponse(ana, "ana@test.com", "Ana", null),
+                new UserSummaryResponse(luis, "luis@test.com", "Luis", "https://img/luis.png"))));
+        // Sin miembros no aparece en la consulta
+        verify(projectMapper).toResponse(app, ProjectCounts.empty(app.getId()), ProjectMemberSummary.empty());
+    }
+
+    @Test
+    void unProyectoNuevoTieneComoUnicoMiembroAQuienLoCreo() {
+        Workspace workspace = new Workspace();
+        workspace.setId(UUID.randomUUID());
+        User pm = new User();
+        pm.setId(UUID.randomUUID());
+        pm.setEmail("pm@test.com");
+        pm.setFullName("Paula");
+        UserSummaryResponse summary = new UserSummaryResponse(pm.getId(), "pm@test.com", "Paula", null);
+        when(lookup.workspace(SLUG)).thenReturn(workspace);
+        when(lookup.user(pm.getId())).thenReturn(pm);
+
+        projectService.create(SLUG, pm.getId(), new CreateProjectRequest("Sitio web", "web", null, null));
+
+        verify(projectMapper).toResponse(any(), any(), eq(new ProjectMemberSummary(1, List.of(summary))));
     }
 }

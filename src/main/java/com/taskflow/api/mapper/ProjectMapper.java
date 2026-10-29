@@ -16,18 +16,24 @@ import com.taskflow.api.entity.SavedView;
 import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.TemplateChecklistItem;
 import com.taskflow.api.repository.ProjectCounts;
+import com.taskflow.api.repository.ProjectMemberSummary;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 
 @Mapper(uses = UserMapper.class)
 public interface ProjectMapper {
 
-    /** {@code counts}: sus contadores ({@code ProjectRepository.countIssues}). */
+    /**
+     * {@code counts}: sus contadores ({@code ProjectRepository.countIssues}); {@code memberSummary}: sus miembros
+     * ({@code ProjectMemberRepository.findMemberPreviews}).
+     */
     @Mapping(target = "id", source = "project.id")
     @Mapping(target = "workspaceId", source = "project.workspace.id")
+    @Mapping(target = "memberCount", source = "memberSummary.memberCount")
+    @Mapping(target = "members", source = "memberSummary.members")
     @Mapping(target = "createdAt", source = "project.createdAt")
     @Mapping(target = "updatedAt", source = "project.updatedAt")
-    ProjectResponse toResponse(Project project, ProjectCounts counts);
+    ProjectResponse toResponse(Project project, ProjectCounts counts, ProjectMemberSummary memberSummary);
 
     /** Referencia corta (nombre, identificador y color): la de las tareas, el feed y las dependencias. */
     ProjectRefResponse toRef(Project project);

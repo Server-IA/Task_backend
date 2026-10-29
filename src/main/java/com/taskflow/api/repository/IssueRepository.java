@@ -21,12 +21,39 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
     Optional<Issue> findByIdAndProjectId(UUID id, UUID projectId);
 
     /**
-     * Bloquea la fila de la tarea hasta el final de la transacción ({@code SELECT … FOR UPDATE}). Se llama antes de
-     * leer la tarea: dos cambios de la misma tarea a la vez se ejecutan en fila y el segundo ve lo que dejó el
+     * Bloquea la fila de la tarea hasta el final de la transacción ({@code SELECT … FOR NO KEY UPDATE}). Se llama
+     * antes de leer la tarea: dos cambios de la misma tarea a la vez se ejecutan en fila y el segundo ve lo que dejó el
      * primero (la descripción, su versión, el estado de una historia…).
+     * <p>
+     * {@code NO KEY UPDATE} y no {@code UPDATE}: bloquea a los demás que escriben la fila, pero no choca con el
+     * {@code FOR KEY SHARE} que toma PostgreSQL al guardar una hija que apunta a ella (la clave foránea
+     * {@code parent_id}). Así, crear o mover tareas de una historia bloqueada no espera, y una tarea que cambia de
+     * historia no se cruza con quien bloquea esa historia.
      */
-    @Query(value = "SELECT 1 FROM issues WHERE id = :id FOR UPDATE", nativeQuery = true)
+    @Query(value = "SELECT 1 FROM issues WHERE id = :id FOR NO KEY UPDATE", nativeQuery = true)
     List<Integer> lockById(@Param("id") UUID id);
+
+    /**
+     * Como {@link #lockById}, varias filas y siempre en el mismo orden (el de los ids en PostgreSQL): dos transacciones
+     * que bloquean las mismas tareas no se esperan mutuamente. El orden lo pone la base de datos: el de
+     * {@link UUID#compareTo} es distinto.
+     */
+    @Query(value = "SELECT 1 FROM issues WHERE id IN (:ids) ORDER BY id FOR NO KEY UPDATE", nativeQuery = true)
+    List<Integer> lockAllById(@Param("ids") Collection<UUID> ids);
+
+    /**
+     * Bloquea las hijas de la tarea (en el orden de {@link #lockAllById}). Antes de eliminar una historia: su borrado
+     * les quita el padre ({@code ON DELETE SET NULL}), y así se bloquean las hijas antes que la historia, en el mismo
+     * orden que quien mueve una de ellas (primero la tarea y luego su historia).
+     */
+    @Query(value = "SELECT 1 FROM issues WHERE parent_id = :parentId ORDER BY id FOR NO KEY UPDATE",
+            nativeQuery = true)
+    List<Integer> lockChildrenOf(@Param("parentId") UUID parentId);
+
+    /** Historias con su estado y su proyecto (para ponerlas al día en bloque). */
+    @EntityGraph(attributePaths = {"project", "state"})
+    @Query("select i from Issue i where i.id in :ids")
+    List<Issue> findAllWithStateByIdIn(@Param("ids") Collection<UUID> ids);
 
     /** Tarea de cualquier proyecto del workspace (para las dependencias entre proyectos). */
     @EntityGraph(attributePaths = {"project", "state"})
@@ -50,6 +77,28 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
             group by i.type, s.stateGroup
             """)
     List<StoryChildCount> countChildrenOf(@Param("storyId") UUID storyId);
+
+    /** {@link #countChildrenOf} de varias historias en una consulta (una fila por historia, tipo y grupo). */
+    @Query("""
+            select new com.taskflow.api.repository.StoryChildCountRow(i.parent.id, i.type, s.stateGroup, count(i))
+            from Issue i join i.state s
+            where i.parent.id in :storyIds
+            group by i.parent.id, i.type, s.stateGroup
+            """)
+    List<StoryChildCountRow> countChildrenOfAll(@Param("storyIds") Collection<UUID> storyIds);
+
+    /**
+     * Tareas ({@code TASK}) del estado que tienen padre, con su proyecto, por número: la que «empezó» cada historia
+     * cuando el estado pasa al grupo STARTED.
+     */
+    @EntityGraph(attributePaths = {"project"})
+    @Query("""
+            select i from Issue i
+            where i.state.id = :stateId and i.parent is not null
+              and i.type = com.taskflow.api.entity.enums.IssueType.TASK
+            order by i.sequenceId asc
+            """)
+    List<Issue> findTasksWithParentInState(@Param("stateId") UUID stateId);
 
     /** Historias del proyecto, de la más nueva a la más vieja. */
     @EntityGraph(attributePaths = {"project", "state", "closedBy"})

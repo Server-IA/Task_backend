@@ -1,6 +1,9 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.dto.request.ReorderStatesRequest;
 import com.taskflow.api.dto.request.UpdateStateRequest;
+import com.taskflow.api.dto.response.StateResponse;
+import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.Project;
 import com.taskflow.api.entity.State;
@@ -22,6 +25,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -128,23 +132,70 @@ class StateServiceImplTest {
     @Test
     void pasarAUnGrupoCerradoCierraSusHistoriasPonAlDiaLasDemasYAvisaDesbloqueos() {
         State qa = state(StateGroup.STARTED);
-        Issue story = new Issue();
-        story.setId(UUID.randomUUID());
-        Issue task = new Issue();
-        task.setId(UUID.randomUUID());
-        when(issueRepository.findStoryIdsAffectedByState(qa.getId())).thenReturn(List.of(story.getId()));
-        when(issueRepository.findById(story.getId())).thenReturn(Optional.of(story));
-        when(issueRepository.findAllByStateId(qa.getId())).thenReturn(List.of(task));
 
         changeGroup(qa, StateGroup.COMPLETED);
 
         // Las historias del estado quedan cerradas por el project manager que cambió el grupo
         verify(issueRepository).closeStoriesInState(eq(qa.getId()), any(), eq(pm));
-        verify(stateRepository).saveAndFlush(qa);
-        // Las historias del estado y las de sus tareas se ponen al día (pueden quedar listas para revisar)
-        verify(storyProgress).reconcile(story, pm, null, false);
-        // Las tareas que se completaron dejan de bloquear a otras
-        verify(relationService).notifyUnblocked(task, pm);
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(stateRepository, storyProgress, relationService);
+        order.verify(stateRepository).saveAndFlush(qa);
+        // Las historias del estado y las de sus tareas se ponen al día en bloque (pueden quedar listas para revisar)
+        order.verify(storyProgress).stateGroupChanged(qa, StateGroup.STARTED, pm);
+        // Las tareas que se completaron dejan de bloquear a otras: un aviso por tarea, con una consulta
+        order.verify(relationService).notifyUnblockedByState(qa, pm);
+        verify(relationService, never()).notifyUnblocked(any(), any());
+    }
+
+    @Test
+    void reordenarDejaCadaEstadoEnLaPosicionDeSuIndice() {
+        State backlog = new State(project, "Backlog", "#000000", StateGroup.BACKLOG, 0);
+        backlog.setId(UUID.randomUUID());
+        State todo = new State(project, "Todo", "#000000", StateGroup.UNSTARTED, 1);
+        todo.setId(UUID.randomUUID());
+        State done = new State(project, "Done", "#000000", StateGroup.COMPLETED, 2);
+        done.setId(UUID.randomUUID());
+        when(stateRepository.findAllByProjectIdForUpdate(project.getId())).thenReturn(List.of(backlog, todo, done));
+        when(projectMapper.toStateResponse(any())).thenAnswer(invocation -> {
+            State state = invocation.getArgument(0);
+            return new StateResponse(state.getId(), state.getName(), state.getColor(), state.getStateGroup(),
+                    state.getPosition());
+        });
+
+        List<StateResponse> result = stateService.reorder(SLUG, project.getId(),
+                new ReorderStatesRequest(List.of(done.getId(), backlog.getId(), todo.getId())));
+
+        assertThat(done.getPosition()).isZero();
+        assertThat(backlog.getPosition()).isEqualTo(1);
+        assertThat(todo.getPosition()).isEqualTo(2);
+        assertThat(result).extracting(StateResponse::id).containsExactly(done.getId(), backlog.getId(), todo.getId());
+        verify(stateRepository).flush();
+    }
+
+    @Test
+    void reordenarExigeExactamenteLosEstadosDelProyecto() {
+        State backlog = new State(project, "Backlog", "#000000", StateGroup.BACKLOG, 0);
+        backlog.setId(UUID.randomUUID());
+        State todo = new State(project, "Todo", "#000000", StateGroup.UNSTARTED, 1);
+        todo.setId(UUID.randomUUID());
+        when(stateRepository.findAllByProjectIdForUpdate(project.getId())).thenReturn(List.of(backlog, todo));
+
+        // Falta uno
+        assertThatThrownBy(() -> stateService.reorder(SLUG, project.getId(),
+                new ReorderStatesRequest(List.of(backlog.getId()))))
+                .isInstanceOf(BadRequestException.class);
+        // Sobra uno (de otro proyecto o inventado)
+        assertThatThrownBy(() -> stateService.reorder(SLUG, project.getId(),
+                new ReorderStatesRequest(List.of(backlog.getId(), todo.getId(), UUID.randomUUID()))))
+                .isInstanceOf(BadRequestException.class);
+        // Repetido
+        assertThatThrownBy(() -> stateService.reorder(SLUG, project.getId(),
+                new ReorderStatesRequest(List.of(backlog.getId(), todo.getId(), todo.getId()))))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("repetir");
+        // Nada cambió
+        assertThat(backlog.getPosition()).isZero();
+        assertThat(todo.getPosition()).isEqualTo(1);
+        verify(stateRepository, never()).flush();
     }
 
     @Test

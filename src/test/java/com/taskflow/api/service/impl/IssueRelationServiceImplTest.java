@@ -42,6 +42,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -432,6 +433,26 @@ class IssueRelationServiceImplTest {
             verify(notificationService).notifyUnblocked(web2, blocker, actor);
             verify(notificationService, never()).notifyUnblocked(eq(closed), any(), any());
             verify(relationRepository, never()).countOpenBlockersExcept(eq(closed.getId()), any(), any());
+        }
+
+        @Test
+        void alCompletarseUnEstadoAvisaUnaVezPorTareaDesbloqueada() {
+            // web2 la bloqueaban dos tareas del estado: un solo aviso (antes, uno por cada una)
+            Issue otherBlocker = issue(13, done);
+            Issue web3 = issue(14, todo);
+            when(relationRepository.findUnblockedByState(done.getId(), StateGroup.CLOSED)).thenReturn(List.of(
+                    new IssueRelation(blocker, web2, IssueRelationType.BLOCKS),
+                    new IssueRelation(otherBlocker, web2, IssueRelationType.BLOCKS),
+                    new IssueRelation(otherBlocker, web3, IssueRelationType.BLOCKS)));
+
+            relationService.notifyUnblockedByState(done, actor);
+
+            verify(notificationService).notifyUnblocked(web2, blocker, actor);
+            verify(notificationService).notifyUnblocked(web3, otherBlocker, actor);
+            verify(notificationService, times(2)).notifyUnblocked(any(), any(), any());
+            // Una consulta para todo el estado, no una por tarea
+            verify(relationRepository, never()).findIssuesBlockedBy(any());
+            verify(relationRepository, never()).countOpenBlockersExcept(any(), any(), any());
         }
     }
 }

@@ -34,10 +34,14 @@ public class User extends BaseEntity {
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
 
-    /**
-     * Último cambio o restablecimiento de la contraseña (al segundo). Los access tokens emitidos antes dejan de
-     * servir; {@code null} si nunca cambió.
-     */
+    /** Último cambio o restablecimiento de la contraseña; {@code null} si nunca cambió. */
     @Column(name = "credentials_changed_at")
     private Instant credentialsChangedAt;
+
+    /**
+     * Sube en cada cambio o restablecimiento de la contraseña. Los access tokens llevan la versión con la que se
+     * emitieron (claim {@code cv}) y solo vale la actual ({@code CredentialsGuard}).
+     */
+    @Column(name = "credentials_version", nullable = false)
+    private int credentialsVersion;
 }

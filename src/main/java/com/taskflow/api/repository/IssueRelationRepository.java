@@ -74,6 +74,27 @@ public interface IssueRelationRepository extends JpaRepository<IssueRelation, UU
     List<IssueRelation> findOpenBlockersOf(@Param("issueIds") Collection<UUID> issueIds,
                                            @Param("closedGroups") Collection<StateGroup> closedGroups);
 
+    /**
+     * Un estado acaba de pasar al grupo COMPLETED: los bloqueos cuya tarea origen está en él y cuya tarea bloqueada,
+     * abierta, ya no tiene ningún otro bloqueo abierto (con las tareas bloqueadas, su estado y su proyecto cargados).
+     * Una tarea bloqueada por varias del estado sale una vez por cada una; quien llama se queda con una.
+     */
+    @Query("""
+            select r from IssueRelation r
+            join fetch r.source s join fetch s.project
+            join fetch r.target t join fetch t.state join fetch t.project
+            where r.type = com.taskflow.api.entity.enums.IssueRelationType.BLOCKS
+              and s.state.id = :stateId
+              and t.state.stateGroup not in :closedGroups
+              and not exists (select 1 from IssueRelation o
+                              where o.target = t
+                                and o.type = com.taskflow.api.entity.enums.IssueRelationType.BLOCKS
+                                and o.source.state.stateGroup not in :closedGroups)
+            order by t.id, s.sequenceId
+            """)
+    List<IssueRelation> findUnblockedByState(@Param("stateId") UUID stateId,
+                                             @Param("closedGroups") Collection<StateGroup> closedGroups);
+
     /** Bloqueos de la tarea que siguen abiertos (estado fuera de {@code closedGroups}), sin contar uno de ellos. */
     @Query("""
             select count(r) from IssueRelation r

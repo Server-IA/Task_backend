@@ -18,7 +18,9 @@ import com.taskflow.api.mapper.CollaborationMapper;
 import com.taskflow.api.repository.IssueActivityRepository;
 import com.taskflow.api.repository.IssueRepository;
 import com.taskflow.api.service.ActivityService;
+import com.taskflow.api.util.PageCursor;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -121,18 +123,32 @@ public class ActivityServiceImpl implements ActivityService {
     @Override
     @Transactional(readOnly = true)
     public PageResponse<ActivityFeedItemResponse> getWorkspaceFeed(String slug, UUID userId, ActivityFeedType type,
-                                                                   UUID projectId, UUID actorId, int page, int size) {
+                                                                   UUID projectId, UUID actorId, int page, int size,
+                                                                   String before) {
+        PageCursor cursor = PageCursor.parse(before);
         // Igual que el resto de listados paginados: página negativa = 0 y tamaño acotado.
-        Pageable pageable = PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, MAX_PAGE_SIZE));
+        int pageSize = Math.clamp(size, 1, MAX_PAGE_SIZE);
+        Pageable pageable = PageRequest.of(Math.max(page, 0), pageSize);
         List<UUID> projectIds = projectAccess.projectIds(lookup.workspace(slug), userId);
         if (projectId != null) {
             // Un proyecto sin acceso (o de otro workspace) simplemente no tiene actividad visible.
             projectIds = projectIds.contains(projectId) ? List.of(projectId) : List.of();
         }
+        if (cursor != null) {
+            List<IssueActivity> rows = projectIds.isEmpty()
+                    ? List.of()
+                    : activityRepository.findFeedBefore(projectIds, type.fields(), actorId, cursor.createdAt(),
+                            cursor.id(), Limit.of(pageSize + 1));
+            return PageResponse.fromCursor(rows, pageSize, mapper::toFeedItem, ActivityServiceImpl::cursorOf);
+        }
         Page<IssueActivity> activities = projectIds.isEmpty()
                 ? new PageImpl<>(List.of(), pageable, 0)
                 : activityRepository.findFeed(projectIds, type.fields(), actorId, pageable);
-        return PageResponse.from(activities, mapper::toFeedItem);
+        return PageResponse.from(activities, mapper::toFeedItem, ActivityServiceImpl::cursorOf);
+    }
+
+    private static String cursorOf(IssueActivity activity) {
+        return PageCursor.format(activity.getCreatedAt(), activity.getId());
     }
 
     @Override

@@ -17,6 +17,10 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
 
     Optional<RefreshToken> findByTokenHash(String tokenHash);
 
+    /** El usuario del token, sin cargar el token (se lee después de bloquear la fila del usuario). */
+    @Query("select t.user.id from RefreshToken t where t.tokenHash = :tokenHash")
+    Optional<UUID> findUserIdByTokenHash(@Param("tokenHash") String tokenHash);
+
     @Modifying
     @Query("update RefreshToken t set t.revoked = true where t.user.id = :userId and t.revoked = false")
     int revokeAllByUserId(@Param("userId") UUID userId);

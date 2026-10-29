@@ -25,6 +25,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -115,6 +117,8 @@ class ControllerPermissionsTest {
         rule(StateController.class, "create", MANAGE);
         rule(StateController.class, "update", MANAGE);
         rule(StateController.class, "delete", MANAGE);
+        // Reordenar las columnas del tablero: project manager
+        rule(StateController.class, "reorder", MANAGE);
         rule(LabelController.class, "getLabels", ACCESS);
         rule(LabelController.class, "create", MANAGE);
         rule(LabelController.class, "update", MANAGE);
@@ -316,6 +320,37 @@ class ControllerPermissionsTest {
                 .collect(Collectors.toCollection(TreeSet::new));
         twice.addAll(AUTHENTICATED_ONLY.stream().filter(PUBLIC::contains).toList());
         assertThat(twice).as("endpoints en más de una lista").isEmpty();
+    }
+
+    /**
+     * Cada {@code #nombre} de la regla es un parámetro del método: si no lo es, Spring Security lo evalúa como
+     * {@code null} y la regla deja de proteger lo que debería (por ejemplo, un {@code #projectId} mal escrito).
+     */
+    @Test
+    void losParametrosDeLaReglaExistenEnElMetodo() {
+        Pattern variable = Pattern.compile("#([A-Za-z_][A-Za-z0-9_]*)");
+        List<String> missing = new ArrayList<>();
+        for (Endpoint endpoint : endpoints()) {
+            PreAuthorize rule = endpoint.rule();
+            if (rule == null) {
+                continue;
+            }
+            Set<String> parameters = new HashSet<>();
+            for (Parameter parameter : endpoint.method().getParameters()) {
+                assertThat(parameter.isNamePresent())
+                        .as("%s compilado sin -parameters: no se pueden comprobar los nombres", endpoint.key())
+                        .isTrue();
+                parameters.add(parameter.getName());
+            }
+            Matcher matcher = variable.matcher(rule.value());
+            while (matcher.find()) {
+                if (!parameters.contains(matcher.group(1))) {
+                    missing.add(endpoint.key() + " usa #" + matcher.group(1));
+                }
+            }
+        }
+
+        assertThat(missing).as("parámetros de @PreAuthorize que el método no tiene").isEmpty();
     }
 
     @Test

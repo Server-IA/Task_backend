@@ -39,6 +39,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -120,18 +121,13 @@ public class CycleServiceImpl implements CycleService {
         if (request.description() != null) {
             cycle.setDescription(PlanningSupport.blankToNull(request.description()));
         }
-        if (Boolean.TRUE.equals(request.clearDates())) {
-            cycle.setStartDate(null);
-            cycle.setEndDate(null);
-        } else {
-            if (request.startDate() != null) {
-                cycle.setStartDate(request.startDate());
-            }
-            if (request.endDate() != null) {
-                cycle.setEndDate(request.endDate());
-            }
-        }
-        PlanningSupport.validateDates(cycle.getStartDate(), cycle.getEndDate(), INVALID_DATES);
+        LocalDate startDate = PlanningSupport.editedDate(cycle.getStartDate(), request.startDate(),
+                request.clearDates(), request.clearStartDate());
+        LocalDate endDate = PlanningSupport.editedDate(cycle.getEndDate(), request.endDate(),
+                request.clearDates(), request.clearEndDate());
+        PlanningSupport.validateDates(startDate, endDate, INVALID_DATES);
+        cycle.setStartDate(startDate);
+        cycle.setEndDate(endDate);
         return toResponse(cycleRepository.saveAndFlush(cycle));
     }
 
@@ -309,11 +305,11 @@ public class CycleServiceImpl implements CycleService {
         if (request.name() != null && !request.name().trim().equals(cycle.getName())) {
             return true;
         }
-        if (Boolean.TRUE.equals(request.clearDates())) {
-            return cycle.getStartDate() != null || cycle.getEndDate() != null;
-        }
-        return request.startDate() != null && !request.startDate().equals(cycle.getStartDate())
-                || request.endDate() != null && !request.endDate().equals(cycle.getEndDate());
+        LocalDate startDate = PlanningSupport.editedDate(cycle.getStartDate(), request.startDate(),
+                request.clearDates(), request.clearStartDate());
+        LocalDate endDate = PlanningSupport.editedDate(cycle.getEndDate(), request.endDate(),
+                request.clearDates(), request.clearEndDate());
+        return !Objects.equals(startDate, cycle.getStartDate()) || !Objects.equals(endDate, cycle.getEndDate());
     }
 
     /**

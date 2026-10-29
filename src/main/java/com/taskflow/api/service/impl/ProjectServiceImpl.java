@@ -6,6 +6,7 @@ import com.taskflow.api.dto.request.CreateProjectRequest;
 import com.taskflow.api.dto.request.UpdateProjectRequest;
 import com.taskflow.api.dto.response.ProjectMemberResponse;
 import com.taskflow.api.dto.response.ProjectResponse;
+import com.taskflow.api.dto.response.UserSummaryResponse;
 import com.taskflow.api.entity.Project;
 import com.taskflow.api.entity.ProjectMember;
 import com.taskflow.api.entity.State;
@@ -17,10 +18,12 @@ import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.ProjectMapper;
+import com.taskflow.api.mapper.UserMapper;
 import com.taskflow.api.repository.IssueRepository;
 import com.taskflow.api.repository.IssueTemplateRepository;
 import com.taskflow.api.repository.ProjectCounts;
 import com.taskflow.api.repository.ProjectMemberRepository;
+import com.taskflow.api.repository.ProjectMemberSummary;
 import com.taskflow.api.repository.ProjectRepository;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
@@ -31,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -51,6 +55,7 @@ public class ProjectServiceImpl implements ProjectService {
     private final ProjectMapper projectMapper;
     private final IssueRepository issueRepository;
     private final AppProperties properties;
+    private final UserMapper userMapper;
 
     @Override
     @Transactional(readOnly = true)
@@ -80,9 +85,11 @@ public class ProjectServiceImpl implements ProjectService {
 
         stateRepository.saveAll(defaultStates(project));
         templateRepository.saveAll(DefaultTemplates.forProject(project));
-        projectMemberRepository.save(new ProjectMember(project, lookup.user(userId)));
-        // Recién creado, no tiene tareas
-        return projectMapper.toResponse(project, ProjectCounts.empty(project.getId()));
+        User creator = lookup.user(userId);
+        projectMemberRepository.save(new ProjectMember(project, creator));
+        // Recién creado, no tiene tareas y su único miembro es quien lo creó
+        return projectMapper.toResponse(project, ProjectCounts.empty(project.getId()),
+                new ProjectMemberSummary(1, List.of(userMapper.toSummary(creator))));
     }
 
     @Override
@@ -166,22 +173,44 @@ public class ProjectServiceImpl implements ProjectService {
         return toResponses(List.of(project)).getFirst();
     }
 
-    /** Con sus contadores, calculados para todos los proyectos en una sola consulta. */
+    /**
+     * Con sus contadores y el resumen de sus miembros, calculados para todos los proyectos con una consulta para cada
+     * cosa (no una por proyecto).
+     */
     private List<ProjectResponse> toResponses(List<Project> projects) {
         if (projects.isEmpty()) {
             return List.of();
         }
+        List<UUID> ids = projects.stream().map(Project::getId).toList();
         LocalDate today = LocalDate.now(ZoneId.of(properties.timezone()));
         Map<UUID, ProjectCounts> counts = new HashMap<>();
-        for (Object[] row : projectRepository.countIssues(projects.stream().map(Project::getId).toList(), today)) {
+        for (Object[] row : projectRepository.countIssues(ids, today)) {
             UUID id = (UUID) row[0];
             counts.put(id, new ProjectCounts(id, intValue(row[1]), intValue(row[2]), intValue(row[3]),
                     intValue(row[4]), intValue(row[5])));
         }
+        Map<UUID, ProjectMemberSummary> members = memberSummaries(ids);
         return projects.stream()
                 .map(project -> projectMapper.toResponse(project,
-                        counts.getOrDefault(project.getId(), ProjectCounts.empty(project.getId()))))
+                        counts.getOrDefault(project.getId(), ProjectCounts.empty(project.getId())),
+                        members.getOrDefault(project.getId(), ProjectMemberSummary.empty())))
                 .toList();
+    }
+
+    private Map<UUID, ProjectMemberSummary> memberSummaries(List<UUID> projectIds) {
+        Map<UUID, Integer> totals = new HashMap<>();
+        Map<UUID, List<UserSummaryResponse>> previews = new HashMap<>();
+        for (Object[] row : projectMemberRepository.findMemberPreviews(projectIds,
+                ProjectMemberRepository.MEMBER_PREVIEW)) {
+            UUID projectId = (UUID) row[0];
+            totals.put(projectId, intValue(row[1]));
+            previews.computeIfAbsent(projectId, id -> new ArrayList<>()).add(new UserSummaryResponse(
+                    (UUID) row[2], (String) row[3], (String) row[4], (String) row[5]));
+        }
+        Map<UUID, ProjectMemberSummary> summaries = new HashMap<>();
+        totals.forEach((projectId, total) ->
+                summaries.put(projectId, new ProjectMemberSummary(total, List.copyOf(previews.get(projectId)))));
+        return summaries;
     }
 
     private static int intValue(Object value) {

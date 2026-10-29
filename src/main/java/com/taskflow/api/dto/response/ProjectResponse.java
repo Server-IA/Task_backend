@@ -3,6 +3,7 @@ package com.taskflow.api.dto.response;
 import com.taskflow.api.entity.enums.ProjectColor;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public record ProjectResponse(
@@ -25,6 +26,10 @@ public record ProjectResponse(
          * esa se lleva el número.
          */
         String nextIssueCode,
+        /** Miembros del proyecto (sin contar a los project managers del workspace que no son miembros). */
+        int memberCount,
+        /** Los primeros miembros por nombre (como mucho 5), para los avatares de la tarjeta. */
+        List<UserSummaryResponse> members,
         Instant createdAt,
         Instant updatedAt
 ) {

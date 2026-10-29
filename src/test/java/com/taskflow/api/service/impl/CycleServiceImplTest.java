@@ -470,6 +470,80 @@ class CycleServiceImplTest {
     }
 
     @Nested
+    class EditarFechas {
+
+        private Cycle sprint;
+        private LocalDate start;
+        private LocalDate end;
+
+        @BeforeEach
+        void sprint() {
+            start = today.plusDays(1);
+            end = today.plusDays(14);
+            sprint = cycle("Sprint 4", start, end);
+        }
+
+        private void update(UpdateCycleRequest request) {
+            cycleService.update(SLUG, project.getId(), sprint.getId(), request);
+        }
+
+        @Test
+        void quitaSoloElInicio() {
+            update(new UpdateCycleRequest(null, null, null, null, null, true, null));
+
+            assertThat(sprint.getStartDate()).isNull();
+            assertThat(sprint.getEndDate()).isEqualTo(end);
+        }
+
+        @Test
+        void quitaSoloElFin() {
+            update(new UpdateCycleRequest(null, null, null, null, null, null, true));
+
+            assertThat(sprint.getStartDate()).isEqualTo(start);
+            assertThat(sprint.getEndDate()).isNull();
+        }
+
+        @Test
+        void clearDatesSigueQuitandoLasDos() {
+            update(new UpdateCycleRequest(null, null, null, null, true));
+
+            assertThat(sprint.getStartDate()).isNull();
+            assertThat(sprint.getEndDate()).isNull();
+        }
+
+        @Test
+        void elFinNoPuedeQuedarAntesDelInicio() {
+            assertThatThrownBy(() -> update(new UpdateCycleRequest(null, null, null, start.minusDays(1), null)))
+                    .isInstanceOf(BadRequestException.class);
+            assertThatThrownBy(() -> update(new UpdateCycleRequest(null, null, end.plusDays(1), null, null, null,
+                    null)))
+                    .isInstanceOf(BadRequestException.class);
+            // Nada cambió
+            assertThat(sprint.getStartDate()).isEqualTo(start);
+            assertThat(sprint.getEndDate()).isEqualTo(end);
+            verify(cycleRepository, never()).saveAndFlush(any());
+        }
+
+        @Test
+        void enviarUnaFechaYPedirQuitarlaEsUnError() {
+            assertThatThrownBy(() -> update(new UpdateCycleRequest(null, null, null, end.plusDays(1), null, null,
+                    true)))
+                    .isInstanceOf(BadRequestException.class);
+            assertThat(sprint.getEndDate()).isEqualTo(end);
+        }
+
+        @Test
+        void enUnCicloCerradoQuitarUnaFechaTambienEsCambiarla() {
+            closed(sprint);
+
+            assertThatThrownBy(() -> update(new UpdateCycleRequest(null, null, null, null, null, true, null)))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessage(CycleServiceImpl.CLOSED_EDIT_MESSAGE);
+            assertThat(sprint.getStartDate()).isEqualTo(start);
+        }
+    }
+
+    @Nested
     class ClosedCycle {
 
         private Cycle sprint;

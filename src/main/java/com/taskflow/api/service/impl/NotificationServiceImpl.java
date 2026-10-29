@@ -18,8 +18,11 @@ import com.taskflow.api.repository.NotificationRepository;
 import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.service.NotificationService;
+import com.taskflow.api.util.PageCursor;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -28,6 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Collection;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -40,6 +44,8 @@ public class NotificationServiceImpl implements NotificationService {
     private static final int MAX_TITLE_IN_MESSAGE = 200;
     /** Propiedades por las que se puede ordenar la bandeja. */
     static final Set<String> SORTABLE = Set.of("createdAt");
+    /** Tamaño máximo de una página pedida con cursor. */
+    static final int MAX_CURSOR_PAGE_SIZE = 100;
     private static final Set<NotificationType> ALL_TYPES = EnumSet.allOf(NotificationType.class);
 
     private final NotificationRepository notificationRepository;
@@ -51,18 +57,37 @@ public class NotificationServiceImpl implements NotificationService {
     @Transactional(readOnly = true)
     public PageResponse<NotificationResponse> getMyNotifications(UUID userId, boolean unreadOnly,
                                                                  Collection<NotificationType> types,
-                                                                 Pageable pageable) {
+                                                                 Pageable pageable, String before) {
         Set<NotificationType> filter = types == null || types.isEmpty()
                 ? EnumSet.allOf(NotificationType.class)
                 : EnumSet.copyOf(types);
+        PageCursor cursor = PageCursor.parse(before);
+        if (cursor != null) {
+            int size = Math.clamp(pageable.getPageSize(), 1, MAX_CURSOR_PAGE_SIZE);
+            List<Notification> rows = notificationRepository.findMineBefore(userId, filter, unreadOnly,
+                    cursor.createdAt(), cursor.id(), Limit.of(size + 1));
+            return PageResponse.fromCursor(rows, size, mapper::toNotificationResponse, NotificationServiceImpl::cursorOf);
+        }
         // Solo por fecha: ordenar por otra propiedad (actor.email, issue.description…) revelaría datos ajenos
         for (Sort.Order order : pageable.getSort()) {
             if (!SORTABLE.contains(order.getProperty())) {
                 throw new BadRequestException("No se puede ordenar por '" + order.getProperty() + "'");
             }
         }
+        Sort.Order byDate = pageable.getSort().getOrderFor("createdAt");
+        boolean newestFirst = byDate != null && byDate.isDescending();
+        if (byDate != null) {
+            // A igual fecha, por id en el mismo sentido: el orden es estable y coincide con el del cursor
+            pageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
+                    Sort.by(byDate, new Sort.Order(byDate.getDirection(), "id")));
+        }
         Page<Notification> page = notificationRepository.findMine(userId, filter, unreadOnly, pageable);
-        return PageResponse.from(page, mapper::toNotificationResponse);
+        return PageResponse.from(page, mapper::toNotificationResponse,
+                newestFirst ? NotificationServiceImpl::cursorOf : null);
+    }
+
+    private static String cursorOf(Notification notification) {
+        return PageCursor.format(notification.getCreatedAt(), notification.getId());
     }
 
     @Override

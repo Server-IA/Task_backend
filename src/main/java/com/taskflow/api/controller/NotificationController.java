@@ -40,7 +40,10 @@ public class NotificationController {
     @Operation(summary = "Mis notificaciones (las más recientes primero)",
             description = "type filtra por tipo (acepta varios: ?type=ISSUE_MENTIONED&type=ISSUE_COMMENTED); sin type, "
                     + "todos. issue = la tarea (null en RETRO_STARTED); cycle = el ciclo de RETRO_STARTED; comment = "
-                    + "extracto del comentario de ISSUE_COMMENTED e ISSUE_MENTIONED.")
+                    + "extracto del comentario de ISSUE_COMMENTED e ISSUE_MENTIONED. Paginación por cursor: "
+                    + "nextCursor (con el orden por defecto) se pasa como before=<createdAt>,<id> para pedir las "
+                    + "siguientes; con before se ignoran page y sort, size es como mucho 100 y totalElements y "
+                    + "totalPages son -1. page y size siguen funcionando sin before.")
     @GetMapping
     public PageResponse<NotificationResponse> getMyNotifications(
             @AuthenticationPrincipal UserPrincipal me,
@@ -49,8 +52,10 @@ public class NotificationController {
                     + "RETRO_STARTED")
             @RequestParam(required = false) List<NotificationType> type,
             @ParameterObject @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC)
-            Pageable pageable) {
-        return notificationService.getMyNotifications(me.getId(), unread, type, pageable);
+            Pageable pageable,
+            @Parameter(description = "Cursor: el nextCursor de la página anterior (<createdAt>,<id>)")
+            @RequestParam(required = false) String before) {
+        return notificationService.getMyNotifications(me.getId(), unread, type, pageable, before);
     }
 
     @Operation(summary = "Cantidad de notificaciones sin leer")

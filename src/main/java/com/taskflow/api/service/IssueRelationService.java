@@ -4,6 +4,7 @@ import com.taskflow.api.dto.request.CreateIssueRelationRequest;
 import com.taskflow.api.dto.response.IssueRelationResponse;
 import com.taskflow.api.dto.response.IssueRelationsResponse;
 import com.taskflow.api.entity.Issue;
+import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.User;
 
 import java.util.UUID;
@@ -33,4 +34,10 @@ public interface IssueRelationService {
      * tarea abierta que bloqueaba y que ya no tiene otros bloqueos abiertos.
      */
     void notifyUnblocked(Issue completedBlocker, User actor);
+
+    /**
+     * El estado pasó de un grupo abierto a COMPLETED: avisa una vez a cada tarea que con eso dejó de estar bloqueada
+     * (aunque la bloquearan varias tareas del estado), con una consulta para todo el estado.
+     */
+    void notifyUnblockedByState(State state, User actor);
 }

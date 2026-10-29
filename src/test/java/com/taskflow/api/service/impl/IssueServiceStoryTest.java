@@ -59,6 +59,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -815,6 +816,67 @@ class IssueServiceStoryTest {
             verify(issueRepository, times(2)).lockById(task.getId());
             verify(issueRepository, times(2)).lockById(story.getId());
             verify(issueRepository).lockById(closed.getId());
+        }
+
+        @Test
+        void laHistoriaSeBloqueaYSeVuelveALeerAntesDeVerSiEstaCerrada() {
+            Issue story = closedStory();
+            // Mientras se esperaba el bloqueo, el project manager la reabrió (/reopen): al releerla ya está abierta
+            doAnswer(invocation -> {
+                Issue locked = invocation.getArgument(0);
+                locked.setState(inProgress);
+                locked.setClosedAt(null);
+                return null;
+            }).when(storyProgress).lock(story);
+
+            issueService.update(SLUG, project.getId(), issue(IssueType.TASK, todo).getId(), pm.getId(),
+                    updateParent(story.getId(), true));
+
+            // No la vuelve a reabrir: un solo «reabrió» en su historial (el del otro)
+            verify(activityService, never()).record(eq(story), any(), eq(ActivityField.STATE), any(), any());
+            assertThat(story.getState()).isSameAs(inProgress);
+        }
+
+        @Test
+        void unaHistoriaQueSeCerroMientrasEsperabaPideReabrirla() {
+            Issue story = issue(IssueType.STORY, inProgress);
+            doAnswer(invocation -> {
+                Issue locked = invocation.getArgument(0);
+                locked.setState(done);
+                return null;
+            }).when(storyProgress).lock(story);
+
+            assertThatThrownBy(() -> issueService.create(SLUG, project.getId(), member.getId(),
+                    new CreateIssueRequest("Nueva", null, null, null, story.getId(), null, null, null, null, null, null,
+                            IssueType.TASK, null, null)))
+                    .isInstanceOf(ConflictException.class);
+        }
+
+        @Test
+        void cambiarDeHistoriaBloqueaLasDosAntesDeCambiarElPadre() {
+            Issue from = issue(IssueType.STORY, inProgress);
+            Issue to = issue(IssueType.STORY, inProgress);
+            Issue task = issue(IssueType.TASK, todo);
+            task.setParent(from);
+
+            issueService.update(SLUG, project.getId(), task.getId(), member.getId(), updateParent(to.getId(), null));
+
+            org.mockito.InOrder order = org.mockito.Mockito.inOrder(storyProgress, issueRepository);
+            order.verify(storyProgress).lockStories(from, to);
+            order.verify(storyProgress).lock(to);
+            order.verify(issueRepository).saveAndFlush(task);
+            order.verify(storyProgress).childChanged(task, from, member, false);
+        }
+
+        @Test
+        void eliminarUnaHistoriaBloqueaSusHijasAntes() {
+            Issue story = issue(IssueType.STORY, inProgress);
+
+            issueService.delete(SLUG, project.getId(), story.getId(), pm.getId());
+
+            org.mockito.InOrder order = org.mockito.Mockito.inOrder(issueRepository);
+            order.verify(issueRepository).lockChildrenOf(story.getId());
+            order.verify(issueRepository).delete(story);
         }
     }
 

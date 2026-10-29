@@ -38,8 +38,19 @@ public interface ActivityService {
      * Feed de actividad del workspace (lo más reciente primero), solo de los proyectos a los que el usuario
      * tiene acceso. {@code projectId} y {@code actorId} son filtros opcionales.
      */
+    default PageResponse<ActivityFeedItemResponse> getWorkspaceFeed(String slug, UUID userId, ActivityFeedType type,
+                                                                    UUID projectId, UUID actorId, int page,
+                                                                    int size) {
+        return getWorkspaceFeed(slug, userId, type, projectId, actorId, page, size, null);
+    }
+
+    /**
+     * Con {@code before} (un cursor {@code <createdAt>,<id>}), lo que va después de ese elemento, sin contar el total
+     * ({@code page} no se usa). La respuesta trae {@code nextCursor}.
+     */
     PageResponse<ActivityFeedItemResponse> getWorkspaceFeed(String slug, UUID userId, ActivityFeedType type,
-                                                            UUID projectId, UUID actorId, int page, int size);
+                                                            UUID projectId, UUID actorId, int page, int size,
+                                                            String before);
 
     /** Resumen de la actividad de los últimos {@code days} días en los proyectos accesibles. */
     ActivitySummaryResponse getWorkspaceSummary(String slug, UUID userId, int days);

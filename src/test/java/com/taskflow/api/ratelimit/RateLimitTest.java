@@ -72,17 +72,41 @@ class RateLimitTest {
     }
 
     @Test
-    void ensureAvailableNoGastaIntentos() {
+    void refundDevuelveUnIntentoGastado() {
         RateLimitService service = new RateLimitService();
-        for (int i = 0; i < 50; i++) {
-            service.ensureAvailable(RateLimitRule.LOGIN_ACCOUNT, "ana@test.com");
+        for (int i = 0; i < RateLimitRule.LOGIN_ACCOUNT_IP.getCapacity(); i++) {
+            assertThat(service.tryConsume(RateLimitRule.LOGIN_ACCOUNT_IP, "ana@test.com|10.0.0.1").isConsumed())
+                    .isTrue();
         }
-        for (int i = 0; i < RateLimitRule.LOGIN_ACCOUNT.getCapacity(); i++) {
-            service.tryConsume(RateLimitRule.LOGIN_ACCOUNT, "ana@test.com");
-        }
+        assertThat(service.tryConsume(RateLimitRule.LOGIN_ACCOUNT_IP, "ana@test.com|10.0.0.1").isConsumed()).isFalse();
 
-        assertThatThrownBy(() -> service.ensureAvailable(RateLimitRule.LOGIN_ACCOUNT, "ana@test.com"))
-                .isInstanceOf(TooManyRequestsException.class);
+        service.refund(RateLimitRule.LOGIN_ACCOUNT_IP, "ana@test.com|10.0.0.1");
+
+        assertThat(service.tryConsume(RateLimitRule.LOGIN_ACCOUNT_IP, "ana@test.com|10.0.0.1").isConsumed()).isTrue();
+        // Devolver un intento de una clave sin bucket no hace nada
+        service.refund(RateLimitRule.LOGIN_ACCOUNT_IP, "nadie");
+        assertThat(service.size(RateLimitRule.LOGIN_ACCOUNT_IP)).isEqualTo(1);
+    }
+
+    @Test
+    void elFiltroCuentaLasIpv6PorSuPrefijo64() throws Exception {
+        RateLimitFilter filter = new RateLimitFilter(new RateLimitService(),
+                new JsonResponseWriter(JsonMapper.builder().build()));
+        FilterChain chain = mock(FilterChain.class);
+        int capacity = RateLimitRule.LOGIN.getCapacity();
+
+        for (int i = 0; i < capacity; i++) {
+            MockHttpServletRequest request = post("/api/v1/auth/login");
+            request.setRemoteAddr("2001:db8:aa:bb::" + Integer.toHexString(i + 1));
+            filter.doFilter(request, new MockHttpServletResponse(), chain);
+        }
+        MockHttpServletRequest sameNetwork = post("/api/v1/auth/login");
+        sameNetwork.setRemoteAddr("2001:db8:aa:bb:1234:5678:9abc:def0");
+        MockHttpServletResponse blocked = new MockHttpServletResponse();
+        filter.doFilter(sameNetwork, blocked, chain);
+
+        assertThat(blocked.getStatus()).isEqualTo(429);
+        verify(chain, times(capacity)).doFilter(any(), any());
     }
 
     @Test
@@ -101,5 +125,48 @@ class RateLimitTest {
         }
 
         assertThat(service.size()).isLessThan(100);
+    }
+
+    @Test
+    void unBucketRecienteDeOtraReglaNoFrenaLaLimpieza() {
+        AtomicLong now = new AtomicLong();
+        RateLimitService service = new RateLimitService(now::get);
+        // El más antiguo de todos es de una regla de una hora; detrás, cien de la regla de un minuto
+        service.tryConsume(RateLimitRule.INVITE_SENDER, "ana");
+        for (int i = 0; i < 100; i++) {
+            service.tryConsume(RateLimitRule.LOGIN, "10.0.0." + i);
+        }
+
+        now.addAndGet(Duration.ofMinutes(2).toNanos());
+        for (int i = 0; i < 2; i++) {
+            service.tryConsume(RateLimitRule.LOGIN, "10.1.0." + i);
+        }
+
+        // Cada regla tiene su mapa: los de un minuto se limpian aunque el de una hora siga vigente
+        assertThat(service.size(RateLimitRule.LOGIN)).isLessThan(100);
+        assertThat(service.size(RateLimitRule.INVITE_SENDER)).isEqualTo(1);
+    }
+
+    @Test
+    void alLlenarseSoloSeDescartanBucketsSinIntentosGastados() {
+        AtomicLong now = new AtomicLong();
+        RateLimitService service = new RateLimitService(now::get, 3);
+        // La víctima gasta todos sus intentos; dos claves más llenan la regla
+        for (int i = 0; i < RateLimitRule.LOGIN_ACCOUNT.getCapacity(); i++) {
+            service.tryConsume(RateLimitRule.LOGIN_ACCOUNT, "victima@test.com");
+        }
+        service.tryConsume(RateLimitRule.LOGIN_ACCOUNT, "a@test.com");
+        service.refund(RateLimitRule.LOGIN_ACCOUNT, "a@test.com");
+        service.tryConsume(RateLimitRule.LOGIN_ACCOUNT, "b@test.com");
+
+        // Una clave nueva ocupa el sitio del único bucket lleno («a», que devolvió su intento)…
+        assertThat(service.tryConsume(RateLimitRule.LOGIN_ACCOUNT, "c@test.com").isConsumed()).isTrue();
+        assertThat(service.size(RateLimitRule.LOGIN_ACCOUNT)).isEqualTo(3);
+        // …y cuando no queda ninguno lleno, la clave nueva se rechaza (no se descarta un bucket con intentos gastados)
+        assertThat(service.tryConsume(RateLimitRule.LOGIN_ACCOUNT, "d@test.com").isConsumed()).isFalse();
+        assertThatThrownBy(() -> service.consume(RateLimitRule.LOGIN_ACCOUNT, "e@test.com"))
+                .isInstanceOf(TooManyRequestsException.class);
+        // La víctima sigue sin intentos: inundar el mapa no se los devolvió
+        assertThat(service.tryConsume(RateLimitRule.LOGIN_ACCOUNT, "victima@test.com").isConsumed()).isFalse();
     }
 }

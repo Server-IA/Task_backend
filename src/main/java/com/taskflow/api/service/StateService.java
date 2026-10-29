@@ -1,6 +1,7 @@
 package com.taskflow.api.service;
 
 import com.taskflow.api.dto.request.CreateStateRequest;
+import com.taskflow.api.dto.request.ReorderStatesRequest;
 import com.taskflow.api.dto.request.UpdateStateRequest;
 import com.taskflow.api.dto.response.StateResponse;
 
@@ -17,4 +18,10 @@ public interface StateService {
 
     /** Falla si es el último estado del proyecto o si todavía tiene issues. */
     void delete(String slug, UUID projectId, UUID stateId);
+
+    /**
+     * Reordena las columnas: {@code stateIds} debe tener exactamente los estados del proyecto, sin repetir. Cada uno
+     * queda en la posición de su índice. Devuelve los estados en el orden nuevo.
+     */
+    List<StateResponse> reorder(String slug, UUID projectId, ReorderStatesRequest request);
 }

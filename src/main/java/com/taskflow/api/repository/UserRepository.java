@@ -17,10 +17,22 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     boolean existsByEmail(String email);
 
     @Query("""
-            select new com.taskflow.api.repository.UserCredentialsState(u.active, u.credentialsChangedAt)
+            select new com.taskflow.api.repository.UserCredentialsState(u.active, u.credentialsVersion)
             from User u where u.id = :id
             """)
     Optional<UserCredentialsState> findCredentialsState(@Param("id") UUID id);
+
+    /**
+     * Bloquea la fila del usuario hasta el final de la transacción ({@code SELECT … FOR UPDATE}) y devuelve, leídos de
+     * la base de datos (no de la entidad en memoria), su hash de contraseña y la versión de sus credenciales. Lo usan
+     * el login, la rotación del refresh token y el cambio de contraseña: así un cambio de contraseña no se cruza con
+     * una sesión que se está abriendo o renovando (o espera a que termine y la cierra, o la otra ve el cambio).
+     */
+    @Query(value = """
+            SELECT password_hash AS "passwordHash", credentials_version AS "credentialsVersion"
+            FROM users WHERE id = :id FOR UPDATE
+            """, nativeQuery = true)
+    Optional<LockedCredentials> lockCredentials(@Param("id") UUID id);
 
     /**
      * De los usuarios indicados, los que se pueden mencionar en una tarea del proyecto: sus miembros y los project

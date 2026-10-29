@@ -1,5 +1,6 @@
 package com.taskflow.api.ratelimit;
 
+import com.taskflow.api.util.ClientKeys;
 import com.taskflow.api.util.JsonResponseWriter;
 import io.github.bucket4j.ConsumptionProbe;
 import jakarta.servlet.FilterChain;
@@ -22,7 +23,8 @@ import java.util.Optional;
  * Se ejecuta antes del filtro JWT y responde 429 con la cabecera {@code Retry-After}.
  * <p>
  * La ruta se compara ya decodificada (como la resuelve Spring MVC): {@code /api/v1/auth/%6Cogin} también es el
- * login. La IP es la del cliente; detrás de un proxy hay que activar {@code FORWARD_HEADERS_STRATEGY=native}.
+ * login. La IP es la del cliente (una IPv6 cuenta por su prefijo /64, {@link ClientKeys#ip}); detrás de un proxy hay
+ * que activar {@code FORWARD_HEADERS_STRATEGY=native}.
  */
 @Component
 @RequiredArgsConstructor
@@ -41,7 +43,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 : Optional.empty();
 
         if (rule.isPresent()) {
-            ConsumptionProbe probe = rateLimitService.tryConsume(rule.get(), request.getRemoteAddr());
+            ConsumptionProbe probe = rateLimitService.tryConsume(rule.get(), ClientKeys.ip(request.getRemoteAddr()));
             if (!probe.isConsumed()) {
                 long retryAfter = RateLimitService.seconds(probe.getNanosToWaitForRefill());
                 response.setHeader(HttpHeaders.RETRY_AFTER, String.valueOf(retryAfter));

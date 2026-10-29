@@ -1,5 +1,13 @@
 package com.taskflow.api.service.impl;
 
+import java.time.Instant;
+
+import com.taskflow.api.dto.response.NotificationResponse;
+
+import com.taskflow.api.dto.response.PageResponse;
+
+import org.springframework.data.domain.Limit;
+
 import com.taskflow.api.dto.response.NotificationCountsResponse;
 import com.taskflow.api.entity.Comment;
 import com.taskflow.api.entity.Cycle;
@@ -281,6 +289,79 @@ class NotificationServiceImplTest {
                 .thenReturn(4L);
 
         assertThat(notificationService.counts(me)).isEqualTo(new NotificationCountsResponse(3, 1, 4));
+    }
+
+    @Test
+    void conBeforePideLasSiguientesSinContarYDevuelveElCursor() {
+        UUID me = UUID.randomUUID();
+        Instant at = Instant.parse("2026-10-29T14:03:07.123456Z");
+        UUID afterId = UUID.randomUUID();
+        List<Notification> rows = new java.util.ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            Notification notification = new Notification();
+            notification.setId(UUID.randomUUID());
+            notification.setCreatedAt(at.minusSeconds(i + 1));
+            rows.add(notification);
+        }
+        // Pide una más que el tamaño: la de más solo indica que hay otra página
+        when(notificationRepository.findMineBefore(eq(me), any(), eq(false), eq(at), eq(afterId), eq(Limit.of(3))))
+                .thenReturn(rows);
+
+        PageResponse<NotificationResponse> page = notificationService.getMyNotifications(me, false,
+                List.of(NotificationType.ISSUE_MENTIONED), PageRequest.of(7, 2), at + "," + afterId);
+
+        assertThat(page.content()).hasSize(2);
+        assertThat(page.nextCursor()).isEqualTo(rows.get(1).getCreatedAt() + "," + rows.get(1).getId());
+        assertThat(page.last()).isFalse();
+        assertThat(page.totalElements()).isEqualTo(PageResponse.UNKNOWN);
+        verify(notificationRepository, never()).findMine(any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void laUltimaPaginaPorCursorNoTraeCursor() {
+        UUID me = UUID.randomUUID();
+        Instant at = Instant.parse("2026-10-29T14:03:07Z");
+        Notification only = new Notification();
+        only.setId(UUID.randomUUID());
+        only.setCreatedAt(at.minusSeconds(1));
+        when(notificationRepository.findMineBefore(any(), any(), anyBoolean(), any(), any(), any()))
+                .thenReturn(List.of(only));
+
+        PageResponse<NotificationResponse> page = notificationService.getMyNotifications(me, true, null,
+                PageRequest.of(0, 20), at + "," + UUID.randomUUID());
+
+        assertThat(page.content()).hasSize(1);
+        assertThat(page.nextCursor()).isNull();
+        assertThat(page.last()).isTrue();
+    }
+
+    @Test
+    void sinBeforeLaPaginaNormalTraeElCursorDeSuUltimaYOrdenaPorIdAIgualFecha() {
+        UUID me = UUID.randomUUID();
+        Notification last = new Notification();
+        last.setId(UUID.randomUUID());
+        last.setCreatedAt(Instant.parse("2026-10-29T14:03:07.5Z"));
+        Pageable requested = PageRequest.of(0, 1, Sort.by(Sort.Direction.DESC, "createdAt"));
+        ArgumentCaptor<Pageable> used = ArgumentCaptor.forClass(Pageable.class);
+        when(notificationRepository.findMine(eq(me), any(), anyBoolean(), used.capture()))
+                .thenAnswer(invocation -> new PageImpl<>(List.of(last), invocation.getArgument(3), 5));
+
+        PageResponse<NotificationResponse> page = notificationService.getMyNotifications(me, false, null, requested);
+
+        assertThat(used.getValue().getSort()).containsExactly(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
+        assertThat(page.totalElements()).isEqualTo(5);
+        assertThat(page.nextCursor()).isEqualTo("2026-10-29T14:03:07.500Z," + last.getId());
+    }
+
+    @Test
+    void unCursorMalFormadoResponde400() {
+        UUID me = UUID.randomUUID();
+        for (String bad : List.of("ayer", "2026-10-29T14:03:07Z", "2026-10-29T14:03:07Z,no-es-uuid", ",abc")) {
+            assertThatThrownBy(() -> notificationService.getMyNotifications(me, false, null, PageRequest.of(0, 20),
+                    bad))
+                    .isInstanceOf(BadRequestException.class);
+        }
+        verifyNoInteractions(notificationRepository);
     }
 
     @Test

@@ -20,8 +20,20 @@ public interface NotificationService {
      * Mis notificaciones (todas o solo las no leídas) de los tipos indicados; {@code types} vacío o {@code null} =
      * todos los tipos.
      */
+    default PageResponse<NotificationResponse> getMyNotifications(UUID userId, boolean unreadOnly,
+                                                                  Collection<NotificationType> types,
+                                                                  Pageable pageable) {
+        return getMyNotifications(userId, unreadOnly, types, pageable, null);
+    }
+
+    /**
+     * Como {@link #getMyNotifications(UUID, boolean, Collection, Pageable)}; con {@code before} (un cursor
+     * {@code <createdAt>,<id>}), las que van después de ese elemento, de lo más nuevo a lo más viejo, con el tamaño de
+     * {@code pageable} (su página y su orden no se usan). La respuesta trae {@code nextCursor}.
+     */
     PageResponse<NotificationResponse> getMyNotifications(UUID userId, boolean unreadOnly,
-                                                          Collection<NotificationType> types, Pageable pageable);
+                                                          Collection<NotificationType> types, Pageable pageable,
+                                                          String before);
 
     CountResponse countUnread(UUID userId);
 

@@ -20,8 +20,16 @@ public enum RateLimitRule {
     FORGOT_PASSWORD("/api/v1/auth/forgot-password", 3, Duration.ofMinutes(15)),
     RESEND_VERIFICATION("/api/v1/auth/resend-verification", 3, Duration.ofMinutes(15)),
 
-    /** Contraseñas incorrectas por cuenta (desde cualquier IP): frena adivinarla repartiendo los intentos. */
-    LOGIN_ACCOUNT(null, 10, Duration.ofMinutes(15)),
+    /**
+     * Intentos fallidos de entrar a una cuenta desde una misma IP (o prefijo IPv6 /64). Quien prueba contraseñas desde
+     * su IP se bloquea solo a sí mismo: la persona dueña de la cuenta sigue entrando desde la suya.
+     */
+    LOGIN_ACCOUNT_IP(null, 10, Duration.ofMinutes(15)),
+    /**
+     * Techo de intentos fallidos por cuenta desde cualquier IP: frena adivinar la contraseña repartiendo los intentos
+     * entre muchas IPs. Es más alto que {@link #LOGIN_ACCOUNT_IP} para que una sola IP no deje fuera a la dueña.
+     */
+    LOGIN_ACCOUNT(null, 50, Duration.ofMinutes(15)),
     /** Invitaciones que envía cada persona. */
     INVITE_SENDER(null, 20, Duration.ofHours(1)),
     /** Invitaciones que recibe cada correo, de cualquier workspace: nadie recibe una avalancha de correos. */

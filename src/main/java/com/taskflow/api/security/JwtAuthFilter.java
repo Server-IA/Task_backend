@@ -39,7 +39,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         if (header != null && header.startsWith(BEARER_PREFIX)) {
             String token = header.substring(BEARER_PREFIX.length()).trim();
             Optional<UserPrincipal> principal = jwtService.parse(token)
-                    .filter(parsed -> credentialsGuard.accepts(parsed.principal().getId(), parsed.issuedAt()))
+                    .filter(parsed -> credentialsGuard.accepts(parsed.principal().getId(), parsed.credentialsVersion()))
                     .map(AccessToken::principal);
             if (principal.isPresent()) {
                 var authentication = new UsernamePasswordAuthenticationToken(

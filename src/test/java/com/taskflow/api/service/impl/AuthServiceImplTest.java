@@ -18,11 +18,13 @@ import com.taskflow.api.exception.UnauthorizedException;
 import com.taskflow.api.mapper.UserMapper;
 import com.taskflow.api.ratelimit.RateLimitRule;
 import com.taskflow.api.ratelimit.RateLimitService;
+import com.taskflow.api.repository.LockedCredentials;
 import com.taskflow.api.repository.RefreshTokenRepository;
 import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.repository.VerificationTokenRepository;
 import com.taskflow.api.security.CredentialsGuard;
 import com.taskflow.api.security.JwtService;
+import com.taskflow.api.security.UserPrincipal;
 import com.taskflow.api.util.ClientInfo;
 import com.taskflow.api.util.TokenUtils;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,22 +32,27 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -86,7 +93,24 @@ class AuthServiceImplTest {
                 new AppProperties.Tokens(24, 60, 7));
         authService = new AuthServiceImpl(userRepository, refreshTokenRepository, verificationTokenRepository,
                 authenticationManager, passwordEncoder, jwtService, emailNotifier, userMapper, properties,
-                new RateLimitService(), credentialsGuard);
+                rateLimitService, credentialsGuard);
+    }
+
+    private final RateLimitService rateLimitService = new RateLimitService();
+
+    /** La fila del usuario bloqueada ({@code UserRepository.lockCredentials}). */
+    private static LockedCredentials locked(String passwordHash, int credentialsVersion) {
+        return new LockedCredentials() {
+            @Override
+            public String getPasswordHash() {
+                return passwordHash;
+            }
+
+            @Override
+            public int getCredentialsVersion() {
+                return credentialsVersion;
+            }
+        };
     }
 
     private static User user(String email) {
@@ -179,12 +203,19 @@ class AuthServiceImplTest {
             stored.setUser(user);
             stored.setExpiresAt(Instant.now().plus(1, ChronoUnit.DAYS));
             stored.setId(UUID.randomUUID());
+            when(refreshTokenRepository.findUserIdByTokenHash(TokenUtils.sha256("rt")))
+                    .thenReturn(Optional.of(user.getId()));
+            when(userRepository.lockCredentials(user.getId())).thenReturn(Optional.of(locked("hash-actual", 2)));
             when(refreshTokenRepository.findByTokenHash(TokenUtils.sha256("rt"))).thenReturn(Optional.of(stored));
             when(refreshTokenRepository.revokeIfActive(stored.getId())).thenReturn(1);
-            when(jwtService.generateAccessToken(user.getId(), user.getEmail())).thenReturn("nuevo-access");
+            when(jwtService.generateAccessToken(user.getId(), user.getEmail(), 2)).thenReturn("nuevo-access");
 
             AuthResponse response = authService.refresh("rt");
 
+            // Primero la fila del usuario (como el cambio de contraseña) y después el token, ya leído con el bloqueo
+            InOrder order = inOrder(userRepository, refreshTokenRepository);
+            order.verify(userRepository).lockCredentials(user.getId());
+            order.verify(refreshTokenRepository).findByTokenHash(TokenUtils.sha256("rt"));
             // La rotación es un UPDATE condicional (atómico), no un cambio en la entidad leída
             verify(refreshTokenRepository).revokeIfActive(stored.getId());
             assertThat(response.accessToken()).isEqualTo("nuevo-access");
@@ -199,7 +230,7 @@ class AuthServiceImplTest {
             stored.setUser(user);
             stored.setRevoked(true);
             stored.setExpiresAt(Instant.now().plus(1, ChronoUnit.DAYS));
-            when(refreshTokenRepository.findByTokenHash(anyString())).thenReturn(Optional.of(stored));
+            lockedRefresh(user, stored);
 
             assertThatThrownBy(() -> authService.refresh("rt"))
                     .isInstanceOf(UnauthorizedException.class);
@@ -214,7 +245,7 @@ class AuthServiceImplTest {
             stored.setId(UUID.randomUUID());
             stored.setUser(user);
             stored.setExpiresAt(Instant.now().plus(1, ChronoUnit.DAYS));
-            when(refreshTokenRepository.findByTokenHash(anyString())).thenReturn(Optional.of(stored));
+            lockedRefresh(user, stored);
             // La otra petición ya lo marcó como usado entre la lectura y el UPDATE
             when(refreshTokenRepository.revokeIfActive(stored.getId())).thenReturn(0);
 
@@ -226,10 +257,32 @@ class AuthServiceImplTest {
 
         @Test
         void rechazaTokenDesconocido() {
+            when(refreshTokenRepository.findUserIdByTokenHash(anyString())).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> authService.refresh("rt"))
+                    .isInstanceOf(UnauthorizedException.class);
+            verify(userRepository, never()).lockCredentials(any());
+        }
+
+        @Test
+        void siUnCambioDeContrasenaBorroElTokenMientrasEsperabaNoCreaOtro() {
+            // El token existía al buscar su usuario, pero un cambio de contraseña lo borró antes del bloqueo
+            UUID userId = UUID.randomUUID();
+            when(refreshTokenRepository.findUserIdByTokenHash(anyString())).thenReturn(Optional.of(userId));
+            when(userRepository.lockCredentials(userId)).thenReturn(Optional.of(locked("hash-nuevo", 1)));
             when(refreshTokenRepository.findByTokenHash(anyString())).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> authService.refresh("rt"))
                     .isInstanceOf(UnauthorizedException.class);
+            verify(refreshTokenRepository, never()).save(any());
+            // No es una reutilización: no se cierran las sesiones nuevas
+            verify(refreshTokenRepository, never()).revokeAllByUserId(any());
+        }
+
+        private void lockedRefresh(User user, RefreshToken stored) {
+            when(refreshTokenRepository.findUserIdByTokenHash(anyString())).thenReturn(Optional.of(user.getId()));
+            when(userRepository.lockCredentials(user.getId())).thenReturn(Optional.of(locked("hash-actual", 0)));
+            when(refreshTokenRepository.findByTokenHash(anyString())).thenReturn(Optional.of(stored));
         }
     }
 
@@ -264,16 +317,24 @@ class AuthServiceImplTest {
             when(passwordEncoder.matches("Clave1234", "hash-actual")).thenReturn(true);
             when(passwordEncoder.matches("Nueva12345", "hash-actual")).thenReturn(false);
             when(passwordEncoder.encode("Nueva12345")).thenReturn("hash-nuevo");
+            // La entidad en memoria está vieja: la versión que cuenta es la de la fila bloqueada
+            when(userRepository.lockCredentials(user.getId())).thenReturn(Optional.of(locked("hash-actual", 4)));
+            when(jwtService.generateAccessToken(user.getId(), user.getEmail(), 5)).thenReturn("access-v5");
 
-            Instant before = Instant.now().truncatedTo(ChronoUnit.SECONDS);
-            authService.changePassword(user.getId(), new ChangePasswordRequest("Clave1234", "Nueva12345"));
+            Instant before = Instant.now();
+            AuthResponse response = authService.changePassword(user.getId(),
+                    new ChangePasswordRequest("Clave1234", "Nueva12345"));
 
             assertThat(user.getPasswordHash()).isEqualTo("hash-nuevo");
-            verify(refreshTokenRepository).deleteAllByUserId(user.getId());
+            // Bloquea la fila antes de borrar las sesiones (como refresh y login antes de crear una)
+            InOrder order = inOrder(userRepository, refreshTokenRepository);
+            order.verify(userRepository).lockCredentials(user.getId());
+            order.verify(refreshTokenRepository).deleteAllByUserId(user.getId());
             verify(emailNotifier).sendPasswordChanged(user);
-            // Los access tokens anteriores dejan de valer (al segundo, como el iat del JWT)
+            // Los access tokens anteriores dejan de valer (sube la versión); el de esta sesión lleva la nueva
+            assertThat(user.getCredentialsVersion()).isEqualTo(5);
             assertThat(user.getCredentialsChangedAt()).isAfterOrEqualTo(before);
-            assertThat(user.getCredentialsChangedAt().getNano()).isZero();
+            assertThat(response.accessToken()).isEqualTo("access-v5");
             verify(credentialsGuard).evict(user.getId());
         }
 
@@ -302,9 +363,12 @@ class AuthServiceImplTest {
                     TokenUtils.sha256("abc"), VerificationTokenType.PASSWORD_RESET)).thenReturn(Optional.of(token));
             when(passwordEncoder.encode("Nueva12345")).thenReturn("hash-nuevo");
 
+            when(userRepository.lockCredentials(user.getId())).thenReturn(Optional.of(locked("hash-actual", 0)));
+
             authService.resetPassword(new ResetPasswordRequest("abc", "Nueva12345"));
 
             assertThat(user.getCredentialsChangedAt()).isNotNull();
+            assertThat(user.getCredentialsVersion()).isEqualTo(1);
             verify(refreshTokenRepository).deleteAllByUserId(user.getId());
             verify(credentialsGuard).evict(user.getId());
         }
@@ -313,20 +377,152 @@ class AuthServiceImplTest {
     @Nested
     class Login {
 
+        private final LoginRequest wrong = new LoginRequest("Ana@Test.com", "mala");
+
+        private ClientInfo from(String ip) {
+            return new ClientInfo(ip, "curl");
+        }
+
+        /** El login de {@code user} con la contraseña correcta funciona (con la fila bloqueada y la versión 0). */
+        private void correctPassword(User user) {
+            when(authenticationManager.authenticate(argThat(token -> token != null && !"mala".equals(token.getCredentials()))))
+                    .thenAnswer(invocation -> new UsernamePasswordAuthenticationToken(UserPrincipal.fromUser(user),
+                            null, java.util.List.of()));
+            when(userRepository.lockCredentials(user.getId())).thenReturn(Optional.of(locked("hash-actual", 0)));
+            when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
+        }
+
         @Test
-        void limitaLasContrasenasIncorrectasPorCuentaDesdeCualquierIp() {
+        void unaIpQuePruebaContrasenasSeBloqueaSoloASiMisma() {
+            User user = user("ana@test.com");
+            when(authenticationManager.authenticate(argThat(token -> token != null && "mala".equals(token.getCredentials()))))
+                    .thenThrow(new BadCredentialsException("mala"));
+            correctPassword(user);
+
+            for (int i = 0; i < RateLimitRule.LOGIN_ACCOUNT_IP.getCapacity(); i++) {
+                assertThatThrownBy(() -> authService.login(wrong, from("203.0.113.7")))
+                        .isInstanceOf(BadCredentialsException.class);
+            }
+            // Desde esa IP ya no se prueba ni la contraseña correcta…
+            assertThatThrownBy(() -> authService.login(new LoginRequest("ana@test.com", "Clave1234"),
+                    from("203.0.113.7")))
+                    .isInstanceOf(TooManyRequestsException.class);
+            // …pero la dueña entra desde la suya
+            authService.login(new LoginRequest("ana@test.com", "Clave1234"), from("198.51.100.20"));
+            verify(refreshTokenRepository).save(any(RefreshToken.class));
+        }
+
+        @Test
+        void lasIpv6DelMismoPrefijo64CuentanComoUna() {
             when(authenticationManager.authenticate(any())).thenThrow(new BadCredentialsException("mala"));
-            LoginRequest request = new LoginRequest("Ana@Test.com", "mala");
+
+            for (int i = 0; i < RateLimitRule.LOGIN_ACCOUNT_IP.getCapacity(); i++) {
+                ClientInfo client = from("2001:db8:1:2::" + Integer.toHexString(i + 1));
+                assertThatThrownBy(() -> authService.login(wrong, client))
+                        .isInstanceOf(BadCredentialsException.class);
+            }
+            assertThatThrownBy(() -> authService.login(wrong, from("2001:db8:1:2:ffff::9")))
+                    .isInstanceOf(TooManyRequestsException.class);
+            // Otro /64 tiene su propio límite
+            assertThatThrownBy(() -> authService.login(wrong, from("2001:db8:1:3::1")))
+                    .isInstanceOf(BadCredentialsException.class);
+        }
+
+        @Test
+        void hayUnTechoPorCuentaDesdeCualquierIp() {
+            when(authenticationManager.authenticate(any())).thenThrow(new BadCredentialsException("mala"));
 
             for (int i = 0; i < RateLimitRule.LOGIN_ACCOUNT.getCapacity(); i++) {
-                ClientInfo client = new ClientInfo("10.0.0." + i, "curl");
-                assertThatThrownBy(() -> authService.login(request, client))
+                ClientInfo client = from("10.0." + (i / 200) + "." + (i % 200));
+                assertThatThrownBy(() -> authService.login(wrong, client))
                         .isInstanceOf(BadCredentialsException.class);
             }
             // Ya no se prueba la contraseña: 429 aunque venga de otra IP
-            assertThatThrownBy(() -> authService.login(request, new ClientInfo("10.0.1.1", "curl")))
+            assertThatThrownBy(() -> authService.login(wrong, from("10.9.9.9")))
                     .isInstanceOf(TooManyRequestsException.class);
             verify(authenticationManager, times(RateLimitRule.LOGIN_ACCOUNT.getCapacity())).authenticate(any());
+            // El intento rechazado por el techo no gastó el de esa IP
+            assertThat(rateLimitService.tryConsume(RateLimitRule.LOGIN_ACCOUNT_IP, "ana@test.com|10.9.9.9")
+                    .getRemainingTokens()).isEqualTo(RateLimitRule.LOGIN_ACCOUNT_IP.getCapacity() - 1);
+        }
+
+        @Test
+        void losIntentosEnCursoYaCuentanAunqueLleguenALaVez() {
+            // Mientras se comprueba una contraseña (BCrypt tarda), llegan más intentos desde la misma IP: el que está
+            // en curso ya gastó su intento, así que no entran más de los que permite el límite
+            AtomicInteger depth = new AtomicInteger();
+            AtomicInteger rejected = new AtomicInteger();
+            when(authenticationManager.authenticate(any())).thenAnswer(invocation -> {
+                if (depth.getAndIncrement() == 0) {
+                    for (int i = 0; i < RateLimitRule.LOGIN_ACCOUNT_IP.getCapacity(); i++) {
+                        try {
+                            authService.login(wrong, from("203.0.113.7"));
+                        } catch (TooManyRequestsException ex) {
+                            rejected.incrementAndGet();
+                        } catch (BadCredentialsException ignored) {
+                            // llegó a comprobar la contraseña
+                        }
+                    }
+                }
+                throw new BadCredentialsException("mala");
+            });
+
+            assertThatThrownBy(() -> authService.login(wrong, from("203.0.113.7")))
+                    .isInstanceOf(BadCredentialsException.class);
+
+            verify(authenticationManager, times(RateLimitRule.LOGIN_ACCOUNT_IP.getCapacity())).authenticate(any());
+            assertThat(rejected).hasValue(1);
+        }
+
+        @Test
+        void unLoginCorrectoDevuelveSuIntento() {
+            User user = user("ana@test.com");
+            when(authenticationManager.authenticate(argThat(token -> token != null && "mala".equals(token.getCredentials()))))
+                    .thenThrow(new BadCredentialsException("mala"));
+            correctPassword(user);
+            LoginRequest right = new LoginRequest("ana@test.com", "Clave1234");
+
+            for (int i = 0; i < RateLimitRule.LOGIN_ACCOUNT_IP.getCapacity() - 1; i++) {
+                assertThatThrownBy(() -> authService.login(wrong, from("203.0.113.7")))
+                        .isInstanceOf(BadCredentialsException.class);
+            }
+            for (int i = 0; i < 5; i++) {
+                authService.login(right, from("203.0.113.7"));
+            }
+            // Queda exactamente un intento: los logins correctos no gastaron ninguno
+            assertThatThrownBy(() -> authService.login(wrong, from("203.0.113.7")))
+                    .isInstanceOf(BadCredentialsException.class);
+            assertThatThrownBy(() -> authService.login(right, from("203.0.113.7")))
+                    .isInstanceOf(TooManyRequestsException.class);
+        }
+
+        @Test
+        void siLaContrasenaCambioMientrasSeComprobabaNoAbreSesion() {
+            User user = user("ana@test.com");
+            when(authenticationManager.authenticate(any()))
+                    .thenAnswer(invocation -> new UsernamePasswordAuthenticationToken(UserPrincipal.fromUser(user),
+                            null, java.util.List.of()));
+            // Al bloquear la fila, el hash ya es otro (un restablecimiento terminó entre medio)
+            when(userRepository.lockCredentials(user.getId())).thenReturn(Optional.of(locked("hash-nuevo", 1)));
+
+            assertThatThrownBy(() -> authService.login(new LoginRequest("ana@test.com", "Clave1234"),
+                    from("203.0.113.7")))
+                    .isInstanceOf(UnauthorizedException.class);
+            verify(refreshTokenRepository, never()).save(any());
+            verifyNoInteractions(jwtService);
+        }
+
+        @Test
+        void elAccessTokenLlevaLaVersionDeLaFilaBloqueada() {
+            User user = user("ana@test.com");
+            correctPassword(user);
+            when(userRepository.lockCredentials(user.getId())).thenReturn(Optional.of(locked("hash-actual", 7)));
+            when(jwtService.generateAccessToken(user.getId(), user.getEmail(), 7)).thenReturn("access-v7");
+
+            AuthResponse response = authService.login(new LoginRequest("ana@test.com", "Clave1234"),
+                    from("203.0.113.7"));
+
+            assertThat(response.accessToken()).isEqualTo("access-v7");
         }
     }
 }

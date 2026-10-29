@@ -60,6 +60,17 @@ El archivo `.env` está en `.gitignore`; nunca se suben secretos.
 ./mvnw test
 ```
 
+**Pruebas con PostgreSQL.** Las carreras con bloqueos (`ConcurrencyIntegrationTest`, `ReviewRound2IntegrationTest`) y
+las migraciones (`ReviewFixesMigrationTest`, `ReviewRound2MigrationTest`) necesitan un PostgreSQL de verdad: toman
+`DB_URL`, `DB_USER` y `DB_PASSWORD` del entorno o del `.env`, crean una base descartable en ese servidor
+(`taskflow_it_*`, `taskflow_v25_test_*`, `taskflow_v26_test_*`) y la borran al terminar. El usuario necesita permiso
+para crear bases de datos. **Sin `DB_URL` se omiten en silencio** (no fallan), así que en CI hay que definirlas, por
+ejemplo con un servicio `postgres:16`:
+
+```bash
+DB_URL=jdbc:postgresql://localhost:5432/taskflow DB_USER=taskflow DB_PASSWORD=… ./mvnw test
+```
+
 Pruebas unitarias de `AuthService`, `IssueService` (código del issue, orden del Kanban, `completedAt`,
 quién puede borrar, checklist al crear y aviso de desbloqueo), `WorkspaceSecurity` y la regla
 `@PreAuthorize` de cada endpoint (permisos), `WorkspaceService` (siempre queda un project manager),
@@ -217,12 +228,13 @@ o quitar miembros; crear, editar o borrar ciclos y módulos; gestionar las vista
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| GET / POST | `/projects` | Listar / crear (PM; `{ name, identifier, description? }`; identifier ej. `WEB`) |
+| GET / POST | `/projects` | Listar / crear (PM; `{ name, identifier, description? }`; identifier ej. `WEB`). Cada proyecto trae `memberCount` y `members` (los 5 primeros por nombre, `UserSummary`) para los avatares de la tarjeta |
 | GET / PATCH / DELETE | `/projects/{projectId}` | Ver / editar (PM) / eliminar (PM) |
 | GET / POST | `/projects/{projectId}/members` | Miembros / agregar (PM; `{ userId }`, debe estar en el workspace) |
 | DELETE | `/projects/{projectId}/members/{userId}` | Quitar miembro (PM) |
 | GET / POST | `/projects/{projectId}/states` | Estados (ordenados por `position`) / crear (PM) `{ name, color, group, position? }` |
 | PATCH / DELETE | `/projects/{projectId}/states/{stateId}` | Editar o reordenar / borrar (PM; no si tiene issues) |
+| PUT | `/projects/{projectId}/states/order` | Reordenar todas las columnas (PM) `{ stateIds: [...] }`: exactamente los estados del proyecto, sin repetir (si no, 400 y nada cambia). Devuelve los estados en el orden nuevo |
 | GET / POST | `/projects/{projectId}/labels` | Etiquetas / crear (PM) `{ name, color }` |
 | PATCH / DELETE | `/projects/{projectId}/labels/{labelId}` | Editar / borrar (PM) |
 
@@ -413,13 +425,13 @@ Base: `/workspaces/{slug}/projects/{projectId}`.
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET / POST | `/cycles` | Listar / crear (PM) `{ name, description?, startDate?, endDate? }` |
-| GET / PATCH / DELETE | `/cycles/{cycleId}` | Ver / editar (PM; `clearDates: true` lo vuelve borrador) / eliminar (PM) |
+| GET / PATCH / DELETE | `/cycles/{cycleId}` | Ver / editar (PM; `clearDates: true` lo vuelve borrador; `clearStartDate` / `clearEndDate` quitan solo una) / eliminar (PM) |
 | POST | `/cycles/{cycleId}/issues` | Agregar `{ issueIds: [...] }` (un issue está en un solo ciclo: se mueve) |
 | DELETE | `/cycles/{cycleId}/issues/{issueId}` | Quitar |
 | GET | `/cycles/{cycleId}/close-preview` | Vista previa del cierre (PM) |
 | POST | `/cycles/{cycleId}/close` | Cerrar el ciclo (PM) |
 | GET / POST | `/modules` | Listar / crear (PM) `{ name, description?, startDate?, targetDate? }` |
-| GET / PATCH / DELETE | `/modules/{moduleId}` | Ver / editar (PM) / eliminar (PM) |
+| GET / PATCH / DELETE | `/modules/{moduleId}` | Ver / editar (PM; `clearDates`, `clearStartDate`, `clearTargetDate` o `clearEndDate` quitan fechas) / eliminar (PM) |
 | POST | `/modules/{moduleId}/issues` | Agregar `{ issueIds: [...] }` (un issue puede estar en varios módulos) |
 | DELETE | `/modules/{moduleId}/issues/{issueId}` | Quitar |
 
@@ -567,7 +579,7 @@ completada ni cancelada. Las semanas empiezan el **lunes**, en la zona horaria `
 |---|---|---|---|
 | GET | `/workspaces/{slug}/projects/{projectId}/stats?weeks=8&assignee=` | Acceso al proyecto | Estadísticas (`weeks` ∈ 4, 8, 12; otro valor → 400; `assignee` = filtro «+ persona») |
 | GET | `/workspaces/{slug}/my-work?view=assigned` | Miembro | Mis tareas abiertas: `assigned` \| `created` \| `commented` |
-| GET | `/workspaces/{slug}/activity?page=0&size=30&type=all&projectId=&actorId=` | Miembro | Feed paginado (`PageResponse`), lo más reciente primero; `size` máx. 100 |
+| GET | `/workspaces/{slug}/activity?page=0&size=30&type=all&projectId=&actorId=&before=` | Miembro | Feed paginado (`PageResponse`), lo más reciente primero; `size` máx. 100. Por cursor: `before=<nextCursor>` (ver la bandeja) |
 | GET | `/workspaces/{slug}/activity/summary?days=7` | Miembro | Resumen de los últimos `days` días (1 a 365) |
 | GET | `/workspaces/{slug}/search?q=pago&limit=8` | Miembro | `IssueResponse[]`; `limit` máx. 20; `q` vacío → `[]` |
 
@@ -715,7 +727,7 @@ comentario se borró). Tipos (`type`):
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| GET | `/notifications?unread=false&type=&page=0&size=20` | Mis notificaciones (más recientes primero); `type` filtra (se puede repetir; sin `type`, todas). Solo se ordena por `createdAt` (otro `sort`, 400) |
+| GET | `/notifications?unread=false&type=&page=0&size=20&before=` | Mis notificaciones (más recientes primero); `type` filtra (se puede repetir; sin `type`, todas). Solo se ordena por `createdAt` (otro `sort`, 400). Por cursor: la respuesta trae `nextCursor` (`<createdAt>,<id>`, `null` si no hay más) y `before=<nextCursor>` pide las siguientes; con `before` se ignoran `page` y `sort`, `size` es como mucho 100 y `totalElements`/`totalPages` son `-1` |
 | GET | `/notifications/unread-count` | `{ count }` para el badge |
 | GET | `/notifications/counts` | `{ unread, unreadMentions, mentions }` para las pestañas de la bandeja |
 | PATCH | `/notifications/{id}/read` | Marcar como leída |
@@ -752,7 +764,11 @@ y cuándo marcó cada elemento de la checklist (`checked_by_id`, `checked_at`; l
 con «[Bug]», que pasan a bugs, y descripciones con la cita «> **Como**» de la historia de usuario, que pasan a
 historias), `issues.closed_at`/`closed_by_id` y `issues.review_notified`, el tipo de cada plantilla
 (`issue_templates.issue_type`: «Reporte de bug» → bug, «Historia de usuario» → historia) y la notificación
-`STORY_READY`.
+`STORY_READY`. `V25` corrige las historias con padre, agrega `users.credentials_changed_at`, la foto del cierre de
+los ciclos (`closed_completed_count`, `closed_total_count`, `closed_cycle_time_days`) e índices; `V26` agrega
+`users.credentials_version` (la versión que llevan los access tokens en el claim `cv`; 1 para quien ya había cambiado
+su contraseña), rellena la foto del cierre de los ciclos cerrados antes de `V25` con sus tareas de ese momento y agrega
+el índice del cursor de la bandeja.
 Las entidades usan **UUID** y `created_at`/`updated_at`. Las tablas intermedias puras
 (`issue_assignees`, `issue_labels`, `cycle_issues`, `module_issues`, `issue_template_labels`,
 `retro_note_votes`) usan clave compuesta.

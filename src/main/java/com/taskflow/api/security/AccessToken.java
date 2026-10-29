@@ -1,9 +1,8 @@
 package com.taskflow.api.security;
 
-import java.time.Instant;
-
 /**
- * Un access token ya validado (firma y vencimiento): su usuario y cuándo se emitió ({@code iat}, al segundo).
+ * Un access token ya validado (firma y vencimiento): su usuario y la versión de las credenciales con la que se emitió
+ * (claim {@code cv}).
  */
-public record AccessToken(UserPrincipal principal, Instant issuedAt) {
+public record AccessToken(UserPrincipal principal, int credentialsVersion) {
 }

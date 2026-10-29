@@ -256,6 +256,8 @@ public class IssueServiceImpl implements IssueService {
             ensureNoCycle(issue, parent);
             boolean newParent = issue.getParent() == null || !issue.getParent().getId().equals(parent.getId());
             if (newParent) {
+                // Antes de guardar el padre nuevo, las dos historias juntas y en orden (StoryProgress.lockStories)
+                storyProgress.lockStories(previousParent, parent);
                 checkNewParent(slug, userId, actor, issue.getType(), parent,
                         Boolean.TRUE.equals(request.reopenParent()));
                 started |= issue.getState().getStateGroup() == StateGroup.STARTED;
@@ -398,7 +400,11 @@ public class IssueServiceImpl implements IssueService {
                 throw new ForbiddenException(DELETE_FORBIDDEN_MESSAGE);
             }
         }
-        // Los sub-issues no se borran: la base de datos les quita el padre (ON DELETE SET NULL).
+        // Los sub-issues no se borran: la base de datos les quita el padre (ON DELETE SET NULL). Se bloquean antes que
+        // la historia, en el mismo orden que quien mueve una de ellas (la tarea y luego su historia)
+        if (issue.isStory()) {
+            issueRepository.lockChildrenOf(issue.getId());
+        }
         Issue parent = issue.getParent();
         issueRepository.delete(issue);
         if (parent != null && parent.isStory()) {
@@ -594,10 +600,18 @@ public class IssueServiceImpl implements IssueService {
     /**
      * Si {@code story} es una historia cerrada: sin {@code reopen}, 409 {@code STORY_CLOSED}; con él, solo el project
      * manager la reabre (queda en su historial). Si no es una historia o está abierta, no hace nada.
+     * <p>
+     * Antes de mirar si está abierta, bloquea la historia y la vuelve a leer: un cierre o una reapertura que otra
+     * persona guarda a la vez (por ejemplo el {@code /reopen} del project manager) se ve aquí, y la historia no se
+     * reabre dos veces.
      */
     private void requireOpenStory(String slug, UUID userId, User actor, Issue story, boolean reopen,
                                   Function<Issue, ConflictException> conflict) {
-        if (story == null || !story.isStory() || story.getState().getStateGroup().isOpen()) {
+        if (story == null || !story.isStory()) {
+            return;
+        }
+        storyProgress.lock(story);
+        if (!story.isStory() || story.getState().getStateGroup().isOpen()) {
             return;
         }
         if (!reopen) {

@@ -6,6 +6,7 @@ import com.taskflow.api.dto.response.IssueRelationsResponse;
 import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.IssueRelation;
 import com.taskflow.api.entity.Project;
+import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.enums.ActivityField;
 import com.taskflow.api.entity.enums.IssueRelationType;
@@ -26,7 +27,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -121,6 +124,17 @@ public class IssueRelationServiceImpl implements IssueRelationService {
                 notificationService.notifyUnblocked(blocked, completedBlocker, actor);
             }
         }
+    }
+
+    @Override
+    @Transactional
+    public void notifyUnblockedByState(State state, User actor) {
+        Map<UUID, IssueRelation> firstPerBlocked = new LinkedHashMap<>();
+        for (IssueRelation relation : relationRepository.findUnblockedByState(state.getId(), StateGroup.CLOSED)) {
+            firstPerBlocked.putIfAbsent(relation.getTarget().getId(), relation);
+        }
+        firstPerBlocked.values().forEach(relation ->
+                notificationService.notifyUnblocked(relation.getTarget(), relation.getSource(), actor));
     }
 
     /**

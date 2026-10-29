@@ -35,11 +35,19 @@ public class JwtService {
         this.accessExpiration = Duration.ofMinutes(properties.jwt().accessExpirationMinutes());
     }
 
-    public String generateAccessToken(UUID userId, String email) {
+    /** Claim con la versión de las credenciales del usuario al emitir el token. */
+    static final String CREDENTIALS_VERSION_CLAIM = "cv";
+
+    /**
+     * @param credentialsVersion la versión de las credenciales del usuario ({@code User.credentialsVersion}): el token
+     *                           deja de valer cuando cambia la contraseña ({@link CredentialsGuard})
+     */
+    public String generateAccessToken(UUID userId, String email, int credentialsVersion) {
         Instant now = Instant.now();
         return Jwts.builder()
                 .subject(userId.toString())
                 .claim("email", email)
+                .claim(CREDENTIALS_VERSION_CLAIM, credentialsVersion)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(accessExpiration)))
                 .signWith(key)
@@ -50,7 +58,10 @@ public class JwtService {
         return accessExpiration.toSeconds();
     }
 
-    /** Devuelve el usuario del token y cuándo se emitió, o vacío si la firma no es válida o ya expiró. */
+    /**
+     * Devuelve el usuario del token y la versión de sus credenciales, o vacío si la firma no es válida o ya expiró. Un
+     * token sin {@code cv} (emitido antes de que existiera) cuenta como versión 0.
+     */
     public Optional<AccessToken> parse(String token) {
         try {
             Claims claims = Jwts.parser()
@@ -60,8 +71,8 @@ public class JwtService {
                     .getPayload();
             UserPrincipal principal = UserPrincipal.fromToken(
                     UUID.fromString(claims.getSubject()), claims.get("email", String.class));
-            return Optional.of(new AccessToken(principal,
-                    claims.getIssuedAt() == null ? null : claims.getIssuedAt().toInstant()));
+            Integer version = claims.get(CREDENTIALS_VERSION_CLAIM, Integer.class);
+            return Optional.of(new AccessToken(principal, version == null ? 0 : version));
         } catch (JwtException | IllegalArgumentException e) {
             return Optional.empty();
         }

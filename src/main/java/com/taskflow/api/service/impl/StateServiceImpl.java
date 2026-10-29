@@ -1,6 +1,7 @@
 package com.taskflow.api.service.impl;
 
 import com.taskflow.api.dto.request.CreateStateRequest;
+import com.taskflow.api.dto.request.ReorderStatesRequest;
 import com.taskflow.api.dto.request.UpdateStateRequest;
 import com.taskflow.api.dto.response.StateResponse;
 import com.taskflow.api.entity.Project;
@@ -20,8 +21,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -90,10 +96,11 @@ public class StateServiceImpl implements StateService {
      * <ul>
      *   <li>su fecha de completado (se mantiene si ya la tenían) y la de inicio si nunca habían empezado;</li>
      *   <li>las historias del estado quedan cerradas por quien cambió el grupo, o se reabren;</li>
-     *   <li>las historias del estado y las de sus tareas se ponen al día (pueden quedar listas para revisar, con su
-     *       aviso);</li>
-     *   <li>las que pasan de abiertas a completadas dejan de bloquear a otras (con su aviso).</li>
+     *   <li>las historias del estado y las de sus tareas se ponen al día: empiezan si el estado pasa a STARTED y
+     *       pueden quedar listas para revisar, con su aviso (las que este cambio reabre, sin aviso);</li>
+     *   <li>las que pasan de abiertas a completadas dejan de bloquear a otras (un aviso por tarea desbloqueada).</li>
      * </ul>
+     * Las historias y los desbloqueos se calculan en bloque, con unas pocas consultas para todo el estado.
      */
     private void changeGroup(State state, StateGroup next, User actor) {
         StateGroup previous = state.getStateGroup();
@@ -114,13 +121,35 @@ public class StateServiceImpl implements StateService {
         state.setStateGroup(next);
         stateRepository.saveAndFlush(state);
 
-        for (UUID storyId : issueRepository.findStoryIdsAffectedByState(state.getId())) {
-            issueRepository.findById(storyId).ifPresent(story -> storyProgress.reconcile(story, actor, null, false));
-        }
+        storyProgress.stateGroupChanged(state, previous, actor);
         if (IssueServiceImpl.becameCompleted(previous, next)) {
-            issueRepository.findAllByStateId(state.getId())
-                    .forEach(issue -> relationService.notifyUnblocked(issue, actor));
+            relationService.notifyUnblockedByState(state, actor);
         }
+    }
+
+    @Override
+    @Transactional
+    public List<StateResponse> reorder(String slug, UUID projectId, ReorderStatesRequest request) {
+        Project project = lookup.project(slug, projectId);
+        // Bloquea los estados del proyecto: dos reordenamientos a la vez van en fila y no mezclan posiciones
+        List<State> states = stateRepository.findAllByProjectIdForUpdate(project.getId());
+        Map<UUID, State> byId = new HashMap<>();
+        states.forEach(state -> byId.put(state.getId(), state));
+        Set<UUID> requested = new HashSet<>(request.stateIds());
+        if (requested.size() != request.stateIds().size()) {
+            throw new BadRequestException("stateIds no puede repetir estados");
+        }
+        if (!requested.equals(byId.keySet())) {
+            throw new BadRequestException("stateIds debe tener exactamente los estados del proyecto");
+        }
+        List<State> ordered = new ArrayList<>(request.stateIds().size());
+        for (int position = 0; position < request.stateIds().size(); position++) {
+            State state = byId.get(request.stateIds().get(position));
+            state.setPosition(position);
+            ordered.add(state);
+        }
+        stateRepository.flush();
+        return ordered.stream().map(projectMapper::toStateResponse).toList();
     }
 
     @Override

@@ -15,10 +15,12 @@ import com.taskflow.api.entity.enums.VerificationTokenType;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ResourceNotFoundException;
+import com.taskflow.api.exception.TooManyRequestsException;
 import com.taskflow.api.exception.UnauthorizedException;
 import com.taskflow.api.mapper.UserMapper;
 import com.taskflow.api.ratelimit.RateLimitRule;
 import com.taskflow.api.ratelimit.RateLimitService;
+import com.taskflow.api.repository.LockedCredentials;
 import com.taskflow.api.repository.RefreshTokenRepository;
 import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.repository.VerificationTokenRepository;
@@ -27,11 +29,12 @@ import com.taskflow.api.security.JwtService;
 import com.taskflow.api.security.UserPrincipal;
 import com.taskflow.api.service.AuthService;
 import com.taskflow.api.util.ClientInfo;
+import com.taskflow.api.util.ClientKeys;
 import com.taskflow.api.util.TokenUtils;
+import io.github.bucket4j.ConsumptionProbe;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -40,7 +43,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -108,38 +110,67 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public AuthResponse login(LoginRequest request, ClientInfo client) {
         String email = normalizeEmail(request.email());
-        // Además del límite por IP, uno por cuenta: repartir los intentos entre muchas IPs no sirve para adivinar la
-        // contraseña. Solo gastan intento las contraseñas incorrectas.
-        rateLimitService.ensureAvailable(RateLimitRule.LOGIN_ACCOUNT, email);
-        Authentication authentication;
-        try {
-            // Lanza BadCredentials, Disabled (sin verificar) o Locked (inactivo); el handler global los traduce.
-            authentication = authenticationManager.authenticate(
-                    new UsernamePasswordAuthenticationToken(email, request.password()));
-        } catch (BadCredentialsException ex) {
-            rateLimitService.tryConsume(RateLimitRule.LOGIN_ACCOUNT, email);
-            throw ex;
-        }
+        // Además del límite por IP (RateLimitFilter), dos por cuenta. Cada intento gasta uno de cada antes de comprobar
+        // la contraseña (así no se saltan con muchas peticiones a la vez) y un login correcto los devuelve:
+        //  - por cuenta e IP: quien prueba contraseñas desde una IP se bloquea solo a sí mismo, no a la dueña;
+        //  - por cuenta, desde cualquier IP: un techo más alto que frena repartir los intentos entre muchas IPs.
+        String accountAndIp = email + "|" + ClientKeys.ip(client.ip());
+        consumeLoginAttempt(RateLimitRule.LOGIN_ACCOUNT_IP, accountAndIp, null, null);
+        consumeLoginAttempt(RateLimitRule.LOGIN_ACCOUNT, email, RateLimitRule.LOGIN_ACCOUNT_IP, accountAndIp);
+
+        // Lanza BadCredentials, Disabled (sin verificar) o Locked (inactivo); el handler global los traduce. Cualquier
+        // fallo deja gastados los intentos.
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(email, request.password()));
         UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
+        // Con la fila bloqueada: si la contraseña cambió mientras se comprobaba (un restablecimiento a la vez), la
+        // sesión no se abre; si el cambio llega después, espera a que esta termine y la cierra.
+        LockedCredentials credentials = userRepository.lockCredentials(principal.getId())
+                .filter(locked -> locked.getPasswordHash().equals(principal.getPassword()))
+                .orElseThrow(() -> new UnauthorizedException("Correo o contraseña incorrectos"));
         User user = userRepository.findById(principal.getId())
                 .orElseThrow(() -> new UnauthorizedException("Correo o contraseña incorrectos"));
+        rateLimitService.refund(RateLimitRule.LOGIN_ACCOUNT_IP, accountAndIp);
+        rateLimitService.refund(RateLimitRule.LOGIN_ACCOUNT, email);
 
-        AuthResponse response = issueTokens(user);
+        AuthResponse response = issueTokens(user, credentials.getCredentialsVersion());
         emailNotifier.sendLoginAlert(user, client, Instant.now());
         return response;
+    }
+
+    /**
+     * Gasta un intento de login de la regla o lanza 429. Si se rechaza, devuelve el intento ya gastado de
+     * {@code previous} (ese intento no llegó a comprobar la contraseña).
+     */
+    private void consumeLoginAttempt(RateLimitRule rule, String key, RateLimitRule previous, String previousKey) {
+        ConsumptionProbe probe = rateLimitService.tryConsume(rule, key);
+        if (!probe.isConsumed()) {
+            if (previous != null) {
+                rateLimitService.refund(previous, previousKey);
+            }
+            throw new TooManyRequestsException(RateLimitService.seconds(probe.getNanosToWaitForRefill()));
+        }
     }
 
     @Override
     @Transactional(noRollbackFor = UnauthorizedException.class)
     public AuthResponse refresh(String refreshToken) {
-        RefreshToken stored = refreshTokenRepository.findByTokenHash(TokenUtils.sha256(refreshToken))
+        String hash = TokenUtils.sha256(refreshToken);
+        UUID userId = refreshTokenRepository.findUserIdByTokenHash(hash)
+                .orElseThrow(() -> new UnauthorizedException("Refresh token inválido"));
+        // Primero la fila del usuario, como el cambio de contraseña: si hay uno en curso, se espera a que termine y
+        // entonces el token ya no existe. Sin este bloqueo, un refresh simultáneo podía crear un token nuevo que el
+        // borrado del cambio de contraseña no veía.
+        LockedCredentials credentials = userRepository.lockCredentials(userId)
+                .orElseThrow(() -> new UnauthorizedException("Refresh token inválido"));
+        // Se lee después del bloqueo (es lo primero que carga esta transacción): ve lo que dejó un cambio de contraseña
+        RefreshToken stored = refreshTokenRepository.findByTokenHash(hash)
                 .orElseThrow(() -> new UnauthorizedException("Refresh token inválido"));
 
         if (stored.isRevoked()) {
             // Reutilizar un token ya rotado indica que pudo ser robado: se cierran todas las sesiones.
-            log.warn("Refresh token reutilizado para el usuario {}; se revocan todas sus sesiones",
-                    stored.getUser().getId());
-            refreshTokenRepository.revokeAllByUserId(stored.getUser().getId());
+            log.warn("Refresh token reutilizado para el usuario {}; se revocan todas sus sesiones", userId);
+            refreshTokenRepository.revokeAllByUserId(userId);
             throw new UnauthorizedException("Refresh token inválido");
         }
         if (!stored.isUsable(Instant.now())) {
@@ -157,7 +188,7 @@ public class AuthServiceImpl implements AuthService {
             refreshTokenRepository.revokeAllByUserId(user.getId());
             throw new UnauthorizedException("Refresh token inválido");
         }
-        return issueTokens(user);
+        return issueTokens(user, credentials.getCredentialsVersion());
     }
 
     @Override
@@ -210,21 +241,33 @@ public class AuthServiceImpl implements AuthService {
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         credentialsChanged(user);
         emailNotifier.sendPasswordChanged(user);
-        // Emitidos después del cambio (al segundo), así que siguen valiendo
+        // Con la versión nueva de las credenciales, así que siguen valiendo
         return issueTokens(user);
     }
 
     /**
      * La contraseña cambió: se cierran todas las sesiones (refresh tokens) y dejan de valer los access tokens emitidos
-     * hasta ahora. La marca va al segundo, como el «iat» de los JWT: los que se emitan desde ya valen.
+     * hasta ahora (sube la versión de las credenciales; los que se emitan desde ya llevan la nueva).
+     * <p>
+     * Bloquea la fila del usuario antes de borrar los refresh tokens, igual que {@link #refresh} y {@link #login}
+     * antes de crear uno: un refresh o un login simultáneo termina antes (y su token se borra aquí) o espera y ve
+     * el cambio. La versión se lee de la fila bloqueada, no de la entidad en memoria.
      */
     private void credentialsChanged(User user) {
-        user.setCredentialsChangedAt(Instant.now().truncatedTo(ChronoUnit.SECONDS));
+        int current = userRepository.lockCredentials(user.getId())
+                .map(LockedCredentials::getCredentialsVersion)
+                .orElse(user.getCredentialsVersion());
+        user.setCredentialsVersion(current + 1);
+        user.setCredentialsChangedAt(Instant.now());
         refreshTokenRepository.deleteAllByUserId(user.getId());
         credentialsGuard.evict(user.getId());
     }
 
     private AuthResponse issueTokens(User user) {
+        return issueTokens(user, user.getCredentialsVersion());
+    }
+
+    private AuthResponse issueTokens(User user, int credentialsVersion) {
         String rawRefreshToken = TokenUtils.generateToken();
         RefreshToken refreshToken = new RefreshToken();
         refreshToken.setUser(user);
@@ -232,7 +275,7 @@ public class AuthServiceImpl implements AuthService {
         refreshToken.setExpiresAt(Instant.now().plus(Duration.ofDays(properties.jwt().refreshExpirationDays())));
         refreshTokenRepository.save(refreshToken);
 
-        String accessToken = jwtService.generateAccessToken(user.getId(), user.getEmail());
+        String accessToken = jwtService.generateAccessToken(user.getId(), user.getEmail(), credentialsVersion);
         return new AuthResponse(accessToken, rawRefreshToken, TOKEN_TYPE,
                 jwtService.getAccessExpirationSeconds(), userMapper.toResponse(user));
     }

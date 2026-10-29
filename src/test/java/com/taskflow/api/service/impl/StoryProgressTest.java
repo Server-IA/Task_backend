@@ -40,6 +40,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -226,11 +227,107 @@ class StoryProgressTest {
 
             progress.childChanged(task, other, luis, false);
 
-            // Las dos primeras: las dos historias en orden de id (después cada una se vuelve a bloquear, ya sin espera)
-            org.mockito.ArgumentCaptor<UUID> locked = org.mockito.ArgumentCaptor.forClass(UUID.class);
-            verify(issueRepository, times(4)).lockById(locked.capture());
-            List<UUID> sorted = java.util.stream.Stream.of(story.getId(), other.getId()).sorted().toList();
-            assertThat(locked.getAllValues().subList(0, 2)).isEqualTo(sorted);
+            // Primero las dos historias juntas, en una consulta que las bloquea en el orden de la base de datos
+            // (después cada una se vuelve a bloquear al ponerla al día, ya sin espera)
+            org.mockito.InOrder order = org.mockito.Mockito.inOrder(issueRepository);
+            order.verify(issueRepository).lockAllById(List.of(story.getId(), other.getId()));
+            order.verify(issueRepository, times(2)).lockById(any());
+        }
+
+        @Test
+        void lockStoriesIgnoraLasNulasYNoRepite() {
+            progress.lockStories(story, null, story);
+
+            verify(entityManager).flush();
+            verify(issueRepository).lockAllById(List.of(story.getId()));
+        }
+    }
+
+    @Nested
+    class CambioDeGrupoDeUnEstado {
+
+        private State qa;
+
+        @BeforeEach
+        void qa() {
+            qa = state("QA", StateGroup.STARTED);
+        }
+
+        private void affected(Issue... stories) {
+            List<UUID> ids = java.util.Arrays.stream(stories).map(Issue::getId).toList();
+            when(issueRepository.findStoryIdsAffectedByState(qa.getId())).thenReturn(ids);
+            when(issueRepository.findAllWithStateByIdIn(ids)).thenReturn(List.of(stories));
+        }
+
+        private void counts(com.taskflow.api.repository.StoryChildCountRow... rows) {
+            when(issueRepository.countChildrenOfAll(any())).thenReturn(List.of(rows));
+        }
+
+        private com.taskflow.api.repository.StoryChildCountRow row(Issue parent, IssueType type, StateGroup group,
+                                                                  long count) {
+            return new com.taskflow.api.repository.StoryChildCountRow(parent.getId(), type, group, count);
+        }
+
+        @Test
+        void sinHistoriasAfectadasNoHaceNada() {
+            when(issueRepository.findStoryIdsAffectedByState(qa.getId())).thenReturn(List.of());
+
+            progress.stateGroupChanged(qa, StateGroup.UNSTARTED, luis);
+
+            verify(issueRepository, never()).lockAllById(any());
+            verify(issueRepository, never()).countChildrenOfAll(any());
+        }
+
+        @Test
+        void bloqueaYCuentaTodasLasHistoriasEnBloque() {
+            Issue other = issue(IssueType.STORY, inProgress, 16);
+            story.setState(inProgress);
+            affected(story, other);
+            counts(row(story, IssueType.TASK, StateGroup.COMPLETED, 2), row(other, IssueType.TASK, StateGroup.STARTED, 1));
+
+            progress.stateGroupChanged(qa, StateGroup.UNSTARTED, luis);
+
+            verify(issueRepository).lockAllById(List.of(story.getId(), other.getId()));
+            verify(issueRepository).countChildrenOfAll(List.of(story.getId(), other.getId()));
+            verify(issueRepository, never()).lockById(any());
+            verify(issueRepository, never()).countChildrenOf(any());
+            // Solo la que quedó lista avisa
+            assertThat(story.isReviewNotified()).isTrue();
+            assertThat(other.isReviewNotified()).isFalse();
+            verify(notificationService).notifyStoryReady(story, List.of(ana), luis);
+            verify(notificationService, never()).notifyStoryReady(eq(other), any(), any());
+        }
+
+        @Test
+        void siElEstadoPasaAEnCursoLasHistoriasDeSusTareasEmpiezan() {
+            // QA (sin empezar) pasa a STARTED; la historia está en Todo y su tarea está en QA
+            Issue task = child(IssueType.TASK, qa, 41);
+            affected(story);
+            counts(row(story, IssueType.TASK, StateGroup.STARTED, 1));
+            when(issueRepository.findTasksWithParentInState(qa.getId())).thenReturn(List.of(task));
+            when(issueRepository.findMaxSortOrder(inProgress.getId())).thenReturn(1000d);
+
+            progress.stateGroupChanged(qa, StateGroup.UNSTARTED, luis);
+
+            assertThat(story.getState()).isSameAs(inProgress);
+            assertThat(story.getStartedAt()).isNotNull();
+            verify(activityService).record(story, null, com.taskflow.api.entity.enums.ActivityField.STORY_AUTO_STATE,
+                    "Luis empezó WEB-41", "In Progress");
+        }
+
+        @Test
+        void unaHistoriaQueEsteCambioReabreNoAvisaAunqueYaEsteLista() {
+            // «QA» era un estado completado y pasa a uno abierto: la historia que está en él se reabre, ya lista
+            qa.setStateGroup(StateGroup.STARTED);
+            story.setState(qa);
+            affected(story);
+            counts(row(story, IssueType.TASK, StateGroup.COMPLETED, 3));
+
+            progress.stateGroupChanged(qa, StateGroup.COMPLETED, luis);
+
+            // Como al reabrirla con /reopen: queda marcada como avisada, sin aviso
+            assertThat(story.isReviewNotified()).isTrue();
+            verifyNoInteractions(notificationService);
         }
     }
 
