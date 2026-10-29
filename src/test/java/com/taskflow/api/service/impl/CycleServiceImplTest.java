@@ -624,4 +624,87 @@ class CycleServiceImplTest {
             assertThat(response.closedAt()).isEqualTo(sprint.getClosedAt());
         }
     }
+
+    /** QA: la lista de ciclos (y la hoja de ruta, que usa la misma) en orden y con el avance de la retrospectiva. */
+    @Nested
+    class ListaDeCiclos {
+
+        private com.taskflow.api.repository.IssueProgress live(Cycle cycle, long total, long completed) {
+            return new com.taskflow.api.repository.IssueProgress() {
+                @Override
+                public UUID getId() {
+                    return cycle.getId();
+                }
+
+                @Override
+                public long getTotal() {
+                    return total;
+                }
+
+                @Override
+                public long getCompleted() {
+                    return completed;
+                }
+            };
+        }
+
+        @Test
+        void unCicloCerradoMuestraElAvanceDeLaFotoDelCierre() {
+            // Sprint 1 se cerró con 1 de 2: la tarea sin terminar salió del ciclo y ahora solo queda la completada
+            Cycle sprint1 = closed(cycle("Sprint 1", today.minusDays(14), today.minusDays(1)));
+            sprint1.setClosedCompletedCount(1);
+            sprint1.setClosedTotalCount(2);
+            sprint1.setCarriedToBacklog(1);
+            // Cerrado antes de la foto (V25): a lo que queda se suman las tareas que se llevó el cierre
+            Cycle sprint0 = closed(cycle("Sprint 0", today.minusDays(28), today.minusDays(15)));
+            sprint0.setCarriedToCycle(2);
+            Cycle sprint2 = cycle("Sprint 2", today, today.plusDays(13));
+            projectCycles(sprint2, sprint1, sprint0);
+            when(cycleRepository.findProgress(anyCollection(), eq(StateGroup.COMPLETED))).thenReturn(List.of(
+                    live(sprint1, 1, 1), live(sprint0, 2, 2), live(sprint2, 4, 1)));
+
+            List<CycleResponse> cycles = cycleService.getCycles(SLUG, project.getId());
+
+            assertThat(cycles).extracting(CycleResponse::name).containsExactly("Sprint 2", "Sprint 1", "Sprint 0");
+            assertThat(cycles.get(0).progress()).isEqualTo(ProgressResponse.of(4, 1));
+            assertThat(cycles.get(1).progress()).isEqualTo(ProgressResponse.of(2, 1));
+            assertThat(cycles.get(1).progress().percentage()).isEqualTo(50);
+            assertThat(cycles.get(2).progress()).isEqualTo(ProgressResponse.of(4, 2));
+            // Igual que el resumen de la retrospectiva
+            assertThat(RetroServiceImpl.summary(sprint1).completedCount()).isEqualTo(1);
+            assertThat(RetroServiceImpl.summary(sprint1).totalCount()).isEqualTo(2);
+        }
+
+        @Test
+        void elDetalleDeUnCicloCerradoTambienUsaLaFoto() {
+            Cycle sprint1 = closed(cycle("Sprint 1", today.minusDays(14), today.minusDays(1)));
+            sprint1.setClosedCompletedCount(3);
+            sprint1.setClosedTotalCount(4);
+            when(cycleRepository.findProgress(anyCollection(), eq(StateGroup.COMPLETED)))
+                    .thenReturn(List.of(live(sprint1, 3, 3)));
+
+            assertThat(cycleService.get(SLUG, project.getId(), sprint1.getId()).progress())
+                    .isEqualTo(ProgressResponse.of(4, 3));
+        }
+
+        @Test
+        void primeroElEnCursoDespuesLosProximosLosBorradoresYLosCerrados() {
+            Cycle oldClosed = closed(cycle("Sprint 1", today.minusDays(28), today.minusDays(15)));
+            oldClosed.setClosedAt(now.minus(Duration.ofDays(14)));
+            Cycle lastClosed = closed(cycle("Sprint 2", today.minusDays(14), today.minusDays(1)));
+            lastClosed.setClosedAt(now.minus(Duration.ofDays(1)));
+            Cycle current = cycle("Sprint 3", today.minusDays(1), today.plusDays(12));
+            Cycle later = cycle("Sprint 5", today.plusDays(27), today.plusDays(40));
+            Cycle next = cycle("Sprint 4", today.plusDays(13), today.plusDays(26));
+            Cycle draft = cycle("Ideas", null, null);
+            Cycle ended = cycle("Sin cerrar", today.minusDays(10), today.minusDays(2));
+            // En el orden de la base de datos (por inicio, del más reciente al más antiguo; sin fechas al final)
+            projectCycles(later, next, current, lastClosed, ended, oldClosed, draft);
+
+            List<CycleResponse> cycles = cycleService.getCycles(SLUG, project.getId());
+
+            assertThat(cycles).extracting(CycleResponse::name).containsExactly(
+                    "Sprint 3", "Sin cerrar", "Sprint 4", "Sprint 5", "Ideas", "Sprint 2", "Sprint 1");
+        }
+    }
 }

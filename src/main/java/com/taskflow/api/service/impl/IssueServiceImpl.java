@@ -166,7 +166,7 @@ public class IssueServiceImpl implements IssueService {
                     new CreateIssueRelationRequest(IssueRelationKind.RELATES, request.relatesToId()));
         }
         if (issue.getParent() != null) {
-            storyProgress.childChanged(issue, null, actor, state.getStateGroup() == StateGroup.STARTED);
+            storyProgress.childChanged(issue, null, actor, StoryRules.startsStory(null, state.getStateGroup()));
         }
         return issueMapper.toResponse(issue);
     }
@@ -210,7 +210,8 @@ public class IssueServiceImpl implements IssueService {
             changeType(slug, userId, project, issue, request.type(), actor, changes, request.description() == null);
             typeChanged = true;
             storyRelevant = true;
-            started = request.type() == IssueType.TASK && issue.getState().getStateGroup() == StateGroup.STARTED;
+            started = request.type() == IssueType.TASK
+                    && StoryRules.startsStory(null, issue.getState().getStateGroup());
         }
 
         if (request.title() != null) {
@@ -241,7 +242,7 @@ public class IssueServiceImpl implements IssueService {
             completed = becameCompleted(previousGroup, state.getStateGroup());
             issue.setSortOrder(SortOrderCalculator.endOfColumn(issueRepository.findMaxSortOrder(state.getId())));
             storyRelevant = true;
-            started |= previousGroup != StateGroup.STARTED && state.getStateGroup() == StateGroup.STARTED;
+            started |= StoryRules.startsStory(previousGroup, state.getStateGroup());
         }
         if (request.priority() != null) {
             changes.track(ActivityField.PRIORITY, issue.getPriority().name(), request.priority().name());
@@ -260,7 +261,7 @@ public class IssueServiceImpl implements IssueService {
                 storyProgress.lockStories(previousParent, parent);
                 checkNewParent(slug, userId, actor, issue.getType(), parent,
                         Boolean.TRUE.equals(request.reopenParent()));
-                started |= issue.getState().getStateGroup() == StateGroup.STARTED;
+                started |= StoryRules.startsStory(null, issue.getState().getStateGroup());
                 storyRelevant = true;
                 parentChecked = true;
             }
@@ -378,7 +379,7 @@ public class IssueServiceImpl implements IssueService {
         }
         if (stateChanged && saved.getParent() != null) {
             storyProgress.childChanged(saved, null, actor,
-                    previousGroup != StateGroup.STARTED && target.getStateGroup() == StateGroup.STARTED);
+                    StoryRules.startsStory(previousGroup, target.getStateGroup()));
         }
         return issueMapper.toResponse(saved);
     }
@@ -476,7 +477,12 @@ public class IssueServiceImpl implements IssueService {
             created.add(child);
         }
         issueRepository.flush();
-        storyProgress.reconcile(story, actor, null, false);
+        // Si las tareas nacen ya empezadas o completadas (un proyecto sin estados «sin empezar»), la historia empieza
+        // con la primera, como al crear una tarea suelta bajo ella
+        Issue starter = StoryRules.startsStory(null, state.getStateGroup())
+                ? created.stream().filter(child -> child.getType() == IssueType.TASK).findFirst().orElse(null)
+                : null;
+        storyProgress.reconcile(story, actor, starter, starter != null);
         return created.stream().map(issueMapper::toResponse).toList();
     }
 

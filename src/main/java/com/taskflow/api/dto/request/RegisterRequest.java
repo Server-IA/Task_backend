@@ -21,4 +21,9 @@ public record RegisterRequest(
         @Size(max = 120, message = "El nombre no puede superar 120 caracteres")
         String fullName
 ) {
+
+    /** Sin los espacios de alrededor antes de validar: « ana@test.com » es un correo válido. */
+    public RegisterRequest {
+        email = email == null ? null : email.strip();
+    }
 }

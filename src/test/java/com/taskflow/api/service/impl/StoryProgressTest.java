@@ -146,6 +146,23 @@ class StoryProgressTest {
                     "In Progress");
         }
 
+        /** QA: las tareas pasan de Todo directo a Done; la historia no se queda en Todo «lista para revisar». */
+        @Test
+        void unaTareaQueSeTerminaSinPasarPorEnCursoTambienMueveLaHistoria() {
+            State done = state("Done", StateGroup.COMPLETED);
+            Issue task = child(IssueType.TASK, done, 41);
+            children(count(IssueType.TASK, StateGroup.COMPLETED, 2));
+
+            progress.childChanged(task, null, luis, true);
+
+            assertThat(story.getState()).isSameAs(inProgress);
+            verify(activityService).record(story, null, ActivityField.STORY_AUTO_STATE, "Luis terminó WEB-41",
+                    "In Progress");
+            // Y, ya en curso, avisa que quedó lista para revisar
+            assertThat(story.isReviewNotified()).isTrue();
+            verify(notificationService).notifyStoryReady(story, List.of(ana), luis);
+        }
+
         @Test
         void unaHistoriaYaEnCursoNoSeMueveDeNuevo() {
             story.setState(inProgress);
@@ -313,6 +330,37 @@ class StoryProgressTest {
             assertThat(story.getStartedAt()).isNotNull();
             verify(activityService).record(story, null, com.taskflow.api.entity.enums.ActivityField.STORY_AUTO_STATE,
                     "Luis empezó WEB-41", "In Progress");
+        }
+
+        /** QA: un estado «sin empezar» que pasa a completado termina sus tareas sin pasar por «en curso». */
+        @Test
+        void siElEstadoPasaDeSinEmpezarACompletadoLasHistoriasDeSusTareasEmpiezan() {
+            qa.setStateGroup(StateGroup.COMPLETED);
+            Issue task = child(IssueType.TASK, qa, 41);
+            affected(story);
+            counts(row(story, IssueType.TASK, StateGroup.COMPLETED, 1));
+            when(issueRepository.findTasksWithParentInState(qa.getId())).thenReturn(List.of(task));
+            when(issueRepository.findMaxSortOrder(inProgress.getId())).thenReturn(1000d);
+
+            progress.stateGroupChanged(qa, StateGroup.UNSTARTED, luis);
+
+            assertThat(story.getState()).isSameAs(inProgress);
+            verify(activityService).record(story, null, ActivityField.STORY_AUTO_STATE, "Luis terminó WEB-41",
+                    "In Progress");
+            assertThat(story.isReviewNotified()).isTrue();
+            verify(notificationService).notifyStoryReady(story, List.of(ana), luis);
+        }
+
+        @Test
+        void siElEstadoPasaDeEnCursoACompletadoNoBuscaQuienEmpezo() {
+            qa.setStateGroup(StateGroup.COMPLETED);
+            affected(story);
+            counts(row(story, IssueType.TASK, StateGroup.COMPLETED, 1));
+
+            progress.stateGroupChanged(qa, StateGroup.STARTED, luis);
+
+            verify(issueRepository, never()).findTasksWithParentInState(any());
+            assertThat(story.getState()).isSameAs(todo);
         }
 
         @Test

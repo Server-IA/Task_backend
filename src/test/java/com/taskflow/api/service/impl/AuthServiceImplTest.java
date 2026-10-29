@@ -306,7 +306,10 @@ class AuthServiceImplTest {
 
             assertThatThrownBy(() -> authService.changePassword(user.getId(),
                     new ChangePasswordRequest("mala", "Nueva12345")))
-                    .isInstanceOf(BadRequestException.class);
+                    .isInstanceOf(BadRequestException.class)
+                    // QA: como error del campo, para que el formulario marque «Contraseña actual»
+                    .extracting(ex -> ((BadRequestException) ex).getErrors())
+                    .isEqualTo(java.util.Map.of("currentPassword", "La contraseña actual no es correcta"));
             verify(refreshTokenRepository, never()).deleteAllByUserId(any());
         }
 

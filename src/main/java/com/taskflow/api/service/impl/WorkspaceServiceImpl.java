@@ -59,6 +59,8 @@ public class WorkspaceServiceImpl implements WorkspaceService {
     @Override
     @Transactional
     public WorkspaceResponse create(UUID userId, CreateWorkspaceRequest request) {
+        // Con la fila del usuario bloqueada: dos creaciones a la vez se cuentan en fila y no pasan juntas del máximo
+        lookup.lockUser(userId);
         User owner = lookup.user(userId);
         if (workspaceRepository.countByOwnerId(userId) >= MAX_OWNED_WORKSPACES) {
             throw new ConflictException(WORKSPACE_LIMIT_MESSAGE, ConflictException.WORKSPACE_LIMIT);

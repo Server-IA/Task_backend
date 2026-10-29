@@ -52,6 +52,7 @@ import java.util.UUID;
 public class AuthServiceImpl implements AuthService {
 
     private static final String TOKEN_TYPE = "Bearer";
+    static final String WRONG_CURRENT_PASSWORD = "La contraseña actual no es correcta";
 
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
@@ -232,7 +233,8 @@ public class AuthServiceImpl implements AuthService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
         if (!passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
-            throw new BadRequestException("La contraseña actual no es correcta");
+            // Como error del campo: el formulario marca «Contraseña actual»
+            throw BadRequestException.forField("currentPassword", WRONG_CURRENT_PASSWORD);
         }
         if (passwordEncoder.matches(request.newPassword(), user.getPasswordHash())) {
             throw new BadRequestException("La nueva contraseña debe ser distinta de la actual");

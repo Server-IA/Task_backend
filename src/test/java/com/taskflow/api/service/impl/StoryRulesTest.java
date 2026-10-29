@@ -111,5 +111,26 @@ class StoryRulesTest {
 
         assertThat(StoryRules.startedBy(luis, task)).isEqualTo("Luis empezó WEB-41");
         assertThat(StoryRules.startedBy(null, task)).isEqualTo("Alguien empezó WEB-41");
+
+        task.setState(new State(project, "Done", "#000000", StateGroup.COMPLETED, 3));
+        assertThat(StoryRules.startedBy(luis, task)).isEqualTo("Luis terminó WEB-41");
+    }
+
+    /** QA: una tarea que pasa de Backlog o Todo directo a Done también empieza su historia. */
+    @Test
+    void quePasosDeUnaTareaEmpiezanSuHistoria() {
+        assertThat(StoryRules.startsStory(StateGroup.UNSTARTED, StateGroup.STARTED)).isTrue();
+        assertThat(StoryRules.startsStory(StateGroup.COMPLETED, StateGroup.STARTED)).isTrue();
+        assertThat(StoryRules.startsStory(null, StateGroup.STARTED)).isTrue();
+        assertThat(StoryRules.startsStory(StateGroup.UNSTARTED, StateGroup.COMPLETED)).isTrue();
+        assertThat(StoryRules.startsStory(StateGroup.BACKLOG, StateGroup.COMPLETED)).isTrue();
+        assertThat(StoryRules.startsStory(null, StateGroup.COMPLETED)).isTrue();
+
+        assertThat(StoryRules.startsStory(StateGroup.STARTED, StateGroup.STARTED)).isFalse();
+        assertThat(StoryRules.startsStory(StateGroup.STARTED, StateGroup.COMPLETED)).isFalse();
+        assertThat(StoryRules.startsStory(StateGroup.CANCELLED, StateGroup.COMPLETED)).isFalse();
+        assertThat(StoryRules.startsStory(StateGroup.UNSTARTED, StateGroup.CANCELLED)).isFalse();
+        assertThat(StoryRules.startsStory(StateGroup.BACKLOG, StateGroup.UNSTARTED)).isFalse();
+        assertThat(StoryRules.startsStory(null, StateGroup.UNSTARTED)).isFalse();
     }
 }

@@ -2,6 +2,7 @@ package com.taskflow.api.service.impl;
 
 import com.taskflow.api.dto.request.CreateIssueRequest;
 import com.taskflow.api.dto.request.RetroNoteRequest;
+import com.taskflow.api.dto.request.UpdateIssueRequest;
 import com.taskflow.api.dto.request.UpdateRetroNoteRequest;
 import com.taskflow.api.dto.response.IssueResponse;
 import com.taskflow.api.dto.response.RetroNoteResponse;
@@ -123,6 +124,7 @@ public class RetroServiceImpl implements RetroService {
             note.setOwner(null);
         } else if (request.ownerId() != null) {
             note.setOwner(findOwner(project, note, request.ownerId()));
+            assignConvertedTask(slug, projectId, note, userId);
         }
         // El flush ejecuta @PreUpdate para que la respuesta lleve el updatedAt nuevo.
         return toNoteResponse(noteRepository.saveAndFlush(note), userId);
@@ -221,6 +223,25 @@ public class RetroServiceImpl implements RetroService {
             cycleRepository.saveAndFlush(cycle);
         }
         return toResponse(project, cycle, userId);
+    }
+
+    /**
+     * La acción ya se convirtió en tarea y recibe responsable: si la tarea sigue sin asignar, se le asigna, como si
+     * hubiera tenido el responsable al convertirla (queda en el historial de la tarea y la persona recibe el aviso de
+     * asignación). Si alguien ya la tiene asignada no se toca: el responsable de la acción no pisa el trabajo repartido
+     * después en el tablero. Con la tarea bloqueada, para no cruzarse con otra edición de sus asignados.
+     */
+    private void assignConvertedTask(String slug, UUID projectId, RetroNote note, UUID userId) {
+        if (note.getIssue() == null) {
+            return;
+        }
+        UUID issueId = note.getIssue().getId();
+        issueRepository.lockById(issueId);
+        if (issueRepository.countAssignees(issueId) > 0) {
+            return;
+        }
+        issueService.update(slug, projectId, issueId, userId, new UpdateIssueRequest(null, null, null, null, null,
+                null, null, List.of(note.getOwner().getId()), null, null, null, null, null, null, null));
     }
 
     /** Título de la tarea: el texto de la acción en una línea, cortado con «…» si no cabe. */

@@ -13,4 +13,9 @@ public record EmailRequest(
         @Email(message = "El correo no es válido")
         String email
 ) {
+
+    /** Sin los espacios de alrededor antes de validar: « ana@test.com » es un correo válido. */
+    public EmailRequest {
+        email = email == null ? null : email.strip();
+    }
 }

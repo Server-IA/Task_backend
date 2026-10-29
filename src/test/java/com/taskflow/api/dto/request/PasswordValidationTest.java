@@ -50,6 +50,19 @@ class PasswordValidationTest {
         assertThat(invalidFields(new RegisterRequest("ana@test.com", ascii, "Ana"))).isEmpty();
     }
 
+    /** QA: « ana@test.com » con espacios alrededor se acepta (antes, 400 «El correo no es válido»). */
+    @Test
+    void losCorreosSeRecortanAntesDeValidar() {
+        RegisterRequest register = new RegisterRequest("  ana@test.com ", "Clave1234", "Ana");
+
+        assertThat(register.email()).isEqualTo("ana@test.com");
+        assertThat(invalidFields(register)).isEmpty();
+        assertThat(invalidFields(new EmailRequest(" ana@test.com	"))).isEmpty();
+        assertThat(invalidFields(new InviteMemberRequest(" luis@test.com "))).isEmpty();
+        assertThat(invalidFields(new RegisterRequest("   ", "Clave1234", "Ana"))).contains("email");
+        assertThat(new RegisterRequest(null, "Clave1234", "Ana").email()).isNull();
+    }
+
     @Test
     void losCorreosNoSuperan255Caracteres() {
         String longEmail = "a".repeat(250) + "@test.com";

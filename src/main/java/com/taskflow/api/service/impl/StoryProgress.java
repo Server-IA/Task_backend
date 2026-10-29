@@ -31,9 +31,10 @@ import java.util.stream.Stream;
 /**
  * El avance automático de una historia, que sigue a sus tareas:
  * <ul>
- *   <li>Cuando empieza una de sus tareas (entra a un estado STARTED) y la historia sigue en Backlog o Todo, TaskFlow
- *       la mueve al primer estado STARTED del proyecto y lo anota en su historial sin autor
- *       ({@code STORY_AUTO_STATE}: «TaskFlow movió la historia a In Progress · Luis empezó WEB-41»).</li>
+ *   <li>Cuando empieza una de sus tareas (entra a un estado STARTED, o pasa de Backlog o Todo directo a COMPLETED:
+ *       {@link StoryRules#startsStory}) y la historia sigue en Backlog o Todo, TaskFlow la mueve al primer estado
+ *       STARTED del proyecto y lo anota en su historial sin autor ({@code STORY_AUTO_STATE}: «TaskFlow movió la
+ *       historia a In Progress · Luis empezó WEB-41», o «· Luis terminó WEB-41»).</li>
  *   <li>Cuando queda «lista para revisar» ({@link StoryRules#isReady}) avisa una vez a los project managers
  *       ({@code STORY_READY}). Si deja de estarlo (se reabre una tarea, llega una tarea nueva o un bug abierto), la
  *       marca se borra y la próxima vez que quede lista vuelve a avisar.</li>
@@ -59,8 +60,9 @@ class StoryProgress {
      * Cambió una tarea o un bug: revisa su historia actual y, si cambió de padre, también la anterior.
      *
      * @param previousParent el padre antes del cambio ({@code null} si no tenía)
-     * @param started        la tarea acaba de empezar: entró a un estado STARTED, o llegó a la historia (o pasó a
-     *                       ser {@code TASK}) estando en uno
+     * @param started        la tarea acaba de empezar ({@link StoryRules#startsStory}): entró a un estado STARTED, pasó
+     *                       de Backlog o Todo directo a COMPLETED, o llegó a la historia (o pasó a ser {@code TASK})
+     *                       estando en STARTED o COMPLETED
      */
     void childChanged(Issue child, Issue previousParent, User actor, boolean started) {
         Issue parent = child.getParent();
@@ -135,7 +137,8 @@ class StoryProgress {
      * Un estado cambió de grupo ({@code previous} → el de {@code state}, ya guardado): pone al día, en bloque, las
      * historias que están en él y las de sus tareas, como si cada tarea se hubiera movido a un estado de ese grupo:
      * <ul>
-     *   <li>si el estado pasa a STARTED, las historias en Backlog o Todo de sus tareas pasan a «en curso»;</li>
+     *   <li>si el estado pasa a STARTED, o de Backlog o Todo a COMPLETED ({@link StoryRules#startsStory}), las
+     *       historias en Backlog o Todo de sus tareas pasan a «en curso»;</li>
      *   <li>las historias que este cambio reabre no avisan aunque ya estén listas para revisar (como al reabrir una
      *       historia: quien lo hizo lo sabe); las demás avisan si quedaron listas.</li>
      * </ul>
@@ -160,7 +163,7 @@ class StoryProgress {
         boolean reopensStories = !previous.isOpen() && next.isOpen();
         Map<UUID, Issue> starters = new HashMap<>();
         State startTarget = null;
-        if (next == StateGroup.STARTED) {
+        if (StoryRules.startsStory(previous, next)) {
             issueRepository.findTasksWithParentInState(state.getId())
                     .forEach(task -> starters.putIfAbsent(task.getParent().getId(), task));
             startTarget = stateRepository.findFirstByProjectIdAndStateGroupOrderByPositionAsc(

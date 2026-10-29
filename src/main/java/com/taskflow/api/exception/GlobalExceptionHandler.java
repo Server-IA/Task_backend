@@ -47,7 +47,8 @@ public class GlobalExceptionHandler {
         if (ex instanceof TooManyRequestsException tooMany) {
             response.header(HttpHeaders.RETRY_AFTER, String.valueOf(tooMany.getRetryAfterSeconds()));
         }
-        return response.body(ErrorResponse.of(ex.getStatus().value(), ex.getMessage(), null, ex.getCode()));
+        Map<String, String> errors = ex instanceof BadRequestException badRequest ? badRequest.getErrors() : null;
+        return response.body(ErrorResponse.of(ex.getStatus().value(), ex.getMessage(), errors, ex.getCode()));
     }
 
     /** 409 al guardar una descripción que otra persona cambió: con la versión actual para resolver el conflicto. */

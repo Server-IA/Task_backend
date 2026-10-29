@@ -7,8 +7,9 @@ package com.taskflow.api.entity.enums;
  * {@code DESCRIPTION_CHECKED} y {@code DESCRIPTION_UNCHECKED}: se marcó o desmarcó una casilla («- [ ] …») de la
  * descripción; {@code newValue} es su texto (Markdown de una línea).
  * {@code TYPE}: cambió el tipo ({@code STORY}, {@code TASK} o {@code BUG}).
- * {@code STORY_AUTO_STATE}: TaskFlow movió la historia sola (sin autor) porque empezó una de sus tareas;
- * {@code newValue} es el estado nuevo y {@code oldValue} lo que la movió («Luis empezó WEB-41»).
+ * {@code STORY_AUTO_STATE}: TaskFlow movió la historia sola (sin autor) porque empezó una de sus tareas (o la terminó
+ * directo desde Backlog o Todo); {@code newValue} es el estado nuevo y {@code oldValue} lo que la movió
+ * («Luis empezó WEB-41» o «Luis terminó WEB-41»).
  */
 public enum ActivityField {
     CREATED,

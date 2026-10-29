@@ -60,6 +60,28 @@ final class StoryRules {
     }
 
     /**
+     * Si una tarea que pasa del grupo {@code from} al grupo {@code to} empieza su historia (la mueve a «en curso» si
+     * está en Backlog o Todo, {@link #startsWithChild}):
+     * <ul>
+     *   <li>entra a STARTED desde otro grupo;</li>
+     *   <li>se completa sin pasar por STARTED (de Backlog o Todo directo a COMPLETED): el trabajo se hizo, y una
+     *       historia «lista para revisar» no se queda en Backlog o Todo.</li>
+     * </ul>
+     *
+     * @param from grupo anterior, o {@code null} si la tarea llega a la historia ya en {@code to}: se crea, cambia de
+     *             historia o pasa a ser {@code TASK}
+     */
+    static boolean startsStory(StateGroup from, StateGroup to) {
+        if (to == StateGroup.STARTED) {
+            return from != StateGroup.STARTED;
+        }
+        if (to == StateGroup.COMPLETED) {
+            return from == null || startsWithChild(from);
+        }
+        return false;
+    }
+
+    /**
      * Si un cambio de estado de una historia es cerrarla o reabrirla (lo que solo puede hacer el project manager):
      * entrar a un estado cerrado (COMPLETED o CANCELLED), salir de uno o moverse entre dos. Devuelve el mensaje del
      * 403, o {@code null} si el cambio es entre dos estados abiertos.
@@ -91,11 +113,15 @@ final class StoryRules {
         }
     }
 
-    /** «Luis empezó WEB-41»: lo que movió una historia sola. */
+    /**
+     * «Luis empezó WEB-41», o «Luis terminó WEB-41» si la tarea ya está completada (pasó directo de Backlog o Todo a
+     * COMPLETED): lo que movió una historia sola.
+     */
     static String startedBy(User actor, Issue task) {
         String name = actor == null || actor.getFullName() == null || actor.getFullName().isBlank()
                 ? "Alguien"
                 : actor.getFullName().trim().split("\\s+")[0];
-        return name + " empezó " + task.getCode();
+        boolean completed = task.getState() != null && task.getState().getStateGroup() == StateGroup.COMPLETED;
+        return name + (completed ? " terminó " : " empezó ") + task.getCode();
     }
 }

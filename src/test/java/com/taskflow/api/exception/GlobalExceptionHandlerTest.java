@@ -90,6 +90,19 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getStatusCode().value()).isEqualTo(413);
     }
 
+    /** QA: un error de negocio de un campo concreto llega con {@code errors}, como los de validación. */
+    @Test
+    void unErrorDeCampoLlevaElMapaDeErroresComoLaValidacion() {
+        ResponseEntity<ErrorResponse> response = handler.handleApi(
+                BadRequestException.forField("currentPassword", "La contraseña actual no es correcta"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody().message()).isEqualTo("La contraseña actual no es correcta");
+        assertThat(response.getBody().errors())
+                .containsExactly(java.util.Map.entry("currentPassword", "La contraseña actual no es correcta"));
+        assertThat(handler.handleApi(new BadRequestException("Otro")).getBody().errors()).isNull();
+    }
+
     @Test
     void demasiadosIntentosLlevaRetryAfter() {
         ResponseEntity<ErrorResponse> response = handler.handleApi(new TooManyRequestsException(42));

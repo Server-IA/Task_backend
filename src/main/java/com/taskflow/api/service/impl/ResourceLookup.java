@@ -47,4 +47,14 @@ class ResourceLookup {
     void lockProject(Project project) {
         projectRepository.lockById(project.getId());
     }
+
+    /** Bloquea la fila del usuario ({@link UserRepository#lockById}): el límite de workspaces propios. */
+    void lockUser(UUID userId) {
+        userRepository.lockById(userId);
+    }
+
+    /** Bloquea la fila del workspace ({@link WorkspaceRepository#lockById}): una sola invitación vigente por correo. */
+    void lockWorkspace(Workspace workspace) {
+        workspaceRepository.lockById(workspace.getId());
+    }
 }

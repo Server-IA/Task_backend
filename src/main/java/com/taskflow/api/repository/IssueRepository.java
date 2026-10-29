@@ -41,6 +41,10 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
     @Query(value = "SELECT 1 FROM issues WHERE id IN (:ids) ORDER BY id FOR NO KEY UPDATE", nativeQuery = true)
     List<Integer> lockAllById(@Param("ids") Collection<UUID> ids);
 
+    /** Cuántas personas tiene asignadas la tarea, leído de la base de datos (no de la entidad en memoria). */
+    @Query("select count(u) from Issue i join i.assignees u where i.id = :id")
+    long countAssignees(@Param("id") UUID id);
+
     /**
      * Bloquea las hijas de la tarea (en el orden de {@link #lockAllById}). Antes de eliminar una historia: su borrado
      * les quita el padre ({@code ON DELETE SET NULL}), y así se bloquean las hijas antes que la historia, en el mismo
@@ -89,7 +93,7 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
 
     /**
      * Tareas ({@code TASK}) del estado que tienen padre, con su proyecto, por número: la que «empezó» cada historia
-     * cuando el estado pasa al grupo STARTED.
+     * cuando el estado pasa al grupo STARTED (o de Backlog o Todo a COMPLETED).
      */
     @EntityGraph(attributePaths = {"project"})
     @Query("""

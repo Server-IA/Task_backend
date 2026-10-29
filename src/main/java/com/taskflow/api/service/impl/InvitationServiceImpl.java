@@ -48,6 +48,9 @@ public class InvitationServiceImpl implements InvitationService {
     @Transactional
     public InvitationResponse invite(String slug, UUID inviterId, InviteMemberRequest request) {
         Workspace workspace = lookup.workspace(slug);
+        // Con la fila del workspace bloqueada: dos invitaciones simultáneas al mismo correo van en fila y la segunda
+        // reemplaza a la primera, así nunca quedan dos vigentes
+        lookup.lockWorkspace(workspace);
         User inviter = lookup.user(inviterId);
         String email = request.email().trim().toLowerCase(Locale.ROOT);
         if (memberRepository.existsByWorkspaceIdAndUserEmail(workspace.getId(), email)) {

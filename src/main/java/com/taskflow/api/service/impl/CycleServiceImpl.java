@@ -78,9 +78,37 @@ public class CycleServiceImpl implements CycleService {
         }
         Map<UUID, ProgressResponse> progress = PlanningSupport.progressById(
                 cycleRepository.findProgress(cycles.stream().map(Cycle::getId).toList(), StateGroup.COMPLETED));
+        LocalDate today = today();
         return cycles.stream()
-                .map(cycle -> toResponse(cycle, progress.getOrDefault(cycle.getId(), ProgressResponse.of(0, 0))))
+                .map(cycle -> toResponse(cycle, progress.getOrDefault(cycle.getId(), ProgressResponse.of(0, 0)), today))
+                .sorted(LIST_ORDER)
                 .toList();
+    }
+
+    /**
+     * Orden de la lista de ciclos: primero el que está en curso, después los que terminaron y siguen sin cerrar (falta
+     * cerrarlos), los próximos (el que empieza antes primero), los borradores (sin las dos fechas) y al final los
+     * cerrados (el último cerrado primero). En los demás casos, el que empieza más tarde primero y, a igual inicio, el
+     * más nuevo.
+     */
+    static final Comparator<CycleResponse> LIST_ORDER = Comparator
+            .comparingInt(CycleServiceImpl::listGroup)
+            .thenComparing(cycle -> cycle.status() == CycleStatus.UPCOMING ? cycle.startDate() : null,
+                    Comparator.nullsLast(Comparator.naturalOrder()))
+            .thenComparing(CycleResponse::closedAt, Comparator.nullsLast(Comparator.reverseOrder()))
+            .thenComparing(CycleResponse::startDate, Comparator.nullsLast(Comparator.reverseOrder()))
+            .thenComparing(CycleResponse::createdAt, Comparator.nullsLast(Comparator.reverseOrder()));
+
+    private static int listGroup(CycleResponse cycle) {
+        if (cycle.closedAt() != null) {
+            return 4;
+        }
+        return switch (cycle.status()) {
+            case CURRENT -> 0;
+            case COMPLETED -> 1;
+            case UPCOMING -> 2;
+            case DRAFT -> 3;
+        };
     }
 
     @Override
@@ -367,7 +395,30 @@ public class CycleServiceImpl implements CycleService {
     }
 
     private CycleResponse toResponse(Cycle cycle, ProgressResponse progress) {
-        CycleStatus status = CycleStatus.of(cycle.getStartDate(), cycle.getEndDate(), cycle.isClosed(), today());
-        return mapper.toCycleResponse(cycle, status, progress);
+        return toResponse(cycle, progress, today());
+    }
+
+    /** {@code live}: el avance con las tareas que están en el ciclo ahora ({@link CycleRepository#findProgress}). */
+    private CycleResponse toResponse(Cycle cycle, ProgressResponse live, LocalDate today) {
+        CycleStatus status = CycleStatus.of(cycle.getStartDate(), cycle.getEndDate(), cycle.isClosed(), today);
+        return mapper.toCycleResponse(cycle, status, progress(cycle, live));
+    }
+
+    /**
+     * Avance que muestra el ciclo. Uno cerrado usa la foto del cierre, igual que su retrospectiva
+     * ({@code RetroServiceImpl.summary}): las tareas sin terminar ya salieron del ciclo, así que contar las que quedan
+     * daría 100 % aunque se haya completado la mitad. Si se cerró antes de que existiera la foto (V25), suma al total
+     * las tareas que se llevó el cierre. Uno abierto, las tareas que tiene ahora.
+     */
+    static ProgressResponse progress(Cycle cycle, ProgressResponse live) {
+        if (!cycle.isClosed()) {
+            return live;
+        }
+        if (cycle.getClosedCompletedCount() != null) {
+            return ProgressResponse.of(cycle.getClosedTotalCount() == null ? 0 : cycle.getClosedTotalCount(),
+                    cycle.getClosedCompletedCount());
+        }
+        return ProgressResponse.of(live.totalIssues() + cycle.getCarriedToCycle() + cycle.getCarriedToBacklog(),
+                live.completedIssues());
     }
 }
