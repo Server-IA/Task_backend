@@ -16,6 +16,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.DynamicUpdate;
 import org.hibernate.annotations.Formula;
 
 import java.time.Instant;
@@ -24,10 +25,16 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+/**
+ * {@code @DynamicUpdate}: cada UPDATE escribe solo las columnas que cambiaron, así un guardado que no tocó la
+ * descripción (mover la tarjeta, cambiar la prioridad, el avance automático de una historia…) no reescribe la que
+ * otra persona guardó mientras tanto.
+ */
 @Getter
 @Setter
 @NoArgsConstructor
 @Entity
+@DynamicUpdate
 @Table(name = "issues")
 public class Issue extends BaseEntity {
 
@@ -249,14 +256,15 @@ public class Issue extends BaseEntity {
     private int bugsAfterCloseCount;
 
     /**
-     * «Lista para revisar»: una historia abierta con al menos una tarea, todas sus tareas completadas o canceladas y
-     * ningún bug ligado abierto. Es una marca calculada: el estado de la historia no cambia (sigue en In Progress) y
-     * solo el project manager la cierra. La misma regla que {@code StoryRules.isReady}.
+     * «Lista para revisar»: una historia abierta con al menos una tarea completada, todas sus tareas completadas o
+     * canceladas y ningún bug ligado abierto. Es una marca calculada: el estado de la historia no cambia (sigue en In
+     * Progress) y solo el project manager la cierra. La misma regla que {@code StoryRules.isReady}.
      */
     @Formula("(issue_type = 'STORY' "
             + "and exists (select 1 from states own where own.id = state_id "
             + "and own.state_group not in ('COMPLETED', 'CANCELLED')) "
-            + "and exists (select 1 from issues s where s.parent_id = id and s.issue_type = 'TASK') "
+            + "and exists (select 1 from issues s join states st on st.id = s.state_id "
+            + "where s.parent_id = id and s.issue_type = 'TASK' and st.state_group = 'COMPLETED') "
             + "and not exists (select 1 from issues s join states st on st.id = s.state_id "
             + "where s.parent_id = id and s.issue_type in ('TASK', 'BUG') "
             + "and st.state_group not in ('COMPLETED', 'CANCELLED')))")

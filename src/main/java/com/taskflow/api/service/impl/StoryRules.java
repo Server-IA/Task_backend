@@ -21,13 +21,15 @@ final class StoryRules {
     static final String TYPE_WITH_CHILDREN = "Una historia con tareas no puede cambiar de tipo hasta mover sus tareas";
     static final String STORY_AS_CHILD = "Una historia no puede ser hija de otra tarea";
     static final String SPLIT_TYPE = "Al partir una historia solo se crean tareas o bugs";
+    static final String DELETE_FORBIDDEN = "Solo el project manager elimina historias";
 
     private StoryRules() {
     }
 
     /**
-     * «Lista para revisar»: la historia está abierta, tiene al menos una tarea, todas sus tareas están completadas o
-     * canceladas y ningún bug ligado sigue abierto. La misma regla que {@code Issue.readyForReview}.
+     * «Lista para revisar»: la historia está abierta, tiene al menos una tarea completada, todas sus tareas están
+     * completadas o canceladas y ningún bug ligado sigue abierto (una historia cuyas tareas se cancelaron todas no está
+     * lista: no se hizo nada). La misma regla que {@code Issue.readyForReview}.
      *
      * @param storyGroup grupo del estado de la historia
      * @param children   sus hijas contadas por tipo y grupo
@@ -41,7 +43,7 @@ final class StoryRules {
             if (child.count() == 0) {
                 continue;
             }
-            if (child.type() == IssueType.TASK) {
+            if (child.type() == IssueType.TASK && child.group() == StateGroup.COMPLETED) {
                 hasTask = true;
             }
             boolean counts = child.type() == IssueType.TASK || child.type() == IssueType.BUG;

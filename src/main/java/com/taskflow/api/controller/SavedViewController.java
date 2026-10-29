@@ -73,7 +73,8 @@ public class SavedViewController {
             description = "shared = ids de todas las vistas compartidas del proyecto en el nuevo orden (solo el project "
                     + "manager: 403); personal = ids de todas mis vistas personales en el nuevo orden. Al menos una de "
                     + "las dos; cada una debe tener exactamente las vistas de su grupo, sin repetir (400). Devuelve "
-                    + "las vistas visibles, como el listado.")
+                    + "las vistas visibles, como el listado, pero con issueCount = null (el orden no cambia los "
+                    + "filtros: se conservan los conteos del listado).")
     @PutMapping("/order")
     public List<SavedViewResponse> reorder(@PathVariable String slug, @PathVariable UUID projectId,
                                            @AuthenticationPrincipal UserPrincipal me,

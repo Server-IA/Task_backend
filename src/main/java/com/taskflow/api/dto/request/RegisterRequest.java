@@ -14,6 +14,7 @@ public record RegisterRequest(
         @NotBlank(message = "La contraseña es obligatoria")
         @Size(min = 8, max = 72, message = "La contraseña debe tener entre 8 y 72 caracteres")
         @Pattern(regexp = PasswordRules.REGEX, message = PasswordRules.MESSAGE)
+        @MaxUtf8Bytes(value = PasswordRules.MAX_BYTES, message = PasswordRules.BYTES_MESSAGE)
         String password,
 
         @NotBlank(message = "El nombre es obligatorio")

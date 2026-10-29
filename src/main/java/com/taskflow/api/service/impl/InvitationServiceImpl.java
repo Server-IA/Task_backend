@@ -16,6 +16,8 @@ import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.WorkspaceMapper;
+import com.taskflow.api.ratelimit.RateLimitRule;
+import com.taskflow.api.ratelimit.RateLimitService;
 import com.taskflow.api.repository.WorkspaceInvitationRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.service.InvitationService;
@@ -40,6 +42,7 @@ public class InvitationServiceImpl implements InvitationService {
     private final WorkspaceMapper workspaceMapper;
     private final EmailNotifier emailNotifier;
     private final AppProperties properties;
+    private final RateLimitService rateLimitService;
 
     @Override
     @Transactional
@@ -50,6 +53,9 @@ public class InvitationServiceImpl implements InvitationService {
         if (memberRepository.existsByWorkspaceIdAndUserEmail(workspace.getId(), email)) {
             throw new ConflictException("Esa persona ya es miembro del workspace");
         }
+        // Cada invitación es un correo: límite por quien invita y por correo invitado (de cualquier workspace)
+        rateLimitService.consume(RateLimitRule.INVITE_SENDER, inviterId.toString());
+        rateLimitService.consume(RateLimitRule.INVITE_RECIPIENT, email);
 
         // Una sola invitación vigente por correo: la nueva reemplaza a las anteriores.
         invitationRepository.deleteNotAccepted(workspace.getId(), email);

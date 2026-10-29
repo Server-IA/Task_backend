@@ -78,7 +78,9 @@ public class RetroServiceImpl implements RetroService {
     @Transactional
     public RetroResponse start(String slug, UUID projectId, UUID cycleId, UUID userId) {
         Project project = lookup.project(slug, projectId);
-        Cycle cycle = findCycle(project, cycleId);
+        // Con la fila bloqueada: un doble clic no abre la retrospectiva (ni avisa) dos veces
+        Cycle cycle = cycleRepository.findForUpdate(cycleId, project.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Ciclo no encontrado"));
         if (cycle.getRetroStartedAt() == null) {
             cycle.setRetroStartedAt(Instant.now());
             cycleRepository.saveAndFlush(cycle);
@@ -258,16 +260,30 @@ public class RetroServiceImpl implements RetroService {
                 previousActions(project, cycle, userId));
     }
 
-    /** Las cuentas de lo que se movió vienen del cierre; las tareas que siguen en el ciclo se cuentan ahora. */
-    private static RetroSummary summary(Cycle cycle) {
-        Collection<Issue> issues = cycle.getIssues();
-        int completed = (int) issues.stream().filter(PlanningSupport::isCompleted).count();
+    /**
+     * Cuenta el trabajo (tareas y bugs; las historias y las canceladas no), como el avance del ciclo. Un ciclo cerrado
+     * usa la foto que se guardó al cerrarlo; uno abierto (o cerrado antes de V25), las tareas que están en él ahora.
+     */
+    static RetroSummary summary(Cycle cycle) {
+        if (cycle.getClosedCompletedCount() != null) {
+            return new RetroSummary(
+                    cycle.getClosedCompletedCount(),
+                    cycle.getClosedTotalCount() == null ? 0 : cycle.getClosedTotalCount(),
+                    cycle.getCarriedToCycle(),
+                    cycle.getCarriedToBacklog(),
+                    cycle.getClosedCycleTimeDays());
+        }
+        List<Issue> work = cycle.getIssues().stream()
+                .filter(PlanningSupport::isWork)
+                .filter(issue -> issue.getState().getStateGroup() != StateGroup.CANCELLED)
+                .toList();
+        int completed = (int) work.stream().filter(PlanningSupport::isCompleted).count();
         return new RetroSummary(
                 completed,
-                issues.size() + cycle.getCarriedToCycle() + cycle.getCarriedToBacklog(),
+                work.size() + cycle.getCarriedToCycle() + cycle.getCarriedToBacklog(),
                 cycle.getCarriedToCycle(),
                 cycle.getCarriedToBacklog(),
-                PlanningSupport.cycleTimeDays(issues));
+                PlanningSupport.cycleTimeDays(work));
     }
 
     private List<RetroNoteResponse> previousActions(Project project, Cycle cycle, UUID userId) {

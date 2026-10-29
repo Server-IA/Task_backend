@@ -94,6 +94,16 @@ class DescriptionTasksTest {
         Diff diff = DescriptionTasks.diff("- [ ]\n- [ ] Uno", "- [x]\n- [ ] Uno");
 
         assertThat(diff.toggles()).isEmpty();
+        // Sin entrada propia, el cambio queda como «editó la descripción» (no se pierde del historial)
+        assertThat(diff.onlyToggles()).isFalse();
+    }
+
+    @Test
+    void unaCasillaVaciaJuntoAUnaConTextoSoloRegistraLaDeTexto() {
+        Diff diff = DescriptionTasks.diff("- [ ]\n- [ ] Uno", "- [x]\n- [x] Uno");
+
+        assertThat(diff.onlyToggles()).isTrue();
+        assertThat(diff.toggles()).containsExactly(new DescriptionTasks.Toggle("Uno", true));
     }
 
     @Test

@@ -40,9 +40,10 @@ public class SmtpEmailService implements EmailService {
             helper.setSubject(subject);
             helper.setText(html, true);
             mailSender.send(message);
-            log.info("Correo enviado por SMTP a {} ({})", to, subject);
+            log.info("Correo enviado por SMTP ({})", subject);
+            log.debug("Correo '{}' enviado por SMTP a {}", subject, to);
         } catch (MessagingException | MailException e) {
-            log.error("Error enviando correo por SMTP a {}", to, e);
+            log.error("Error enviando el correo '{}' por SMTP", subject, e);
         }
     }
 }

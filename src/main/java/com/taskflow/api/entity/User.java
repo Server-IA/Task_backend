@@ -7,6 +7,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.time.Instant;
+
 @Getter
 @Setter
 @NoArgsConstructor
@@ -31,4 +33,11 @@ public class User extends BaseEntity {
 
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
+
+    /**
+     * Último cambio o restablecimiento de la contraseña (al segundo). Los access tokens emitidos antes dejan de
+     * servir; {@code null} si nunca cambió.
+     */
+    @Column(name = "credentials_changed_at")
+    private Instant credentialsChangedAt;
 }

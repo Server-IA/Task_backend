@@ -17,9 +17,12 @@ import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.exception.UnauthorizedException;
 import com.taskflow.api.mapper.UserMapper;
+import com.taskflow.api.ratelimit.RateLimitRule;
+import com.taskflow.api.ratelimit.RateLimitService;
 import com.taskflow.api.repository.RefreshTokenRepository;
 import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.repository.VerificationTokenRepository;
+import com.taskflow.api.security.CredentialsGuard;
 import com.taskflow.api.security.JwtService;
 import com.taskflow.api.security.UserPrincipal;
 import com.taskflow.api.service.AuthService;
@@ -28,13 +31,16 @@ import com.taskflow.api.util.TokenUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -54,6 +60,8 @@ public class AuthServiceImpl implements AuthService {
     private final EmailNotifier emailNotifier;
     private final UserMapper userMapper;
     private final AppProperties properties;
+    private final RateLimitService rateLimitService;
+    private final CredentialsGuard credentialsGuard;
 
     @Override
     @Transactional
@@ -99,9 +107,19 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public AuthResponse login(LoginRequest request, ClientInfo client) {
-        // Lanza BadCredentials, Disabled (sin verificar) o Locked (inactivo); el handler global los traduce.
-        var authentication = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(normalizeEmail(request.email()), request.password()));
+        String email = normalizeEmail(request.email());
+        // Además del límite por IP, uno por cuenta: repartir los intentos entre muchas IPs no sirve para adivinar la
+        // contraseña. Solo gastan intento las contraseñas incorrectas.
+        rateLimitService.ensureAvailable(RateLimitRule.LOGIN_ACCOUNT, email);
+        Authentication authentication;
+        try {
+            // Lanza BadCredentials, Disabled (sin verificar) o Locked (inactivo); el handler global los traduce.
+            authentication = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(email, request.password()));
+        } catch (BadCredentialsException ex) {
+            rateLimitService.tryConsume(RateLimitRule.LOGIN_ACCOUNT, email);
+            throw ex;
+        }
         UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
         User user = userRepository.findById(principal.getId())
                 .orElseThrow(() -> new UnauthorizedException("Correo o contraseña incorrectos"));
@@ -132,7 +150,13 @@ public class AuthServiceImpl implements AuthService {
         if (!user.isActive()) {
             throw new UnauthorizedException("La cuenta está desactivada");
         }
-        stored.setRevoked(true);
+        // Atómico: si dos peticiones usan el mismo token a la vez, solo una lo rota; la otra cuenta como reutilización.
+        if (refreshTokenRepository.revokeIfActive(stored.getId()) == 0) {
+            log.warn("Refresh token usado dos veces a la vez por el usuario {}; se revocan todas sus sesiones",
+                    user.getId());
+            refreshTokenRepository.revokeAllByUserId(user.getId());
+            throw new UnauthorizedException("Refresh token inválido");
+        }
         return issueTokens(user);
     }
 
@@ -165,13 +189,15 @@ public class AuthServiceImpl implements AuthService {
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         // Quien recibió el correo demostró ser dueño del email.
         user.setEmailVerified(true);
-        refreshTokenRepository.deleteAllByUserId(user.getId());
+        credentialsChanged(user);
         emailNotifier.sendPasswordChanged(user);
     }
 
     @Override
     @Transactional
     public AuthResponse changePassword(UUID userId, ChangePasswordRequest request) {
+        // Con una sesión robada no se puede probar la contraseña actual sin límite
+        rateLimitService.consume(RateLimitRule.CHANGE_PASSWORD, userId.toString());
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
         if (!passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
@@ -182,9 +208,20 @@ public class AuthServiceImpl implements AuthService {
         }
 
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
-        refreshTokenRepository.deleteAllByUserId(user.getId());
+        credentialsChanged(user);
         emailNotifier.sendPasswordChanged(user);
+        // Emitidos después del cambio (al segundo), así que siguen valiendo
         return issueTokens(user);
+    }
+
+    /**
+     * La contraseña cambió: se cierran todas las sesiones (refresh tokens) y dejan de valer los access tokens emitidos
+     * hasta ahora. La marca va al segundo, como el «iat» de los JWT: los que se emitan desde ya valen.
+     */
+    private void credentialsChanged(User user) {
+        user.setCredentialsChangedAt(Instant.now().truncatedTo(ChronoUnit.SECONDS));
+        refreshTokenRepository.deleteAllByUserId(user.getId());
+        credentialsGuard.evict(user.getId());
     }
 
     private AuthResponse issueTokens(User user) {

@@ -5,6 +5,7 @@ import com.taskflow.api.dto.response.ProgressResponse;
 import com.taskflow.api.entity.Cycle;
 import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.Project;
+import com.taskflow.api.entity.enums.IssueType;
 import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.repository.IssueProgress;
@@ -67,6 +68,11 @@ class PlanningSupport {
                         == CycleStatus.CURRENT)
                 .findFirst()
                 .orElse(null);
+    }
+
+    /** Trabajo que cuenta en el avance y los resúmenes: tareas y bugs (las historias avanzan con sus tareas). */
+    static boolean isWork(Issue issue) {
+        return issue.getType() != IssueType.STORY;
     }
 
     /** En el grupo COMPLETED. */

@@ -182,10 +182,9 @@ public class IssueServiceImpl implements IssueService {
     @Transactional
     public IssueResponse update(String slug, UUID projectId, UUID issueId, UUID userId, UpdateIssueRequest request) {
         Project project = lookup.project(slug, projectId);
-        if (request.description() != null) {
-            // Antes de leerla: los guardados de la descripción de la misma tarea van en fila (la versión no se salta)
-            issueRepository.lockById(issueId);
-        }
+        // Antes de leerla: los cambios de la misma tarea van en fila (la versión de la descripción no se salta y nadie
+        // guarda una copia vieja de la tarea)
+        issueRepository.lockById(issueId);
         Issue issue = findIssue(project, issueId);
         String description = blankToNull(request.description());
         boolean descriptionChanged = request.description() != null
@@ -200,11 +199,16 @@ public class IssueServiceImpl implements IssueService {
         boolean completed = false;
         // Lo que puede mover a su historia: cambiar de estado, de padre o de tipo
         Issue previousParent = issue.getParent();
+        StateGroup originalGroup = issue.getState().getStateGroup();
         boolean storyRelevant = false;
         boolean started = false;
+        boolean typeChanged = false;
+        // La regla de la historia cerrada ya se aplicó al padre nuevo (checkNewParent)
+        boolean parentChecked = false;
 
         if (request.type() != null && request.type() != issue.getType()) {
             changeType(slug, userId, project, issue, request.type(), actor, changes, request.description() == null);
+            typeChanged = true;
             storyRelevant = true;
             started = request.type() == IssueType.TASK && issue.getState().getStateGroup() == StateGroup.STARTED;
         }
@@ -256,12 +260,27 @@ public class IssueServiceImpl implements IssueService {
                         Boolean.TRUE.equals(request.reopenParent()));
                 started |= issue.getState().getStateGroup() == StateGroup.STARTED;
                 storyRelevant = true;
+                parentChecked = true;
             }
             changes.track(ActivityField.PARENT, codeOf(issue.getParent()), parent.getCode());
             issue.setParent(parent);
         }
-        if (issue.isStory() && issue.getParent() != null) {
+        // Solo si esta petición cambia el tipo o el padre: una historia que ya tenía padre (datos viejos) se sigue
+        // pudiendo editar
+        if (issue.isStory() && issue.getParent() != null && (typeChanged || parentChecked)) {
             throw new BadRequestException(StoryRules.STORY_AS_CHILD);
+        }
+        if (!parentChecked) {
+            // Una tarea de una historia cerrada no vuelve a ser trabajo abierto sin reabrir la historia: ni al pasar
+            // a TASK ni al salir de un estado completado o cancelado
+            boolean reopenParent = Boolean.TRUE.equals(request.reopenParent());
+            if (typeChanged && issue.getType() == IssueType.TASK) {
+                requireOpenStory(slug, userId, actor, issue.getParent(), reopenParent,
+                        IssueServiceImpl::closedStoryConflict);
+            } else {
+                checkReopenedWork(slug, userId, actor, issue, originalGroup, issue.getState().getStateGroup(),
+                        reopenParent);
+            }
         }
         if (Boolean.TRUE.equals(request.clearStartDate())) {
             changes.track(ActivityField.START_DATE, toText(issue.getStartDate()), null);
@@ -303,6 +322,10 @@ public class IssueServiceImpl implements IssueService {
         if (storyRelevant) {
             storyProgress.childChanged(saved, previousParent, actor, started);
         }
+        if (typeChanged && saved.isStory()) {
+            // Una tarea con hijas que pasa a historia puede quedar lista para revisar en el acto
+            storyProgress.reconcile(saved, actor, null, false);
+        }
         return issueMapper.toResponse(saved);
     }
 
@@ -310,6 +333,7 @@ public class IssueServiceImpl implements IssueService {
     @Transactional
     public IssueResponse move(String slug, UUID projectId, UUID issueId, UUID userId, MoveIssueRequest request) {
         Project project = lookup.project(slug, projectId);
+        issueRepository.lockById(issueId);
         Issue issue = findIssue(project, issueId);
         State target = findState(project, request.stateId());
         User actor = null;
@@ -317,6 +341,8 @@ public class IssueServiceImpl implements IssueService {
         if (stateChanged) {
             ensureStoryStateChangeAllowed(slug, userId, issue, target);
             actor = lookup.user(userId);
+            checkReopenedWork(slug, userId, actor, issue, issue.getState().getStateGroup(), target.getStateGroup(),
+                    Boolean.TRUE.equals(request.reopenParent()));
             activityService.record(issue, actor, ActivityField.STATE, issue.getState().getName(), target.getName());
         }
 
@@ -360,9 +386,17 @@ public class IssueServiceImpl implements IssueService {
     public void delete(String slug, UUID projectId, UUID issueId, UUID userId) {
         Project project = lookup.project(slug, projectId);
         Issue issue = findIssue(project, issueId);
-        boolean isCreator = issue.getCreatedBy() != null && issue.getCreatedBy().getId().equals(userId);
-        if (!isCreator && !isManager(slug, userId)) {
-            throw new ForbiddenException(DELETE_FORBIDDEN_MESSAGE);
+        if (issue.isStory()) {
+            // Una historia (con su historial y sus tareas) solo la elimina el project manager, aunque la haya creado
+            // otra persona como tarea
+            if (!isManager(slug, userId)) {
+                throw new ForbiddenException(StoryRules.DELETE_FORBIDDEN);
+            }
+        } else {
+            boolean isCreator = issue.getCreatedBy() != null && issue.getCreatedBy().getId().equals(userId);
+            if (!isCreator && !isManager(slug, userId)) {
+                throw new ForbiddenException(DELETE_FORBIDDEN_MESSAGE);
+            }
         }
         // Los sub-issues no se borran: la base de datos les quita el padre (ON DELETE SET NULL).
         Issue parent = issue.getParent();
@@ -379,6 +413,7 @@ public class IssueServiceImpl implements IssueService {
     public List<IssueResponse> split(String slug, UUID projectId, UUID storyId, UUID userId,
                                      SplitStoryRequest request) {
         Project project = lookup.project(slug, projectId);
+        issueRepository.lockById(storyId);
         Issue story = findIssue(project, storyId);
         if (!story.isStory()) {
             throw new BadRequestException("Solo se parten las historias");
@@ -443,6 +478,7 @@ public class IssueServiceImpl implements IssueService {
     @Transactional
     public IssueResponse closeStory(String slug, UUID projectId, UUID storyId, UUID userId) {
         Project project = lookup.project(slug, projectId);
+        issueRepository.lockById(storyId);
         Issue story = findStory(project, storyId);
         if (!story.getState().getStateGroup().isOpen()) {
             throw new ConflictException("La historia ya está cerrada");
@@ -464,6 +500,7 @@ public class IssueServiceImpl implements IssueService {
     @Transactional
     public IssueResponse reopenStory(String slug, UUID projectId, UUID storyId, UUID userId) {
         Project project = lookup.project(slug, projectId);
+        issueRepository.lockById(storyId);
         Issue story = findStory(project, storyId);
         if (story.getState().getStateGroup().isOpen()) {
             throw new ConflictException("La historia no está cerrada");
@@ -486,8 +523,8 @@ public class IssueServiceImpl implements IssueService {
 
     /**
      * Reabre una historia cerrada (solo el project manager llega aquí): vuelve al primer estado STARTED (o, si el
-     * proyecto no tiene, al primer estado abierto) y queda en su historial. No vuelve a avisar de «lista para revisar»
-     * hasta que deje de estarlo y lo vuelva a estar.
+     * proyecto no tiene, al primer estado abierto) y queda en su historial. Si al reabrirla ya está lista para revisar,
+     * no se vuelve a avisar (quien la reabre lo sabe); si no lo está, avisará cuando lo esté.
      */
     private void reopen(Issue story, User actor) {
         UUID projectId = story.getProject().getId();
@@ -499,7 +536,8 @@ public class IssueServiceImpl implements IssueService {
                         StateGroup.BACKLOG))
                 .orElseThrow(() -> new ConflictException("El proyecto no tiene un estado abierto"));
         changeStoryState(story, target, actor);
-        story.setReviewNotified(true);
+        story.setReviewNotified(StoryRules.isReady(target.getStateGroup(),
+                issueRepository.countChildrenOf(story.getId())));
     }
 
     /** Cambia el estado de una historia con su historial, sus fechas y quién la cerró. */
@@ -537,20 +575,47 @@ public class IssueServiceImpl implements IssueService {
         if (type == IssueType.STORY) {
             throw new BadRequestException(StoryRules.STORY_AS_CHILD);
         }
-        if (!parent.isStory() || parent.getState().getStateGroup().isOpen() || type != IssueType.TASK) {
+        if (type == IssueType.TASK) {
+            requireOpenStory(slug, userId, actor, parent, reopen, IssueServiceImpl::closedStoryConflict);
+        }
+    }
+
+    /**
+     * Una tarea ({@code TASK}) de una historia cerrada que sale de un estado completado o cancelado a uno abierto
+     * vuelve a ser trabajo abierto: exige reabrir la historia, igual que agregarle una tarea.
+     */
+    private void checkReopenedWork(String slug, UUID userId, User actor, Issue issue, StateGroup from, StateGroup to,
+                                   boolean reopen) {
+        if (issue.getType() == IssueType.TASK && !from.isOpen() && to.isOpen()) {
+            requireOpenStory(slug, userId, actor, issue.getParent(), reopen, IssueServiceImpl::reopenedWorkConflict);
+        }
+    }
+
+    /**
+     * Si {@code story} es una historia cerrada: sin {@code reopen}, 409 {@code STORY_CLOSED}; con él, solo el project
+     * manager la reabre (queda en su historial). Si no es una historia o está abierta, no hace nada.
+     */
+    private void requireOpenStory(String slug, UUID userId, User actor, Issue story, boolean reopen,
+                                  Function<Issue, ConflictException> conflict) {
+        if (story == null || !story.isStory() || story.getState().getStateGroup().isOpen()) {
             return;
         }
         if (!reopen) {
-            throw closedStoryConflict(parent);
+            throw conflict.apply(story);
         }
         if (!isManager(slug, userId)) {
             throw new ForbiddenException(StoryRules.REOPEN_FORBIDDEN);
         }
-        reopen(parent, actor);
+        reopen(story, actor);
     }
 
     private static ConflictException closedStoryConflict(Issue story) {
         return new ConflictException(story.getCode() + " está cerrada. Reábrela o crea la tarea suelta relacionada",
+                ConflictException.STORY_CLOSED);
+    }
+
+    private static ConflictException reopenedWorkConflict(Issue story) {
+        return new ConflictException(story.getCode() + " está cerrada. Reábrela para volver a abrir esta tarea",
                 ConflictException.STORY_CLOSED);
     }
 

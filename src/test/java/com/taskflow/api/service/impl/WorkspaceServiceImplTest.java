@@ -1,5 +1,6 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.dto.request.CreateWorkspaceRequest;
 import com.taskflow.api.dto.request.UpdateMemberRoleRequest;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.Workspace;
@@ -8,6 +9,7 @@ import com.taskflow.api.entity.enums.WorkspaceRole;
 import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.mapper.WorkspaceMapper;
+import com.taskflow.api.repository.IssueRepository;
 import com.taskflow.api.repository.IssueTemplateRepository;
 import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
@@ -27,6 +29,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -45,6 +48,8 @@ class WorkspaceServiceImplTest {
     @Mock
     private IssueTemplateRepository templateRepository;
     @Mock
+    private IssueRepository issueRepository;
+    @Mock
     private ResourceLookup lookup;
     @Mock
     private WorkspaceMapper workspaceMapper;
@@ -62,7 +67,20 @@ class WorkspaceServiceImplTest {
         workspace.setId(UUID.randomUUID());
         workspace.setSlug(SLUG);
         workspace.setOwner(creator);
-        when(workspaceRepository.findBySlugForUpdate(SLUG)).thenReturn(Optional.of(workspace));
+        lenient().when(workspaceRepository.findBySlugForUpdate(SLUG)).thenReturn(Optional.of(workspace));
+    }
+
+    @Test
+    void nadiePuedeTenerMasDeDiezWorkspaces() {
+        when(lookup.user(creator.getId())).thenReturn(creator);
+        when(workspaceRepository.countByOwnerId(creator.getId()))
+                .thenReturn((long) WorkspaceServiceImpl.MAX_OWNED_WORKSPACES);
+
+        assertThatThrownBy(() -> workspaceService.create(creator.getId(), new CreateWorkspaceRequest("Otro", null)))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage(WorkspaceServiceImpl.WORKSPACE_LIMIT_MESSAGE)
+                .extracting("code").isEqualTo(ConflictException.WORKSPACE_LIMIT);
+        verify(workspaceRepository, never()).save(any());
     }
 
     private static User user(String name) {
@@ -146,6 +164,8 @@ class WorkspaceServiceImplTest {
             verify(projectMemberRepository).deleteAllInWorkspace(workspace.getId(), devId);
             // Deja de ser asignado por defecto en las plantillas de los proyectos del workspace
             verify(templateRepository).removeAssigneeInWorkspace(workspace.getId(), devId);
+            // Y de sus tareas: ya no las ve, no puede seguir asignado ni recibir sus avisos
+            verify(issueRepository).removeAssigneeInWorkspace(workspace.getId(), devId);
             verify(memberRepository).delete(dev);
         }
 

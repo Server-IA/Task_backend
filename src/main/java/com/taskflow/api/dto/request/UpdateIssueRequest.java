@@ -21,8 +21,9 @@ import java.util.UUID;
  *       ({@code DescriptionConflictResponse}) y no cambia nada. Sin ella, gana el último que guarda.</li>
  *   <li>{@code type}: cambia el tipo. Una historia con tareas no puede dejar de serlo (409) y solo el project manager
  *       convierte en historia o deja de serlo.</li>
- *   <li>{@code reopenParent}: con {@code parentId} de una historia cerrada, la reabre para agregar esta tarea (solo el
- *       project manager); sin él, 409 con {@code code: STORY_CLOSED}.</li>
+ *   <li>{@code reopenParent}: la tarea ({@code TASK}) queda como trabajo abierto de una historia cerrada (se le pone
+ *       como padre, pasa a ser {@code TASK} estando bajo ella, o sale de un estado completado o cancelado a uno
+ *       abierto): la reabre (solo el project manager). Sin él, 409 con {@code code: STORY_CLOSED}.</li>
  * </ul>
  */
 public record UpdateIssueRequest(

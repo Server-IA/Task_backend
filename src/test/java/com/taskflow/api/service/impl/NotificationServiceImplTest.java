@@ -8,10 +8,13 @@ import com.taskflow.api.entity.Notification;
 import com.taskflow.api.entity.Project;
 import com.taskflow.api.entity.ProjectMember;
 import com.taskflow.api.entity.User;
+import com.taskflow.api.entity.Workspace;
+import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.entity.enums.NotificationType;
 import com.taskflow.api.mapper.CollaborationMapper;
 import com.taskflow.api.repository.NotificationRepository;
 import com.taskflow.api.repository.ProjectMemberRepository;
+import com.taskflow.api.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -23,20 +26,26 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 import java.util.Collection;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -48,6 +57,8 @@ class NotificationServiceImplTest {
     private ProjectMemberRepository projectMemberRepository;
     @Mock
     private CollaborationMapper mapper;
+    @Mock
+    private UserRepository userRepository;
 
     @InjectMocks
     private NotificationServiceImpl notificationService;
@@ -59,12 +70,17 @@ class NotificationServiceImplTest {
     private User ana;
     private User luis;
     private User creator;
+    /** Quienes ya no pueden ver el proyecto (los quitaron). */
+    private final Set<UUID> removed = new HashSet<>();
 
     @BeforeEach
     void setUp() {
         project = new Project();
         project.setId(UUID.randomUUID());
         project.setIdentifier("WEB");
+        Workspace workspace = new Workspace();
+        workspace.setId(UUID.randomUUID());
+        project.setWorkspace(workspace);
         issue = new Issue();
         issue.setProject(project);
         issue.setSequenceId(12);
@@ -78,6 +94,34 @@ class NotificationServiceImplTest {
         comment = new Comment();
         comment.setId(UUID.randomUUID());
         comment.setBody("¿lo revisas antes de la daily?");
+        // Pueden ver la tarea todos los usuarios de la prueba, salvo los quitados del proyecto
+        List<User> everyone = List.of(author, ana, luis, creator);
+        lenient().when(userRepository.findMentionable(any(), eq(project.getId()), eq(workspace.getId())))
+                .thenAnswer(call -> {
+                    Collection<UUID> ids = call.getArgument(0);
+                    return everyone.stream()
+                            .filter(user -> ids.contains(user.getId()) && !removed.contains(user.getId()))
+                            .toList();
+                });
+    }
+
+    @Test
+    void quienYaNoEstaEnElProyectoNoRecibeAvisosDeComentariosNiDesbloqueos() {
+        // Carla creó la tarea y Luis estaba asignado, pero los quitaron del proyecto
+        removed.add(creator.getId());
+        removed.add(luis.getId());
+        Issue blocker = new Issue();
+        blocker.setProject(project);
+        blocker.setSequenceId(3);
+
+        notificationService.notifyCommented(issue, author, comment, List.of());
+        notificationService.notifyUnblocked(issue, blocker, author);
+
+        assertThat(saved())
+                .extracting(n -> n.getRecipient().getFullName(), Notification::getType)
+                .containsExactlyInAnyOrder(
+                        tuple("Ana", NotificationType.ISSUE_COMMENTED),
+                        tuple("Ana", NotificationType.ISSUE_UNBLOCKED));
     }
 
     private static User user(String name) {
@@ -230,11 +274,23 @@ class NotificationServiceImplTest {
     @Test
     void contadoresDeLaBandeja() {
         UUID me = UUID.randomUUID();
-        when(notificationRepository.countByRecipientIdAndReadFalse(me)).thenReturn(3L);
-        when(notificationRepository.countByRecipientIdAndTypeAndReadFalse(me, NotificationType.ISSUE_MENTIONED))
+        when(notificationRepository.countMine(me, EnumSet.allOf(NotificationType.class), true)).thenReturn(3L);
+        when(notificationRepository.countMine(me, EnumSet.of(NotificationType.ISSUE_MENTIONED), true))
                 .thenReturn(1L);
-        when(notificationRepository.countByRecipientIdAndType(me, NotificationType.ISSUE_MENTIONED)).thenReturn(4L);
+        when(notificationRepository.countMine(me, EnumSet.of(NotificationType.ISSUE_MENTIONED), false))
+                .thenReturn(4L);
 
         assertThat(notificationService.counts(me)).isEqualTo(new NotificationCountsResponse(3, 1, 4));
+    }
+
+    @Test
+    void laBandejaSoloSeOrdenaPorFecha() {
+        UUID me = UUID.randomUUID();
+
+        assertThatThrownBy(() -> notificationService.getMyNotifications(me, false, null,
+                PageRequest.of(0, 20, Sort.by("actor.passwordHash"))))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("actor.passwordHash");
+        verifyNoInteractions(notificationRepository);
     }
 }

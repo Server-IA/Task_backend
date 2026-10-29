@@ -5,6 +5,8 @@ import com.taskflow.api.dto.response.ErrorResponse;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.data.core.PropertyReferenceException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -13,7 +15,11 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.authentication.LockedException;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.ServletRequestBindingException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -34,8 +40,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ErrorResponse> handleApi(ApiException ex) {
-        return ResponseEntity.status(ex.getStatus())
-                .body(ErrorResponse.of(ex.getStatus().value(), ex.getMessage(), null, ex.getCode()));
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(ex.getStatus());
+        if (ex instanceof TooManyRequestsException tooMany) {
+            response.header(HttpHeaders.RETRY_AFTER, String.valueOf(tooMany.getRetryAfterSeconds()));
+        }
+        return response.body(ErrorResponse.of(ex.getStatus().value(), ex.getMessage(), null, ex.getCode()));
     }
 
     /** 409 al guardar una descripción que otra persona cambió: con la versión actual para resolver el conflicto. */
@@ -90,6 +99,37 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.BAD_REQUEST, "Falta el parámetro '" + ex.getParameterName() + "'");
     }
 
+    /** Falta una cabecera obligatoria u otro dato de la petición (400). */
+    @ExceptionHandler(ServletRequestBindingException.class)
+    public ResponseEntity<ErrorResponse> handleBinding(ServletRequestBindingException ex) {
+        if (ex instanceof MissingRequestHeaderException missing) {
+            return build(HttpStatus.BAD_REQUEST, "Falta la cabecera '" + missing.getHeaderName() + "'");
+        }
+        return build(HttpStatus.BAD_REQUEST, "La petición no es válida");
+    }
+
+    /** Un cuerpo que no es JSON (por ejemplo text/plain) en un endpoint que lo espera (415). */
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ErrorResponse> handleMediaTypeNotSupported(HttpMediaTypeNotSupportedException ex) {
+        return build(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "El cuerpo de la petición debe ser JSON (application/json)");
+    }
+
+    /** El cliente no acepta JSON (406): sin cuerpo, porque no hay un formato que acepte. */
+    @ExceptionHandler(HttpMediaTypeNotAcceptableException.class)
+    public ResponseEntity<Void> handleMediaTypeNotAcceptable(HttpMediaTypeNotAcceptableException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_ACCEPTABLE).build();
+    }
+
+    /**
+     * Dos cambios de la misma tarea (o historia) se cruzaron y la base de datos canceló uno para no bloquearse (409):
+     * basta con repetirlo.
+     */
+    @ExceptionHandler(PessimisticLockingFailureException.class)
+    public ResponseEntity<ErrorResponse> handleLockFailure(PessimisticLockingFailureException ex) {
+        log.warn("Bloqueo cancelado por la base de datos: {}", ex.getMostSpecificCause().getMessage());
+        return build(HttpStatus.CONFLICT, "Otra persona estaba cambiando lo mismo. Intenta de nuevo");
+    }
+
     @ExceptionHandler(PropertyReferenceException.class)
     public ResponseEntity<ErrorResponse> handlePropertyReference(PropertyReferenceException ex) {
         return build(HttpStatus.BAD_REQUEST, "No se puede ordenar por '" + ex.getPropertyName() + "'");
@@ -117,7 +157,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ErrorResponse> handleDataIntegrity(DataIntegrityViolationException ex) {
-        log.warn("Violación de integridad de datos: {}", ex.getMostSpecificCause().getMessage());
+        // Solo la restricción: el detalle de PostgreSQL trae los valores («Key (email)=(…)»), datos personales
+        log.warn("Violación de integridad de datos: {}", constraintName(ex));
         return build(HttpStatus.CONFLICT, "La operación entra en conflicto con datos existentes");
     }
 
@@ -133,8 +174,24 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpected(Exception ex) {
+        // Otras excepciones de Spring MVC ya traen su estado (4xx): no son errores del servidor
+        if (ex instanceof org.springframework.web.ErrorResponse web && web.getStatusCode().is4xxClientError()) {
+            HttpStatus status = HttpStatus.valueOf(web.getStatusCode().value());
+            return build(status, "La petición no es válida");
+        }
         log.error("Error inesperado", ex);
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "Ocurrió un error inesperado");
+    }
+
+    /** Nombre de la restricción violada (por ejemplo {@code uk_users_email}), o el tipo de error si no se conoce. */
+    static String constraintName(DataIntegrityViolationException ex) {
+        for (Throwable cause = ex; cause != null; cause = cause.getCause()) {
+            if (cause instanceof org.hibernate.exception.ConstraintViolationException hibernate
+                    && hibernate.getConstraintName() != null) {
+                return hibernate.getConstraintName();
+            }
+        }
+        return ex.getMostSpecificCause().getClass().getSimpleName();
     }
 
     private ResponseEntity<ErrorResponse> build(HttpStatus status, String message) {

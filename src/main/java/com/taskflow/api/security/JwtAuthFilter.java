@@ -13,9 +13,12 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.Optional;
 
 /**
- * Lee el header {@code Authorization: Bearer <token>} y, si el token es válido, autentica la petición.
+ * Lee el header {@code Authorization: Bearer <token>} y, si el token es válido, autentica la petición. Un token
+ * emitido antes del último cambio de contraseña, o de una cuenta desactivada o eliminada, no vale
+ * ({@link CredentialsGuard}).
  */
 @Component
 @RequiredArgsConstructor
@@ -27,6 +30,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final JwtService jwtService;
+    private final CredentialsGuard credentialsGuard;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
@@ -34,12 +38,17 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         String header = request.getHeader(HttpHeaders.AUTHORIZATION);
         if (header != null && header.startsWith(BEARER_PREFIX)) {
             String token = header.substring(BEARER_PREFIX.length()).trim();
-            jwtService.parse(token).ifPresentOrElse(principal -> {
+            Optional<UserPrincipal> principal = jwtService.parse(token)
+                    .filter(parsed -> credentialsGuard.accepts(parsed.principal().getId(), parsed.issuedAt()))
+                    .map(AccessToken::principal);
+            if (principal.isPresent()) {
                 var authentication = new UsernamePasswordAuthenticationToken(
-                        principal, null, principal.getAuthorities());
+                        principal.get(), null, principal.get().getAuthorities());
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authentication);
-            }, () -> request.setAttribute(INVALID_TOKEN_ATTRIBUTE, true));
+            } else {
+                request.setAttribute(INVALID_TOKEN_ATTRIBUTE, true);
+            }
         }
         chain.doFilter(request, response);
     }

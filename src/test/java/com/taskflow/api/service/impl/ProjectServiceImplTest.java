@@ -8,7 +8,10 @@ import com.taskflow.api.entity.ProjectMember;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.Workspace;
 import com.taskflow.api.entity.enums.ProjectColor;
+import com.taskflow.api.config.AppProperties;
 import com.taskflow.api.mapper.ProjectMapper;
+import com.taskflow.api.repository.IssueRepository;
+import com.taskflow.api.repository.ProjectCounts;
 import com.taskflow.api.repository.IssueTemplateRepository;
 import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.ProjectRepository;
@@ -19,8 +22,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -53,6 +59,10 @@ class ProjectServiceImplTest {
     private ResourceLookup lookup;
     @Mock
     private ProjectMapper projectMapper;
+    @Mock
+    private IssueRepository issueRepository;
+    @Spy
+    private AppProperties properties = new AppProperties(null, null, "http://localhost:5173", "America/Bogota", null);
 
     @InjectMocks
     private ProjectServiceImpl projectService;
@@ -146,5 +156,29 @@ class ProjectServiceImplTest {
 
         verify(projectMemberRepository).delete(member);
         verify(templateRepository).removeAssignee(project.getId(), userId);
+        // Y de sus tareas: ya no puede ser asignada ni recibir sus avisos
+        verify(issueRepository).removeAssigneeInProject(project.getId(), userId);
+    }
+
+    @Test
+    void losContadoresSeCalculanEnUnaSolaConsultaConLaFechaDeLaZonaDeLaAplicacion() {
+        Workspace workspace = new Workspace();
+        workspace.setId(UUID.randomUUID());
+        Project web = new Project();
+        web.setId(UUID.randomUUID());
+        Project app = new Project();
+        app.setId(UUID.randomUUID());
+        when(lookup.workspace(SLUG)).thenReturn(workspace);
+        UUID pmId = UUID.randomUUID();
+        when(projectAccess.projects(workspace, pmId)).thenReturn(List.of(web, app));
+        LocalDate today = LocalDate.now(ZoneId.of("America/Bogota"));
+        when(projectRepository.countIssues(List.of(web.getId(), app.getId()), today))
+                .thenReturn(List.<Object[]>of(new Object[] {web.getId(), 7L, 4L, 1L, 2L, 1L}));
+
+        projectService.getProjects(SLUG, pmId);
+
+        verify(projectMapper).toResponse(web, new ProjectCounts(web.getId(), 7, 4, 1, 2, 1));
+        // Sin tareas no aparece en la consulta: todo en cero
+        verify(projectMapper).toResponse(app, ProjectCounts.empty(app.getId()));
     }
 }

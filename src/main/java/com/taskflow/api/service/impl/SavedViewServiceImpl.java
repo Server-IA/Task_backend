@@ -141,7 +141,11 @@ public class SavedViewServiceImpl implements SavedViewService {
                     project.getId(), userId), request.personal(), "tus vistas personales");
         }
         viewRepository.flush();
-        return visible(project, userId);
+        // Reordenar no cambia los filtros: sin issueCount (null), para no repetir un conteo por vista en cada
+        // arrastre. El listado (GET) los trae.
+        return viewRepository.findVisible(project.getId(), userId).stream()
+                .map(view -> toResponse(view, userId, false))
+                .toList();
     }
 
     /**
@@ -213,8 +217,14 @@ public class SavedViewServiceImpl implements SavedViewService {
 
     /** {@code issueCount}: una consulta de conteo por vista, con los mismos filtros que el listado de tareas. */
     private SavedViewResponse toResponse(SavedView view, UUID userId) {
-        long issueCount = issueRepository.count(
-                IssueSpecifications.matching(view.getProject().getId(), issueFilter(view.getFilters())));
+        return toResponse(view, userId, true);
+    }
+
+    private SavedViewResponse toResponse(SavedView view, UUID userId, boolean withCount) {
+        Long issueCount = withCount
+                ? issueRepository.count(
+                        IssueSpecifications.matching(view.getProject().getId(), issueFilter(view.getFilters())))
+                : null;
         return projectMapper.toSavedViewResponse(view, view.getOwner().getId().equals(userId), issueCount);
     }
 }

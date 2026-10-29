@@ -44,9 +44,13 @@ docker compose up -d          # PostgreSQL 16 (5432) y Mailpit (bandeja de corre
 | `JWT_SECRET` | Clave para firmar los JWT (≥ 32 caracteres). Generar una con `openssl rand -base64 48` |
 | `MAIL_PROVIDER` | `smtp` (Mailpit en local, o Brevo/Gmail) o `resend` (producción). Por defecto `resend` |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_AUTH`, `SMTP_STARTTLS` | Servidor SMTP. Los valores de `.env.example` son los de Mailpit (`localhost:1025`, sin autenticación) |
-| `RESEND_API_KEY` | API key de Resend (solo con `MAIL_PROVIDER=resend`). **Si está vacía**, los correos no se envían y los enlaces se imprimen en el log de la API |
+| `RESEND_API_KEY` | API key de Resend (solo con `MAIL_PROVIDER=resend`). **Si está vacía**, los correos no se envían. Con un `FRONTEND_URL` que no es localhost (producción) la API **no arranca** sin ella |
+| `MAIL_LOG_LINKS` | `true`/`false`: escribir en el log los enlaces de los correos que no salen (verificar, restablecer contraseña, invitar). Son **secretos**: quien lea el log puede tomar la cuenta. Vacío (por defecto): solo si `FRONTEND_URL` es localhost, para probar en local sin proveedor de correo |
 | `MAIL_FROM` | Remitente. Con Resend debe ser de un **dominio verificado**; sin él, Resend solo permite `onboarding@resend.dev` y únicamente hacia el correo dueño de la cuenta |
 | `FRONTEND_URL` | Origen permitido por CORS y base de los enlaces de los correos (por defecto `http://localhost:5173`) |
+| `FORWARD_HEADERS_STRATEGY` | `none` (por defecto) o `native` detrás de un proxy (Dokploy/Traefik): ver [Docker / despliegue](#docker--despliegue) |
+| `SPRINGDOC_ENABLED` | Swagger UI y `/v3/api-docs` (por defecto `true`; el frontend genera sus tipos con `/v3/api-docs`). `false` los apaga |
+| `NOTIFICATION_RETENTION_DAYS`, `MAINTENANCE_CRON` | Limpieza diaria: notificaciones leídas de más de 90 días, tokens vencidos o usados (por defecto a las 3:30, `0 30 3 * * *`, en `app.timezone`) |
 
 El archivo `.env` está en `.gitignore`; nunca se suben secretos.
 
@@ -123,7 +127,8 @@ Todas las respuestas de error tienen la misma forma (`errors` solo aparece en va
 | 401 | Sin token, o `"Token inválido o expirado"` → llamar a `/auth/refresh` |
 | 403 | Sin permiso, o email sin verificar en el login |
 | 404 | Recurso no encontrado |
-| 409 | Conflicto (slug, identificador o email duplicado, estado con issues…) |
+| 409 | Conflicto (slug, identificador o email duplicado, estado con issues…). Algunos traen `code`: `STORY_CLOSED`, `DESCRIPTION_CONFLICT`, `WORKSPACE_LIMIT` |
+| 415 | El cuerpo no es JSON (`Content-Type` distinto de `application/json`) |
 | 429 | Rate limit: leer la cabecera `Retry-After` (segundos) y mostrarlo con Sonner |
 
 ### Autenticación
@@ -141,13 +146,22 @@ Todas las respuestas de error tienen la misma forma (`errors` solo aparece en va
 
 `AuthResponse`: `{ accessToken, refreshToken, tokenType: "Bearer", expiresIn: 900, user }`.
 
-- Contraseña: 8–72 caracteres con al menos una letra y un número.
+- Contraseña: 8–72 caracteres con al menos una letra y un número, y como mucho **72 bytes** (el límite
+  de BCrypt: con tildes, ñ o emojis caben menos de 72 caracteres; si no, 400).
 - El **access token dura 15 min** y el **refresh token 7 días**. Cada refresh **rota** el token:
   hay que guardar el nuevo. Si se reutiliza un refresh token ya usado, se cierran todas las
   sesiones del usuario (protección contra robo).
 - Login sin verificar el email → `403 "Debes verificar tu correo antes de iniciar sesión"`.
 - Rate limit por IP: login 5/min, registro 3/10 min, olvidé mi contraseña y reenviar
-  verificación 3/15 min.
+  verificación 3/15 min (la ruta se compara decodificada: `/auth/%6Cogin` cuenta como login).
+- Rate limit por cuenta: 10 contraseñas incorrectas cada 15 min para un mismo correo, desde cualquier IP
+  (después, 429 con `Retry-After`). Cambiar la contraseña (`PATCH /users/me/password`): 5 intentos cada
+  15 min.
+- Cambiar o restablecer la contraseña **invalida los access tokens emitidos antes** (no solo los refresh
+  tokens): las demás sesiones reciben 401 «Token inválido o expirado» en su siguiente petición y, como su
+  refresh token ya no existe, vuelven al login. La sesión que cambió la contraseña recibe un par nuevo.
+- El correo de cada operación sale **después** de confirmarla; si el proveedor de correo falla o su cola
+  está llena, la operación (login, registro, invitación…) no falla.
 
 **Páginas que debe tener el front** (los correos enlazan a ellas):
 
@@ -176,14 +190,14 @@ backend responde 400 si se usan.
 
 | Método | Ruta | Permiso |
 |---|---|---|
-| GET / POST | `/workspaces` | Mis workspaces (con `myRole`) / crear (`{ name, slug? }`) |
+| GET / POST | `/workspaces` | Mis workspaces (con `myRole`) / crear (`{ name, slug? }`; como mucho 10 propios, si no 409 `code: "WORKSPACE_LIMIT"`) |
 | GET | `/workspaces/{slug}` | Miembro |
 | PATCH | `/workspaces/{slug}` | Project manager |
 | DELETE | `/workspaces/{slug}` | Project manager |
 | GET | `/workspaces/{slug}/members` | Miembro |
 | PATCH | `/workspaces/{slug}/members/{userId}` | Project manager (`{ role: "OWNER" \| "MEMBER" }`) |
 | DELETE | `/workspaces/{slug}/members/{userId}` | Project manager, o uno mismo para salir |
-| POST / GET | `/workspaces/{slug}/invitations` | Project manager: invitar (`{ email }`, entra como `MEMBER`) / pendientes |
+| POST / GET | `/workspaces/{slug}/invitations` | Project manager: invitar (`{ email }`, entra como `MEMBER`; 20 invitaciones por hora por persona y 3 por hora a un mismo correo, si no 429) / pendientes |
 | DELETE | `/workspaces/{slug}/invitations/{invitationId}` | Project manager: cancelar |
 | GET | `/invitations/{token}` | Ver invitación (**público**, sin sesión) |
 | POST | `/invitations/{token}/accept` | Aceptar (con sesión del email invitado) |
@@ -290,21 +304,38 @@ tareas (sus hijas por `parentId`); los bugs hijos de una historia son sus «bugs
 - **Avance automático**: cuando una de sus tareas entra a un estado `STARTED` y la historia sigue en
   Backlog o Todo, pasa sola al primer estado `STARTED` (historial `STORY_AUTO_STATE` sin autor, con
   `oldValue: "Luis empezó WEB-41"` y `newValue` el estado nuevo).
-- `readyForReview` («lista para revisar»): abierta, con al menos una tarea, todas completadas o canceladas
-  y ningún bug ligado abierto. El estado no cambia; se avisa una vez a los project managers con
-  `STORY_READY` (sin autor) y la marca se borra si se reabre una tarea o llega una tarea o un bug abierto.
+- `readyForReview` («lista para revisar»): abierta, con al menos una tarea **completada**, todas completadas
+  o canceladas y ningún bug ligado abierto (si todas sus tareas se cancelaron, no está lista). El estado no
+  cambia; se avisa una vez a los project managers con `STORY_READY` (sin autor) y la marca se borra si se
+  reabre una tarea o llega una tarea o un bug abierto. Reabrir una historia que ya está lista no vuelve a
+  avisar; si no lo está, avisará cuando lo esté. Convertir en historia una tarea con hijas la revisa en el
+  acto.
+- Eliminar una historia es **solo del project manager** (403 «Solo el project manager elimina historias»),
+  aunque la haya creado otra persona cuando era tarea.
 - Cerrar (pasar a `COMPLETED`/`CANCELLED`) o reabrir una historia es del project manager por cualquier
   camino (`PATCH`, `/move`, `/close`, `/reopen`; si no, 403 «Solo el project manager cierra la historia»).
   Se guarda `closedAt` y `closedBy`.
-- Agregar una `TASK` a una historia cerrada (crear con `parentId` o cambiar el padre) responde **409** con
-  `code: "STORY_CLOSED"` salvo que llegue `reopenParent: true` (solo PM: la reabre). Un `BUG` se liga sin
-  reabrirla. `relatesToId` en el `POST /issues` deja la tarea nueva relacionada (`RELATES`) con esa tarea
+- Una `TASK` no vuelve a ser trabajo abierto de una historia cerrada sin reabrirla. Responde **409** con
+  `code: "STORY_CLOSED"` salvo que llegue `reopenParent: true` (solo el PM: la reabre y queda en su
+  historial; un miembro recibe 403 «Solo el project manager reabre la historia»):
+  - agregarle una `TASK` (crear con `parentId`, o cambiar el padre con `PATCH`);
+  - convertir en `TASK` (`PATCH { type: "TASK" }`) un hijo suyo (un bug, por ejemplo);
+  - sacar una `TASK` suya de un estado completado o cancelado a uno abierto, por `PATCH { stateId }` o por
+    `PATCH /move` (que también acepta `reopenParent`).
+
+  Un `BUG` se liga (o se reabre) sin reabrirla. Moverse entre estados cerrados, o editar otros campos, no
+  pide nada. `relatesToId` en el `POST /issues` deja la tarea nueva relacionada (`RELATES`) con esa tarea
   en la misma transacción («crear tarea relacionada»).
+- Una historia no puede ser hija de otra tarea (400 `STORY_AS_CHILD`); se valida solo cuando la petición
+  cambia el tipo o el padre.
 - Listado: `?type=TASK&type=BUG` (sin `type`, todos). Las vistas guardadas sin `type` muestran tareas y
   bugs; `groupBy` acepta además `type` (lista) y `story` (carriles del tablero).
 - Las tareas de un proyecto que cuentan (`issueCount`, `openIssueCount`, `overdueIssueCount`, el avance de
-  ciclos y módulos, las estadísticas y la daily) son el trabajo: tareas y bugs, no las historias. El
-  proyecto trae además `openStoryCount` y `unsplitStoryCount` («2 sin partir»).
+  ciclos y módulos, la vista previa y las cuentas del cierre de un ciclo, el resumen de la retrospectiva, el
+  resumen de actividad, las estadísticas y la daily) son el trabajo: tareas y bugs, no las historias. Las
+  canceladas no suman al total del avance (9 hechas y 1 cancelada = 9/9). El proyecto trae además
+  `openStoryCount` y `unsplitStoryCount` («2 sin partir»). «Vencida» (`overdueIssueCount`) usa el día de
+  `app.timezone`.
 
 **Dependencias** (`relations`): `type` = `BLOCKS` (esta tarea bloquea a `issueId`), `BLOCKED_BY`
 (`issueId` bloquea a esta; se guarda como el `BLOCKS` inverso) o `RELATES` (simétrica). La otra tarea
@@ -364,8 +395,12 @@ estado con `?state=`), agrupar por `state.id` y ordenar por `sortOrder`. Al solt
 
 ```http
 PATCH /issues/{issueId}/move
-{ "stateId": "<columna destino>", "afterIssueId": "<tarjeta de arriba>", "beforeIssueId": "<tarjeta de abajo>" }
+{ "stateId": "<columna destino>", "afterIssueId": "<tarjeta de arriba>", "beforeIssueId": "<tarjeta de abajo>",
+  "reopenParent": false }
 ```
+
+`reopenParent` (opcional): solo hace falta al sacar una `TASK` de una historia cerrada de una columna
+completada o cancelada a una abierta (sin él, 409 `STORY_CLOSED`; con él, el PM reabre la historia).
 
 `afterIssueId` y `beforeIssueId` son opcionales (sin ninguno, la tarjeta va al final de la
 columna). El backend calcula el nuevo `sortOrder` como el promedio de las vecinas, así que solo se
@@ -426,8 +461,13 @@ terminar se ignoran). Sin ciclo siguiente y con alguna tarea hacia `NEXT_CYCLE` 
 `targetCycleId` que no es del proyecto o es el mismo ciclo → 400, cerrado → 409. Si el ciclo terminaba
 después de hoy, su `endDate` pasa a hoy. Cerrar un ciclo ya cerrado, o que aún no empieza, → 409. Cada
 tarea movida registra `CYCLE` en su historial. Un ciclo cerrado no acepta cambios de nombre ni de
-fechas (la descripción sí) ni tareas nuevas → 409. `startRetro: true` abre la retrospectiva y avisa a
-los miembros del proyecto (notificación `RETRO_STARTED`, menos a quien la abre; solo en la app).
+fechas (la descripción sí), ni tareas nuevas, ni quitarle tareas → 409. Una tarea de un ciclo cerrado sí
+puede agregarse a otro ciclo (sale del cerrado y su historial registra `CYCLE` «Sprint 1 → Sprint 2»); el
+resumen del ciclo cerrado no cambia porque se guarda al cerrarlo. Las historias abiertas del ciclo se
+mueven con el resto, pero no cuentan en `movedToCycle`/`movedToBacklog` ni en la vista previa. Dos
+cierres a la vez (doble clic) se ejecutan en fila: el segundo recibe 409. `startRetro: true` abre la
+retrospectiva y avisa a los miembros del proyecto (notificación `RETRO_STARTED`, menos a quien la abre;
+solo en la app).
 
 ### Retrospectiva
 
@@ -456,8 +496,10 @@ Base: `/workspaces/{slug}/projects/{projectId}/cycles/{cycleId}/retro`.
 
 - Columnas: `WENT_WELL` «Qué salió bien», `IMPROVE` «Qué mejorar», `ACTION` «Acciones». Notas en orden
   de creación.
-- `summary`: `totalCount` = tareas que siguen en el ciclo + las que movió el cierre; `carriedTo*`
-  salen de lo que hizo el cierre.
+- `summary`: tareas y bugs (sin historias ni canceladas). En un ciclo cerrado es la foto del cierre
+  (`completedCount`, `totalCount` = completadas + las que movió el cierre, `cycleTimeDays`), que no cambia
+  si después una tarea se reabre o pasa a otro ciclo; en uno abierto (o cerrado antes de esta versión), se
+  calcula con las tareas que están en él. `carriedTo*` salen de lo que hizo el cierre.
 - Votos: uno por nota y 5 por persona en cada retro (409 si ya votaste o no te quedan). Quitar un voto
   que no existe no cambia nada.
 - Crear, editar, borrar y votar solo con la retro abierta y sin terminar (409).
@@ -512,7 +554,8 @@ manager (403).
 **Ordenar vistas** (`PUT /views/order`): `shared` = ids de **todas** las vistas compartidas en el
 nuevo orden (solo el project manager, si no 403); `personal` = ids de **todas** mis vistas personales.
 Al menos una de las dos (400); cada lista debe tener exactamente las vistas de su grupo, sin repetir
-(400). Devuelve las vistas visibles, como el `GET`.
+(400). Devuelve las vistas visibles, como el `GET`, pero con `issueCount: null` (el orden no cambia los
+filtros: hay que conservar los conteos del listado; así arrastrar no repite un conteo por vista).
 
 ### Estadísticas, mi trabajo, actividad y búsqueda
 
@@ -672,11 +715,16 @@ comentario se borró). Tipos (`type`):
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| GET | `/notifications?unread=false&type=&page=0&size=20` | Mis notificaciones (más recientes primero); `type` filtra (se puede repetir; sin `type`, todas) |
+| GET | `/notifications?unread=false&type=&page=0&size=20` | Mis notificaciones (más recientes primero); `type` filtra (se puede repetir; sin `type`, todas). Solo se ordena por `createdAt` (otro `sort`, 400) |
 | GET | `/notifications/unread-count` | `{ count }` para el badge |
 | GET | `/notifications/counts` | `{ unread, unreadMentions, mentions }` para las pestañas de la bandeja |
 | PATCH | `/notifications/{id}/read` | Marcar como leída |
 | POST | `/notifications/read-all` | Marcar todas como leídas |
+
+Las notificaciones de un proyecto que ya no puedes ver (te quitaron de él o del workspace) no aparecen ni
+cuentan. Al quitar a alguien de un proyecto o del workspace deja de estar asignado a sus tareas, y los
+avisos de comentarios y desbloqueos solo llegan a quien todavía puede ver la tarea. Las leídas de hace más
+de 90 días se borran.
 
 ---
 
@@ -731,5 +779,16 @@ Detalles a tener en cuenta:
 ## Docker / despliegue
 
 El `Dockerfile` (multi-stage, Java 21) queda listo para desplegar en Dokploy más adelante. El
-rate limiting guarda los contadores en memoria (una sola instancia). Detrás de un proxy habrá que
-activar `server.forward-headers-strategy` para que la IP del cliente sea la real.
+rate limiting guarda los contadores en memoria (una sola instancia; los que llevan sin usarse más que su
+periodo se descartan).
+
+**Detrás de Dokploy/Traefik**: definir `FORWARD_HEADERS_STRATEGY=native`. Sin eso, la API ve la IP del
+proxy en todas las peticiones: todos los usuarios comparten el mismo límite de login (5 por minuto entre
+todos) y el aviso de inicio de sesión muestra la IP del proxy. Con `native`, Tomcat toma la IP de
+`X-Forwarded-For` solo si la conexión viene de una red interna (10.x, 172.16–31.x, 192.168.x, 127.x: el
+proxy en la red de Docker), así un cliente no puede falsearla. No usar `native` si la API queda expuesta
+directamente a internet sin proxy.
+
+**Producción**, además: `FRONTEND_URL` con el dominio real, `MAIL_PROVIDER=resend` con su
+`RESEND_API_KEY` (sin ella la API no arranca) y `MAIL_LOG_LINKS` vacío o `false` (los enlaces de los
+correos nunca van al log). `SPRINGDOC_ENABLED=false` si no se quiere publicar Swagger.

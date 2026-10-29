@@ -7,9 +7,13 @@ import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.Workspace;
 import com.taskflow.api.entity.WorkspaceInvitation;
 import com.taskflow.api.entity.enums.WorkspaceRole;
+import com.taskflow.api.exception.TooManyRequestsException;
 import com.taskflow.api.mapper.WorkspaceMapper;
+import com.taskflow.api.ratelimit.RateLimitRule;
+import com.taskflow.api.ratelimit.RateLimitService;
 import com.taskflow.api.repository.WorkspaceInvitationRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -19,6 +23,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -38,21 +45,50 @@ class InvitationServiceImplTest {
     @Mock
     private EmailNotifier emailNotifier;
 
-    @Test
-    void laPersonaInvitadaEntraSiempreComoMiembro() {
+    private InvitationServiceImpl invitationService;
+    private final User pm = new User();
+
+    @BeforeEach
+    void setUp() {
         AppProperties properties = new AppProperties(null, null, "http://localhost:5173", "America/Bogota",
                 new AppProperties.Tokens(24, 60, 7));
-        InvitationServiceImpl invitationService = new InvitationServiceImpl(invitationRepository, memberRepository,
-                lookup, workspaceMapper, emailNotifier, properties);
+        invitationService = new InvitationServiceImpl(invitationRepository, memberRepository,
+                lookup, workspaceMapper, emailNotifier, properties, new RateLimitService());
         Workspace workspace = new Workspace();
         workspace.setId(UUID.randomUUID());
         workspace.setName("Mi equipo");
-        User pm = new User();
         pm.setId(UUID.randomUUID());
         pm.setFullName("Ana");
         when(lookup.workspace(SLUG)).thenReturn(workspace);
         when(lookup.user(pm.getId())).thenReturn(pm);
+    }
 
+    @Test
+    void unMismoCorreoNoRecibeUnaAvalanchaDeInvitaciones() {
+        for (int i = 0; i < RateLimitRule.INVITE_RECIPIENT.getCapacity(); i++) {
+            invitationService.invite(SLUG, pm.getId(), new InviteMemberRequest("victima@test.com"));
+        }
+
+        assertThatThrownBy(() -> invitationService.invite(SLUG, pm.getId(),
+                new InviteMemberRequest("Victima@Test.com")))
+                .isInstanceOf(TooManyRequestsException.class);
+        verify(emailNotifier, times(RateLimitRule.INVITE_RECIPIENT.getCapacity()))
+                .sendWorkspaceInvitation(any(), any(), any(), any());
+    }
+
+    @Test
+    void cadaPersonaTieneUnLimiteDeInvitacionesPorHora() {
+        for (int i = 0; i < RateLimitRule.INVITE_SENDER.getCapacity(); i++) {
+            invitationService.invite(SLUG, pm.getId(), new InviteMemberRequest("persona" + i + "@test.com"));
+        }
+
+        assertThatThrownBy(() -> invitationService.invite(SLUG, pm.getId(),
+                new InviteMemberRequest("otra@test.com")))
+                .isInstanceOf(TooManyRequestsException.class);
+    }
+
+    @Test
+    void laPersonaInvitadaEntraSiempreComoMiembro() {
         invitationService.invite(SLUG, pm.getId(), new InviteMemberRequest("  Beto@Test.com "));
 
         ArgumentCaptor<WorkspaceInvitation> saved = ArgumentCaptor.forClass(WorkspaceInvitation.class);

@@ -1,5 +1,6 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.config.AppProperties;
 import com.taskflow.api.dto.request.AddProjectMemberRequest;
 import com.taskflow.api.dto.request.CreateProjectRequest;
 import com.taskflow.api.dto.request.UpdateProjectRequest;
@@ -16,7 +17,9 @@ import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.ProjectMapper;
+import com.taskflow.api.repository.IssueRepository;
 import com.taskflow.api.repository.IssueTemplateRepository;
+import com.taskflow.api.repository.ProjectCounts;
 import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.ProjectRepository;
 import com.taskflow.api.repository.StateRepository;
@@ -26,8 +29,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -42,12 +49,14 @@ public class ProjectServiceImpl implements ProjectService {
     private final ProjectAccess projectAccess;
     private final ResourceLookup lookup;
     private final ProjectMapper projectMapper;
+    private final IssueRepository issueRepository;
+    private final AppProperties properties;
 
     @Override
     @Transactional(readOnly = true)
     public List<ProjectResponse> getProjects(String slug, UUID userId) {
         Workspace workspace = lookup.workspace(slug);
-        return projectAccess.projects(workspace, userId).stream().map(projectMapper::toResponse).toList();
+        return toResponses(projectAccess.projects(workspace, userId));
     }
 
     @Override
@@ -72,13 +81,14 @@ public class ProjectServiceImpl implements ProjectService {
         stateRepository.saveAll(defaultStates(project));
         templateRepository.saveAll(DefaultTemplates.forProject(project));
         projectMemberRepository.save(new ProjectMember(project, lookup.user(userId)));
-        return projectMapper.toResponse(project);
+        // Recién creado, no tiene tareas
+        return projectMapper.toResponse(project, ProjectCounts.empty(project.getId()));
     }
 
     @Override
     @Transactional(readOnly = true)
     public ProjectResponse get(String slug, UUID projectId) {
-        return projectMapper.toResponse(lookup.project(slug, projectId));
+        return toResponse(lookup.project(slug, projectId));
     }
 
     @Override
@@ -107,7 +117,7 @@ public class ProjectServiceImpl implements ProjectService {
             project.setColor(request.color());
         }
         // El flush ejecuta @PreUpdate para que la respuesta lleve el updatedAt nuevo.
-        return projectMapper.toResponse(projectRepository.saveAndFlush(project));
+        return toResponse(projectRepository.saveAndFlush(project));
     }
 
     @Override
@@ -148,6 +158,34 @@ public class ProjectServiceImpl implements ProjectService {
                 .orElseThrow(() -> new ResourceNotFoundException("El usuario no es miembro del proyecto"));
         projectMemberRepository.delete(member);
         templateRepository.removeAssignee(project.getId(), userId);
+        // Ya no puede ser asignada: deja de serlo en las tareas del proyecto (y de recibir sus avisos)
+        issueRepository.removeAssigneeInProject(project.getId(), userId);
+    }
+
+    private ProjectResponse toResponse(Project project) {
+        return toResponses(List.of(project)).getFirst();
+    }
+
+    /** Con sus contadores, calculados para todos los proyectos en una sola consulta. */
+    private List<ProjectResponse> toResponses(List<Project> projects) {
+        if (projects.isEmpty()) {
+            return List.of();
+        }
+        LocalDate today = LocalDate.now(ZoneId.of(properties.timezone()));
+        Map<UUID, ProjectCounts> counts = new HashMap<>();
+        for (Object[] row : projectRepository.countIssues(projects.stream().map(Project::getId).toList(), today)) {
+            UUID id = (UUID) row[0];
+            counts.put(id, new ProjectCounts(id, intValue(row[1]), intValue(row[2]), intValue(row[3]),
+                    intValue(row[4]), intValue(row[5])));
+        }
+        return projects.stream()
+                .map(project -> projectMapper.toResponse(project,
+                        counts.getOrDefault(project.getId(), ProjectCounts.empty(project.getId()))))
+                .toList();
+    }
+
+    private static int intValue(Object value) {
+        return value == null ? 0 : ((Number) value).intValue();
     }
 
     /** Backlog, Todo, In Progress, Done y Cancelled, como en Plane. */

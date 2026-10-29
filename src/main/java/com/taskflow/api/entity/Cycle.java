@@ -60,6 +60,21 @@ public class Cycle extends BaseEntity {
     @Column(name = "carried_to_backlog", nullable = false)
     private int carriedToBacklog;
 
+    /**
+     * Foto del cierre para el resumen de la retrospectiva: tareas y bugs completados, el total (completados más los
+     * que pasaron a otro ciclo o al backlog; sin historias ni canceladas) y la mediana del tiempo de ciclo. Así el
+     * resumen no cambia si después una tarea se reabre o pasa a otro ciclo. {@code null} en los ciclos cerrados antes
+     * de V25 (el resumen se calcula con las tareas que siguen en el ciclo).
+     */
+    @Column(name = "closed_completed_count")
+    private Integer closedCompletedCount;
+
+    @Column(name = "closed_total_count")
+    private Integer closedTotalCount;
+
+    @Column(name = "closed_cycle_time_days")
+    private Double closedCycleTimeDays;
+
     /** La retrospectiva está abierta desde aquí (al cerrar el ciclo o cuando la abre el project manager). */
     @Column(name = "retro_started_at")
     private Instant retroStartedAt;

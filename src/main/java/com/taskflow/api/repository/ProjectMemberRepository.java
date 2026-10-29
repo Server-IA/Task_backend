@@ -15,6 +15,14 @@ public interface ProjectMemberRepository extends JpaRepository<ProjectMember, UU
 
     boolean existsByProjectIdAndUserId(UUID projectId, UUID userId);
 
+    /** El usuario es miembro del proyecto y el proyecto es del workspace indicado. */
+    @Query("""
+            select count(pm) > 0 from ProjectMember pm
+            where pm.project.id = :projectId and pm.project.workspace.slug = :slug and pm.user.id = :userId
+            """)
+    boolean existsMemberInWorkspace(@Param("projectId") UUID projectId, @Param("slug") String slug,
+                                    @Param("userId") UUID userId);
+
     Optional<ProjectMember> findByProjectIdAndUserId(UUID projectId, UUID userId);
 
     @Query("""

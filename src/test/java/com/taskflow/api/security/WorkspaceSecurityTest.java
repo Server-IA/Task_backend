@@ -2,6 +2,7 @@ package com.taskflow.api.security;
 
 import com.taskflow.api.entity.enums.WorkspaceRole;
 import com.taskflow.api.repository.ProjectMemberRepository;
+import com.taskflow.api.repository.ProjectRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +33,9 @@ class WorkspaceSecurityTest {
 
     @Mock
     private ProjectMemberRepository projectMemberRepository;
+
+    @Mock
+    private ProjectRepository projectRepository;
 
     @InjectMocks
     private WorkspaceSecurity workspaceSecurity;
@@ -102,20 +106,30 @@ class WorkspaceSecurityTest {
     }
 
     @Test
-    void miembroSoloAccedeASusProyectos() {
+    void unProyectoDeOtroWorkspaceNoSeAccedeNiSeGestionaDesdeEste() {
+        // Ana es project manager de su workspace (cualquiera puede crear uno) y pide un proyecto de otro
+        when(memberRepository.findRole(SLUG, userId)).thenReturn(Optional.of(WorkspaceRole.OWNER));
+        when(projectRepository.existsInOtherWorkspace(projectId, SLUG)).thenReturn(true);
+
+        assertThat(workspaceSecurity.canAccessProject(SLUG, projectId)).isFalse();
+        assertThat(workspaceSecurity.canManageProject(SLUG, projectId)).isFalse();
+    }
+
+    @Test
+    void miembroSoloAccedeASusProyectosDelWorkspaceDeLaUrl() {
         when(memberRepository.findRole(SLUG, userId)).thenReturn(Optional.of(WorkspaceRole.MEMBER));
-        when(projectMemberRepository.existsByProjectIdAndUserId(projectId, userId)).thenReturn(false);
+        when(projectMemberRepository.existsMemberInWorkspace(projectId, SLUG, userId)).thenReturn(false);
 
         assertThat(workspaceSecurity.canAccessProject(SLUG, projectId)).isFalse();
 
-        when(projectMemberRepository.existsByProjectIdAndUserId(projectId, userId)).thenReturn(true);
+        when(projectMemberRepository.existsMemberInWorkspace(projectId, SLUG, userId)).thenReturn(true);
         assertThat(workspaceSecurity.canAccessProject(SLUG, projectId)).isTrue();
     }
 
     @Test
     void miembroDelProyectoNoPuedeConfigurarlo() {
         when(memberRepository.findRole(SLUG, userId)).thenReturn(Optional.of(WorkspaceRole.MEMBER));
-        lenient().when(projectMemberRepository.existsByProjectIdAndUserId(projectId, userId)).thenReturn(true);
+        lenient().when(projectMemberRepository.existsMemberInWorkspace(projectId, SLUG, userId)).thenReturn(true);
 
         assertThat(workspaceSecurity.canAccessProject(SLUG, projectId)).isTrue();
         // Estados, etiquetas, miembros, ciclos, módulos, editar o borrar el proyecto: solo el project manager.

@@ -18,6 +18,9 @@ public interface WorkspaceRepository extends JpaRepository<Workspace, UUID> {
 
     boolean existsBySlug(String slug);
 
+    /** Workspaces de los que el usuario es el dueño registrado (el límite de workspaces por persona). */
+    long countByOwnerId(UUID ownerId);
+
     /**
      * Busca el workspace bloqueando su fila hasta el final de la transacción. Se usa al cambiar roles o
      * quitar miembros, para que dos cambios simultáneos no dejen el workspace sin project manager.

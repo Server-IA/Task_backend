@@ -33,10 +33,21 @@ class IssueListSortTest {
     }
 
     @Test
-    void otrosOrdenesNoCambian() {
-        Pageable requested = PageRequest.of(0, 20, Sort.by(Sort.Order.asc("dueDate")));
+    void cualquierOtroOrdenTerminaPorNumeroParaQueLasPaginasSeanEstables() {
+        // sortOrder se repite entre columnas (65535 es el primero de cada una): sin desempate, una tarea podía salir
+        // en dos páginas y otra en ninguna
+        assertThat(describe(IssueListSort.withTieBreakers(PageRequest.of(1, 20, Sort.by("sortOrder")))))
+                .isEqualTo("sortOrder,asc sequenceId,asc");
+        assertThat(describe(IssueListSort.withTieBreakers(PageRequest.of(0, 20, Sort.by(Sort.Order.desc("createdAt"))))))
+                .isEqualTo("createdAt,desc sequenceId,asc");
+        assertThat(describe(IssueListSort.withTieBreakers(PageRequest.of(0, 20)))).isEqualTo("sequenceId,asc");
+    }
 
-        assertThat(IssueListSort.withTieBreakers(requested)).isSameAs(requested);
+    @Test
+    void siYaOrdenaPorNumeroNoLoRepite() {
+        Pageable result = IssueListSort.withTieBreakers(PageRequest.of(0, 20, Sort.by(Sort.Order.desc("sequenceId"))));
+
+        assertThat(describe(result)).isEqualTo("sequenceId,desc");
         assertThat(IssueListSort.withTieBreakers(Pageable.unpaged())).isEqualTo(Pageable.unpaged());
     }
 }

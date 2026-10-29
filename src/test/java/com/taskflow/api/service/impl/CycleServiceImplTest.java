@@ -18,6 +18,7 @@ import com.taskflow.api.entity.Project;
 import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.enums.ActivityField;
+import com.taskflow.api.entity.enums.IssueType;
 import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
@@ -155,7 +156,14 @@ class CycleServiceImplTest {
         cycle.getIssues().addAll(Arrays.asList(issues));
         lenient().when(cycleRepository.findByIdAndProjectId(cycle.getId(), project.getId()))
                 .thenReturn(Optional.of(cycle));
+        lenient().when(cycleRepository.findForUpdate(cycle.getId(), project.getId())).thenReturn(Optional.of(cycle));
         return cycle;
+    }
+
+    private Issue story(State state) {
+        Issue story = issue(state);
+        story.setType(IssueType.STORY);
+        return story;
     }
 
     private Cycle closed(Cycle cycle) {
@@ -317,6 +325,58 @@ class CycleServiceImplTest {
         }
 
         @Test
+        void cierraConLaFilaBloqueada() {
+            cycleService.close(SLUG, project.getId(), sprint.getId(), pm.getId(),
+                    closeRequest(CycleMoveTarget.BACKLOG, null, false));
+
+            // Dos cierres a la vez (o agregar una tarea mientras se cierra) van en fila
+            verify(cycleRepository).findForUpdate(sprint.getId(), project.getId());
+        }
+
+        @Test
+        void guardaLaFotoDelCierreParaLaRetrospectiva() {
+            projectCycles(next, sprint);
+
+            cycleService.close(SLUG, project.getId(), sprint.getId(), pm.getId(),
+                    closeRequest(CycleMoveTarget.NEXT_CYCLE, null, false));
+
+            // 1 completada; total = completadas + las 2 que pasaron al siguiente (la cancelada no cuenta)
+            assertThat(sprint.getClosedCompletedCount()).isEqualTo(1);
+            assertThat(sprint.getClosedTotalCount()).isEqualTo(3);
+            assertThat(sprint.getClosedCycleTimeDays()).isEqualTo(2.0);
+        }
+
+        @Test
+        void lasHistoriasSeMuevenConSusTareasPeroNoCuentan() {
+            Issue openStory = story(inProgress);
+            Issue doneStory = story(done);
+            doneStory.setStartedAt(now.minus(Duration.ofDays(30)));
+            doneStory.setCompletedAt(now);
+            sprint.getIssues().addAll(List.of(openStory, doneStory));
+            projectCycles(next, sprint);
+
+            CloseCycleResponse response = cycleService.close(SLUG, project.getId(), sprint.getId(), pm.getId(),
+                    closeRequest(CycleMoveTarget.NEXT_CYCLE, null, false));
+
+            assertThat(next.getIssues()).contains(openStory);
+            assertThat(response.movedToCycle()).isEqualTo(2);
+            assertThat(sprint.getCarriedToCycle()).isEqualTo(2);
+            assertThat(sprint.getClosedCompletedCount()).isEqualTo(1);
+            assertThat(sprint.getClosedCycleTimeDays()).isEqualTo(2.0);
+        }
+
+        @Test
+        void laVistaPreviaNoCuentaLasHistorias() {
+            sprint.getIssues().addAll(List.of(story(inProgress), story(done)));
+            projectCycles(next, sprint);
+
+            CloseCyclePreviewResponse preview = cycleService.closePreview(SLUG, project.getId(), sprint.getId());
+
+            assertThat(preview.completedCount()).isEqualTo(1);
+            assertThat(preview.unfinishedCount()).isEqualTo(2);
+        }
+
+        @Test
         void siLaRetroYaEstabaAbiertaNoVuelveAAvisar() {
             Instant opened = now.minus(Duration.ofHours(1));
             sprint.setRetroStartedAt(opened);
@@ -451,6 +511,35 @@ class CycleServiceImplTest {
                     .isInstanceOf(ConflictException.class)
                     .hasMessage(CycleServiceImpl.CLOSED_ADD_MESSAGE);
             verifyNoInteractions(support, activityService);
+        }
+
+        @Test
+        void noSeLeQuitanTareas() {
+            Issue finished = completedIssue(Duration.ofDays(3), Duration.ofDays(1));
+            sprint.getIssues().add(finished);
+
+            assertThatThrownBy(() -> cycleService.removeIssue(SLUG, project.getId(), sprint.getId(),
+                    finished.getId(), pm.getId()))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessage(CycleServiceImpl.CLOSED_REMOVE_MESSAGE);
+            assertThat(sprint.getIssues()).contains(finished);
+            verifyNoInteractions(activityService);
+        }
+
+        @Test
+        void unaTareaQueSaleDeElHaciaOtroCicloQuedaEnSuHistorial() {
+            Issue reopened = issue(todo);
+            sprint.getIssues().add(reopened);
+            reopened.getCycles().add(sprint);
+            Cycle sprint4 = cycle("Sprint 4", today, today.plusDays(14));
+            when(support.findIssues(project, List.of(reopened.getId()))).thenReturn(List.of(reopened));
+
+            cycleService.addIssues(SLUG, project.getId(), sprint4.getId(), pm.getId(),
+                    new IssueIdsRequest(List.of(reopened.getId())));
+
+            verify(cycleRepository).removeIssuesFromOtherCycles(sprint4.getId(), List.of(reopened.getId()));
+            // «de Sprint 3 a Sprint 4»; el resumen de Sprint 3 no cambia (lo guarda la foto del cierre)
+            verify(activityService).record(reopened, pm, ActivityField.CYCLE, "Sprint 3", "Sprint 4");
         }
 
         @Test

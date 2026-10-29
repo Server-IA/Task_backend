@@ -41,13 +41,19 @@ server:
   port: 8080
   error:
     include-message: never
+  # none (por defecto): la IP del cliente es la de la conexión. Detrás de un proxy (Dokploy/Traefik) usar native: Tomcat
+  # toma la IP real de X-Forwarded-For solo si la conexión viene de una red interna (el proxy), así nadie la falsea.
+  forward-headers-strategy: ${FORWARD_HEADERS_STRATEGY:none}
 
 springdoc:
+  # El frontend genera sus tipos con /v3/api-docs; en producción se puede apagar con SPRINGDOC_ENABLED=false
   swagger-ui:
+    enabled: ${SPRINGDOC_ENABLED:true}
     path: /swagger-ui.html
     operations-sorter: method
     tags-sorter: alpha
   api-docs:
+    enabled: ${SPRINGDOC_ENABLED:true}
     path: /v3/api-docs
 
 app:
@@ -60,9 +66,15 @@ app:
     provider: ${MAIL_PROVIDER:resend}
     resend-api-key: ${RESEND_API_KEY:}
     from: ${MAIL_FROM:TaskFlow <onboarding@resend.dev>}
+    # Escribir en el log los enlaces (secretos) de los correos que no salen. Vacío: solo si FRONTEND_URL es localhost
+    log-links: ${MAIL_LOG_LINKS:}
   frontend-url: ${FRONTEND_URL:http://localhost:5173}
   # Zona horaria usada para mostrar fechas en los correos
   timezone: America/Bogota
+  # Limpieza diaria de tokens vencidos y notificaciones leídas antiguas (MaintenanceJobs)
+  maintenance:
+    cron: ${MAINTENANCE_CRON:0 30 3 * * *}
+    notification-retention-days: ${NOTIFICATION_RETENTION_DAYS:90}
   tokens:
     email-verification-hours: 24
     password-reset-minutes: 60

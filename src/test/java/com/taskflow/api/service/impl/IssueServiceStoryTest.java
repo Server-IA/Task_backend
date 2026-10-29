@@ -592,6 +592,232 @@ class IssueServiceStoryTest {
         }
     }
 
+    /**
+     * Una tarea de una historia cerrada no vuelve a ser trabajo abierto sin que el project manager reabra la historia
+     * (409 {@code STORY_CLOSED}, o {@code reopenParent} y PM), por cualquier camino.
+     */
+    @Nested
+    class TrabajoAbiertoEnUnaHistoriaCerrada {
+
+        private Issue story;
+
+        @BeforeEach
+        void closed() {
+            story = closedStory();
+        }
+
+        private Issue child(IssueType type, State state) {
+            Issue child = issue(type, state);
+            child.setParent(story);
+            return child;
+        }
+
+        private static MoveIssueRequest moveTo(UUID stateId, Boolean reopenParent) {
+            return new MoveIssueRequest(stateId, null, null, reopenParent);
+        }
+
+        private static UpdateIssueRequest stateWithReopen(UUID stateId, Boolean reopenParent) {
+            return new UpdateIssueRequest(null, null, stateId, null, null, null, null, null, null, null, null, null,
+                    null, null, reopenParent);
+        }
+
+        @Test
+        void sacarUnaTareaTerminadaDeHechoPorElTableroResponde409ConCodigo() {
+            Issue task = child(IssueType.TASK, done);
+
+            assertThatThrownBy(() -> issueService.move(SLUG, project.getId(), task.getId(), member.getId(),
+                    moveTo(todo.getId(), null)))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessage(story.getCode() + " está cerrada. Reábrela para volver a abrir esta tarea")
+                    .extracting(error -> ((ApiException) error).getCode())
+                    .isEqualTo(ConflictException.STORY_CLOSED);
+            assertThat(task.getState()).isSameAs(done);
+            verify(issueRepository, never()).saveAndFlush(any());
+        }
+
+        @Test
+        void sacarUnaTareaCanceladaPorElSelectorDeEstadoTambien() {
+            Issue task = child(IssueType.TASK, cancelled);
+
+            assertThatThrownBy(() -> issueService.update(SLUG, project.getId(), task.getId(), member.getId(),
+                    updateState(inProgress.getId())))
+                    .isInstanceOf(ConflictException.class)
+                    .extracting(error -> ((ApiException) error).getCode())
+                    .isEqualTo(ConflictException.STORY_CLOSED);
+        }
+
+        @Test
+        void unMiembroNoPuedeReabrirlaAunqueMandeReopenParent() {
+            Issue task = child(IssueType.TASK, done);
+
+            assertThatThrownBy(() -> issueService.move(SLUG, project.getId(), task.getId(), member.getId(),
+                    moveTo(todo.getId(), true)))
+                    .isInstanceOf(ForbiddenException.class)
+                    .hasMessage("Solo el project manager reabre la historia");
+            assertThat(story.getState()).isSameAs(done);
+        }
+
+        @Test
+        void elProjectManagerLaReabreAlMoverConReopenParent() {
+            Issue task = child(IssueType.TASK, done);
+
+            issueService.move(SLUG, project.getId(), task.getId(), pm.getId(), moveTo(todo.getId(), true));
+
+            assertThat(task.getState()).isSameAs(todo);
+            assertThat(story.getState()).isSameAs(inProgress);
+            assertThat(story.getClosedAt()).isNull();
+            verify(activityService).record(story, pm, ActivityField.STATE, "Done", "In Progress");
+        }
+
+        @Test
+        void elProjectManagerLaReabreAlEditarConReopenParent() {
+            Issue task = child(IssueType.TASK, done);
+
+            issueService.update(SLUG, project.getId(), task.getId(), pm.getId(),
+                    stateWithReopen(inProgress.getId(), true));
+
+            assertThat(task.getState()).isSameAs(inProgress);
+            assertThat(story.getState()).isSameAs(inProgress);
+        }
+
+        @Test
+        void entreEstadosCerradosOSiendoBugNoHaceFaltaReabrirla() {
+            Issue task = child(IssueType.TASK, done);
+            Issue bug = child(IssueType.BUG, done);
+
+            issueService.move(SLUG, project.getId(), task.getId(), member.getId(), moveTo(cancelled.getId(), null));
+            // «Bug después de cerrar»: se reabre sin tocar la historia
+            issueService.move(SLUG, project.getId(), bug.getId(), member.getId(), moveTo(todo.getId(), null));
+
+            assertThat(task.getState()).isSameAs(cancelled);
+            assertThat(bug.getState()).isSameAs(todo);
+            assertThat(story.getState()).isSameAs(done);
+        }
+
+        @Test
+        void convertirEnTareaUnBugDeLaHistoriaCerradaPideReabrirla() {
+            Issue bug = child(IssueType.BUG, todo);
+
+            assertThatThrownBy(() -> issueService.update(SLUG, project.getId(), bug.getId(), member.getId(),
+                    updateType(IssueType.TASK)))
+                    .isInstanceOf(ConflictException.class)
+                    .extracting(error -> ((ApiException) error).getCode())
+                    .isEqualTo(ConflictException.STORY_CLOSED);
+
+            // (sin base de datos el primer intento no se deshace: otro bug para el project manager)
+            Issue other = child(IssueType.BUG, todo);
+            issueService.update(SLUG, project.getId(), other.getId(), pm.getId(),
+                    new UpdateIssueRequest(null, null, null, null, null, null, null, null, null, null, null, null,
+                            null, IssueType.TASK, true));
+            assertThat(other.getType()).isEqualTo(IssueType.TASK);
+            assertThat(story.getState()).isSameAs(inProgress);
+        }
+
+        @Test
+        void editarOtrosCamposDeUnaTareaDeLaHistoriaCerradaNoPideNada() {
+            Issue task = child(IssueType.TASK, done);
+
+            issueService.update(SLUG, project.getId(), task.getId(), member.getId(),
+                    new UpdateIssueRequest("Nuevo título", null, null, null, null, null, null, null, null, null, null,
+                            null, null, null, null));
+
+            assertThat(task.getTitle()).isEqualTo("Nuevo título");
+            assertThat(story.getState()).isSameAs(done);
+        }
+    }
+
+    @Nested
+    class Revision {
+
+        @Test
+        void reabrirUnaHistoriaQueNoEstaListaVuelveAAvisarCuandoLoEste() {
+            Issue story = closedStory();
+            story.setReviewNotified(true);
+            when(issueRepository.countChildrenOf(story.getId())).thenReturn(List.of(
+                    new com.taskflow.api.repository.StoryChildCount(IssueType.TASK, StateGroup.UNSTARTED, 1)));
+
+            issueService.reopenStory(SLUG, project.getId(), story.getId(), pm.getId());
+
+            assertThat(story.isReviewNotified()).isFalse();
+        }
+
+        @Test
+        void reabrirUnaHistoriaYaListaNoVuelveAAvisar() {
+            Issue story = closedStory();
+            when(issueRepository.countChildrenOf(story.getId())).thenReturn(List.of(
+                    new com.taskflow.api.repository.StoryChildCount(IssueType.TASK, StateGroup.COMPLETED, 2)));
+
+            issueService.reopenStory(SLUG, project.getId(), story.getId(), pm.getId());
+
+            assertThat(story.isReviewNotified()).isTrue();
+        }
+
+        @Test
+        void convertirEnHistoriaUnaTareaConHijasLaPoneAlDia() {
+            Issue task = issue(IssueType.TASK, inProgress);
+
+            issueService.update(SLUG, project.getId(), task.getId(), pm.getId(), updateType(IssueType.STORY));
+
+            verify(storyProgress).reconcile(task, pm, null, false);
+        }
+
+        @Test
+        void unaHistoriaQueQuedoConPadreSeSigueEditando() {
+            // Datos viejos (V24): una historia con padre. V25 los limpia, pero editarla no debe fallar
+            Issue parent = issue(IssueType.TASK, todo);
+            Issue story = issue(IssueType.STORY, inProgress);
+            story.setParent(parent);
+
+            issueService.update(SLUG, project.getId(), story.getId(), member.getId(),
+                    new UpdateIssueRequest("Otro título", null, null, IssuePriority.HIGH, null, null, null, null, null,
+                            null, null, null, null, null, null));
+
+            assertThat(story.getTitle()).isEqualTo("Otro título");
+        }
+
+        @Test
+        void soloElProjectManagerEliminaUnaHistoriaAunqueLaHayaCreadoOtro() {
+            Issue story = issue(IssueType.STORY, inProgress);
+            story.setCreatedBy(member);
+
+            assertThatThrownBy(() -> issueService.delete(SLUG, project.getId(), story.getId(), member.getId()))
+                    .isInstanceOf(ForbiddenException.class)
+                    .hasMessage(StoryRules.DELETE_FORBIDDEN);
+            verify(issueRepository, never()).delete(any(Issue.class));
+
+            issueService.delete(SLUG, project.getId(), story.getId(), pm.getId());
+            verify(issueRepository).delete(story);
+        }
+    }
+
+    @Nested
+    class Bloqueos {
+
+        @Test
+        void editarMoverCerrarReabrirYPartirBloqueanLaFilaAntesDeLeerla() {
+            Issue task = issue(IssueType.TASK, todo);
+            Issue story = issue(IssueType.STORY, inProgress);
+            Issue closed = closedStory();
+
+            issueService.update(SLUG, project.getId(), task.getId(), member.getId(),
+                    new UpdateIssueRequest(null, null, null, IssuePriority.HIGH, null, null, null, null, null, null,
+                            null, null, null, null, null));
+            issueService.move(SLUG, project.getId(), task.getId(), member.getId(),
+                    new MoveIssueRequest(inProgress.getId(), null, null));
+            issueService.split(SLUG, project.getId(), story.getId(), pm.getId(),
+                    new SplitStoryRequest(List.of(new SplitItemRequest("Una", null, null, null)), null));
+            issueService.closeStory(SLUG, project.getId(), story.getId(), pm.getId());
+            issueService.reopenStory(SLUG, project.getId(), closed.getId(), pm.getId());
+
+            org.mockito.InOrder order = org.mockito.Mockito.inOrder(issueRepository);
+            order.verify(issueRepository).lockById(task.getId());
+            order.verify(issueRepository).findByIdAndProjectId(task.getId(), project.getId());
+            verify(issueRepository, times(2)).lockById(task.getId());
+            verify(issueRepository, times(2)).lockById(story.getId());
+            verify(issueRepository).lockById(closed.getId());
+        }
+    }
+
     @Nested
     class Partir {
 

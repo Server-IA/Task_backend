@@ -15,7 +15,11 @@ public record SavedViewResponse(
         int position,
         /** {@code true} si la creó el usuario actual. */
         boolean mine,
-        /** Tareas que cumplen sus filtros ahora mismo (las mismas que lista {@code GET /issues} con esos filtros). */
-        long issueCount
+        /**
+         * Tareas que cumplen sus filtros ahora mismo (las mismas que lista {@code GET /issues} con esos filtros).
+         * {@code null} en la respuesta de reordenar ({@code PUT /views/order}), que no cambia los filtros: se conservan
+         * los del listado.
+         */
+        Long issueCount
 ) {
 }

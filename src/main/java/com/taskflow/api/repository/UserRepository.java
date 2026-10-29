@@ -16,6 +16,12 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     boolean existsByEmail(String email);
 
+    @Query("""
+            select new com.taskflow.api.repository.UserCredentialsState(u.active, u.credentialsChangedAt)
+            from User u where u.id = :id
+            """)
+    Optional<UserCredentialsState> findCredentialsState(@Param("id") UUID id);
+
     /**
      * De los usuarios indicados, los que se pueden mencionar en una tarea del proyecto: sus miembros y los project
      * managers del workspace (que ven todos los proyectos).

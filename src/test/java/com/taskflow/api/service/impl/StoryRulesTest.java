@@ -42,6 +42,15 @@ class StoryRulesTest {
     }
 
     @Test
+    void conTodasSusTareasCanceladasNoEstaLista() {
+        // No se hizo nada: no hay una tarea completada
+        assertThat(StoryRules.isReady(StateGroup.STARTED, List.of(count(IssueType.TASK, StateGroup.CANCELLED, 3))))
+                .isFalse();
+        assertThat(StoryRules.isReady(StateGroup.STARTED, List.of(count(IssueType.TASK, StateGroup.CANCELLED, 3),
+                count(IssueType.BUG, StateGroup.COMPLETED, 2)))).isFalse();
+    }
+
+    @Test
     void cerrarOReabrirEsDelProjectManager() {
         assertThat(StoryRules.managerOnlyMessage(StateGroup.STARTED, StateGroup.COMPLETED))
                 .isEqualTo(StoryRules.CLOSE_FORBIDDEN);

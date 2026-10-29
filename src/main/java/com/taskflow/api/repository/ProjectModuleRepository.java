@@ -19,10 +19,11 @@ public interface ProjectModuleRepository extends JpaRepository<ProjectModule, UU
 
     /**
      * Avance de los módulos indicados; un módulo sin issues no aparece en el resultado. Cuenta el trabajo
-     * (tareas y bugs): las historias no.
+     * (tareas y bugs): las historias no, y las canceladas no suman al total.
      */
     @Query("""
-            select m.id as id, count(i) as total,
+            select m.id as id, coalesce(sum(case when i.state.stateGroup <> com.taskflow.api.entity.enums.StateGroup.CANCELLED
+                       then 1 else 0 end), 0) as total,
                    coalesce(sum(case when i.state.stateGroup = :completed then 1 else 0 end), 0) as completed
             from ProjectModule m join m.issues i
             where m.id in :ids and i.type <> com.taskflow.api.entity.enums.IssueType.STORY

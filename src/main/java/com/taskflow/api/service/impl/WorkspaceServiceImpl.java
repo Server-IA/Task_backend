@@ -14,6 +14,7 @@ import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.WorkspaceMapper;
+import com.taskflow.api.repository.IssueRepository;
 import com.taskflow.api.repository.IssueTemplateRepository;
 import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
@@ -31,6 +32,11 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class WorkspaceServiceImpl implements WorkspaceService {
 
+    /** Workspaces que puede crear (y tener como dueño) una persona. */
+    static final int MAX_OWNED_WORKSPACES = 10;
+    static final String WORKSPACE_LIMIT_MESSAGE =
+            "Ya tienes " + MAX_OWNED_WORKSPACES + " workspaces: elimina uno o pide que te inviten a otro";
+
     static final String LAST_MANAGER_MESSAGE =
             "El workspace debe tener al menos un project manager: asigna ese rol a otra persona primero";
 
@@ -38,6 +44,7 @@ public class WorkspaceServiceImpl implements WorkspaceService {
     private final WorkspaceMemberRepository memberRepository;
     private final ProjectMemberRepository projectMemberRepository;
     private final IssueTemplateRepository templateRepository;
+    private final IssueRepository issueRepository;
     private final ResourceLookup lookup;
     private final WorkspaceMapper workspaceMapper;
 
@@ -53,6 +60,9 @@ public class WorkspaceServiceImpl implements WorkspaceService {
     @Transactional
     public WorkspaceResponse create(UUID userId, CreateWorkspaceRequest request) {
         User owner = lookup.user(userId);
+        if (workspaceRepository.countByOwnerId(userId) >= MAX_OWNED_WORKSPACES) {
+            throw new ConflictException(WORKSPACE_LIMIT_MESSAGE, ConflictException.WORKSPACE_LIMIT);
+        }
         String slug = request.slug() != null ? request.slug() : generateUniqueSlug(request.name());
         ensureNotReserved(slug);
         if (workspaceRepository.existsBySlug(slug)) {
@@ -139,6 +149,8 @@ public class WorkspaceServiceImpl implements WorkspaceService {
         }
         templateRepository.removeAssigneeInWorkspace(workspace.getId(), memberUserId);
         projectMemberRepository.deleteAllInWorkspace(workspace.getId(), memberUserId);
+        // Sin acceso al workspace, deja de estar asignado a sus tareas (y de recibir sus avisos)
+        issueRepository.removeAssigneeInWorkspace(workspace.getId(), memberUserId);
         memberRepository.delete(member);
     }
 

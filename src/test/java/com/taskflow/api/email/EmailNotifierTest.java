@@ -9,6 +9,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.task.TaskRejectedException;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionSynchronizationUtils;
 import org.thymeleaf.spring6.SpringTemplateEngine;
 import org.thymeleaf.templatemode.TemplateMode;
 import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver;
@@ -16,6 +20,11 @@ import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver;
 import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 
@@ -102,9 +111,46 @@ class EmailNotifierTest {
     void invitacionMuestraElWorkspaceConSuInicial() {
         notifier.sendWorkspaceInvitation("luis@test.com", "Ana Pérez", "equipo diseño", "tok-789");
 
-        String html = sentHtml("luis@test.com", "Ana Pérez te invitó a equipo diseño en TaskFlow");
+        // El asunto no lleva textos que escribe el usuario (el nombre de quien invita ni el del workspace)
+        String html = sentHtml("luis@test.com", "Te invitaron a un workspace en TaskFlow");
         assertThat(html)
                 .contains(APP + "/invitations/tok-789", "vence en 7 días")
+                .contains("Ana Pérez", "equipo diseño")
                 .contains(">E</td>");
+    }
+
+    @Test
+    void dentroDeUnaTransaccionElCorreoSaleDespuesDelCommit() {
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            notifier.sendEmailVerification(user(), "tok-123");
+            verifyNoInteractions(emailService);
+
+            TransactionSynchronizationUtils.triggerAfterCommit();
+
+            verify(emailService).send(eq("ana@test.com"), eq("Verifica tu cuenta de TaskFlow"), anyString());
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
+    void siLaTransaccionNoSeConfirmaElCorreoNoSale() {
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            notifier.sendPasswordChanged(user());
+            TransactionSynchronizationUtils.triggerAfterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+        verifyNoInteractions(emailService);
+    }
+
+    @Test
+    void unaColaDeCorreosLlenaNoRompeLaOperacion() {
+        doThrow(new TaskRejectedException("cola llena")).when(emailService).send(any(), any(), any());
+
+        assertThatCode(() -> notifier.sendLoginAlert(user(), new ClientInfo("1.2.3.4", "curl"), Instant.now()))
+                .doesNotThrowAnyException();
     }
 }

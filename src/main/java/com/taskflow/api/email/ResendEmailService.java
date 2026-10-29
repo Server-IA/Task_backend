@@ -27,7 +27,7 @@ public class ResendEmailService implements EmailService {
     @Override
     public void send(String to, String subject, String html) {
         if (!properties.mail().enabled()) {
-            log.info("[Correo no enviado: RESEND_API_KEY sin configurar] Para: {} | Asunto: {}", to, subject);
+            log.info("[Correo no enviado: RESEND_API_KEY sin configurar] Asunto: {}", subject);
             return;
         }
 
@@ -39,9 +39,10 @@ public class ResendEmailService implements EmailService {
                 .build();
         try {
             resend.emails().send(params);
-            log.info("Correo enviado a {} ({})", to, subject);
+            log.info("Correo enviado ({})", subject);
+            log.debug("Correo '{}' enviado a {}", subject, to);
         } catch (ResendException e) {
-            log.error("Error enviando correo a {}", to, e);
+            log.error("Error enviando el correo '{}'", subject, e);
         }
     }
 }

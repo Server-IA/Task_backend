@@ -13,7 +13,7 @@ public interface StateService {
 
     StateResponse create(String slug, UUID projectId, CreateStateRequest request);
 
-    StateResponse update(String slug, UUID projectId, UUID stateId, UpdateStateRequest request);
+    StateResponse update(String slug, UUID projectId, UUID stateId, UUID userId, UpdateStateRequest request);
 
     /** Falla si es el último estado del proyecto o si todavía tiene issues. */
     void delete(String slug, UUID projectId, UUID stateId);

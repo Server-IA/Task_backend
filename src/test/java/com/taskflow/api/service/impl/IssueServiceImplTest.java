@@ -633,14 +633,15 @@ class IssueServiceImplTest {
 
         @Test
         @SuppressWarnings("unchecked")
-        void otrosOrdenesQuedanIgual() {
+        void cualquierOrdenTerminaPorNumero() {
             Pageable requested = PageRequest.of(0, 20, Sort.by(Sort.Direction.ASC, "dueDate"));
-            when(issueRepository.findAll(any(Specification.class), eq(requested)))
-                    .thenReturn(new PageImpl<>(List.of(), requested, 0));
+            Pageable expected = PageRequest.of(0, 20, Sort.by(Sort.Direction.ASC, "dueDate", "sequenceId"));
+            when(issueRepository.findAll(any(Specification.class), eq(expected)))
+                    .thenReturn(new PageImpl<>(List.of(), expected, 0));
 
             issueService.getIssues(SLUG, project.getId(), new IssueFilter(null, null, null, null, null, null, null, null, null), requested);
 
-            verify(issueRepository).findAll(any(Specification.class), eq(requested));
+            verify(issueRepository).findAll(any(Specification.class), eq(expected));
         }
     }
 
@@ -811,10 +812,11 @@ class IssueServiceImplTest {
 
             issueService.update(SLUG, project.getId(), issue.getId(), author.getId(), priorityOnly);
 
-            // Sin descripción, la versión base no se mira y la fila no se bloquea
+            // Sin descripción, la versión base no se mira; la fila se bloquea igual (ningún cambio guarda una copia
+            // vieja de la tarea encima de otro)
             assertThat(issue.getDescriptionVersion()).isEqualTo(3);
             assertThat(issue.getPriority()).isEqualTo(IssuePriority.HIGH);
-            verify(issueRepository, never()).lockById(any());
+            verify(issueRepository).lockById(issue.getId());
         }
 
         @Test

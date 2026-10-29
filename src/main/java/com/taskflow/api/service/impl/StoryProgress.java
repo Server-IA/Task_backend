@@ -13,11 +13,13 @@ import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.service.NotificationService;
 import com.taskflow.api.util.SortOrderCalculator;
+import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.Objects;
+import java.util.stream.Stream;
 
 /**
  * El avance automático de una historia, que sigue a sus tareas:
@@ -41,6 +43,7 @@ class StoryProgress {
     private final WorkspaceMemberRepository workspaceMemberRepository;
     private final ActivityService activityService;
     private final NotificationService notificationService;
+    private final EntityManager entityManager;
 
     /**
      * Cambió una tarea o un bug: revisa su historia actual y, si cambió de padre, también la anterior.
@@ -51,8 +54,16 @@ class StoryProgress {
      */
     void childChanged(Issue child, Issue previousParent, User actor, boolean started) {
         Issue parent = child.getParent();
+        boolean leftPrevious = previousParent != null
+                && (parent == null || !Objects.equals(previousParent.getId(), parent.getId()));
+        if (leftPrevious && parent != null) {
+            // Las dos historias se bloquean siempre en el mismo orden: dos tareas que se cruzan de historia a la vez
+            // no se bloquean mutuamente.
+            entityManager.flush();
+            Stream.of(parent.getId(), previousParent.getId()).sorted().forEach(issueRepository::lockById);
+        }
         reconcile(parent, actor, child, started);
-        if (previousParent != null && (parent == null || !Objects.equals(previousParent.getId(), parent.getId()))) {
+        if (leftPrevious) {
             reconcile(previousParent, actor, null, false);
         }
     }
@@ -60,11 +71,19 @@ class StoryProgress {
     /**
      * Pone al día una historia: la mueve a «en curso» si empezó una de sus tareas y avisa si quedó lista para
      * revisar. Si {@code story} no es una historia, no hace nada.
+     * <p>
+     * Antes de contar sus hijas bloquea la fila de la historia y la vuelve a leer: dos tareas que terminan a la vez
+     * se cuentan en fila (la segunda ve a la primera ya terminada y avisa), y el avance automático no pisa un cierre
+     * o una reapertura que el project manager acaba de guardar.
      *
      * @param trigger la tarea que cambió ({@code null} si se fue o se eliminó)
      */
     void reconcile(Issue story, User actor, Issue trigger, boolean started) {
         if (story == null || !story.isStory()) {
+            return;
+        }
+        lock(story);
+        if (!story.isStory()) {
             return;
         }
         if (started && trigger != null && trigger.getType() == IssueType.TASK
@@ -83,6 +102,16 @@ class StoryProgress {
         } else if (!ready && story.isReviewNotified()) {
             story.setReviewNotified(false);
         }
+    }
+
+    /**
+     * Bloquea la fila de la historia ({@code SELECT … FOR UPDATE}) y la vuelve a leer. Antes escribe lo pendiente
+     * de esta transacción, para no perderlo al releerla.
+     */
+    private void lock(Issue story) {
+        entityManager.flush();
+        issueRepository.lockById(story.getId());
+        entityManager.refresh(story);
     }
 
     private void start(Issue story, State target, User actor, Issue trigger) {

@@ -22,8 +22,8 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
 
     /**
      * Bloquea la fila de la tarea hasta el final de la transacción ({@code SELECT … FOR UPDATE}). Se llama antes de
-     * leer la tarea: dos guardados de la descripción a la vez se ejecutan en fila y el segundo ve la versión que
-     * dejó el primero.
+     * leer la tarea: dos cambios de la misma tarea a la vez se ejecutan en fila y el segundo ve lo que dejó el
+     * primero (la descripción, su versión, el estado de una historia…).
      */
     @Query(value = "SELECT 1 FROM issues WHERE id = :id FOR UPDATE", nativeQuery = true)
     List<Integer> lockById(@Param("id") UUID id);
@@ -85,6 +85,62 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
     @Modifying
     @Query("update Issue i set i.completedAt = null where i.state.id = :stateId")
     int clearCompletedInState(@Param("stateId") UUID stateId);
+
+    /**
+     * El estado pasó de un grupo abierto a uno cerrado (COMPLETED o CANCELLED): sus historias quedan cerradas desde
+     * ahora, por quien cambió el grupo.
+     */
+    @Modifying
+    @Query("""
+            update Issue i set i.closedAt = :now, i.closedBy = :actor
+            where i.state.id = :stateId and i.type = com.taskflow.api.entity.enums.IssueType.STORY
+              and i.closedAt is null
+            """)
+    int closeStoriesInState(@Param("stateId") UUID stateId, @Param("now") Instant now,
+                            @Param("actor") com.taskflow.api.entity.User actor);
+
+    /** El estado pasó de un grupo cerrado a uno abierto: sus historias se reabren. */
+    @Modifying
+    @Query("""
+            update Issue i set i.closedAt = null, i.closedBy = null
+            where i.state.id = :stateId and i.type = com.taskflow.api.entity.enums.IssueType.STORY
+            """)
+    int reopenStoriesInState(@Param("stateId") UUID stateId);
+
+    /**
+     * Ids de las historias a poner al día después de que un estado cambió de grupo: las que están en ese estado y las
+     * madres de las tareas y bugs que están en él.
+     */
+    @Query("""
+            select i.id from Issue i
+            where i.type = com.taskflow.api.entity.enums.IssueType.STORY
+              and (i.state.id = :stateId
+                   or i.id in (select c.parent.id from Issue c where c.state.id = :stateId and c.parent is not null))
+            """)
+    List<UUID> findStoryIdsAffectedByState(@Param("stateId") UUID stateId);
+
+    /** Issues de ese estado (para avisar a las tareas que dejaron de estar bloqueadas). */
+    @EntityGraph(attributePaths = {"project", "state"})
+    List<Issue> findAllByStateId(UUID stateId);
+
+    /** Al quitar a alguien de un proyecto, deja de estar asignado a sus tareas. */
+    @Modifying
+    @Query(value = """
+            DELETE FROM issue_assignees ia
+            USING issues i
+            WHERE ia.issue_id = i.id AND i.project_id = :projectId AND ia.user_id = :userId
+            """, nativeQuery = true)
+    int removeAssigneeInProject(@Param("projectId") UUID projectId, @Param("userId") UUID userId);
+
+    /** Al quitar a alguien de un workspace, deja de estar asignado a las tareas de todos sus proyectos. */
+    @Modifying
+    @Query(value = """
+            DELETE FROM issue_assignees ia
+            USING issues i, projects p
+            WHERE ia.issue_id = i.id AND i.project_id = p.id AND p.workspace_id = :workspaceId
+              AND ia.user_id = :userId
+            """, nativeQuery = true)
+    int removeAssigneeInWorkspace(@Param("workspaceId") UUID workspaceId, @Param("userId") UUID userId);
 
     /** El estado pasó al grupo STARTED: sus tareas que nunca habían empezado empiezan ahora. */
     @Modifying
@@ -209,11 +265,19 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
     long countCompletedBetween(@Param("projectId") UUID projectId, @Param("from") Instant from,
                                @Param("to") Instant to);
 
-    // ----- Resumen de actividad -----
+    // ----- Resumen de actividad (el trabajo: tareas y bugs, como las estadísticas; las historias no) -----
 
-    @Query("select count(i) from Issue i where i.project.id in :projectIds and i.completedAt >= :since")
+    @Query("""
+            select count(i) from Issue i
+            where i.project.id in :projectIds and i.completedAt >= :since
+              and i.type <> com.taskflow.api.entity.enums.IssueType.STORY
+            """)
     long countCompletedSince(@Param("projectIds") Collection<UUID> projectIds, @Param("since") Instant since);
 
-    @Query("select count(i) from Issue i where i.project.id in :projectIds and i.createdAt >= :since")
+    @Query("""
+            select count(i) from Issue i
+            where i.project.id in :projectIds and i.createdAt >= :since
+              and i.type <> com.taskflow.api.entity.enums.IssueType.STORY
+            """)
     long countCreatedSince(@Param("projectIds") Collection<UUID> projectIds, @Param("since") Instant since);
 }

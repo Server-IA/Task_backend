@@ -3,6 +3,7 @@ package com.taskflow.api.controller;
 import com.taskflow.api.dto.request.CreateStateRequest;
 import com.taskflow.api.dto.request.UpdateStateRequest;
 import com.taskflow.api.dto.response.StateResponse;
+import com.taskflow.api.security.UserPrincipal;
 import com.taskflow.api.service.StateService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -10,6 +11,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -47,12 +49,16 @@ public class StateController {
         return stateService.create(slug, projectId, request);
     }
 
-    @Operation(summary = "Editar o reordenar estado (project manager)")
+    @Operation(summary = "Editar o reordenar estado (project manager)",
+            description = "Cambiar el grupo mueve con él a sus tareas: fechas de inicio y completado, historias "
+                    + "cerradas o reabiertas (cerradas por quien cambia el grupo), historias listas para revisar y "
+                    + "avisos de desbloqueo, como si cada tarea se moviera a un estado de ese grupo.")
     @PatchMapping("/{stateId}")
     @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
     public StateResponse update(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID stateId,
+                                @AuthenticationPrincipal UserPrincipal me,
                                 @Valid @RequestBody UpdateStateRequest request) {
-        return stateService.update(slug, projectId, stateId, request);
+        return stateService.update(slug, projectId, stateId, me.getId(), request);
     }
 
     @Operation(summary = "Eliminar estado (project manager)",

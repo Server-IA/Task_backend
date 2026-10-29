@@ -38,10 +38,11 @@ public interface CycleRepository extends JpaRepository<Cycle, UUID> {
 
     /**
      * Avance de los ciclos indicados; un ciclo sin issues no aparece en el resultado. Cuenta el trabajo
-     * (tareas y bugs): las historias no.
+     * (tareas y bugs): las historias no, y las canceladas no suman al total.
      */
     @Query("""
-            select c.id as id, count(i) as total,
+            select c.id as id, coalesce(sum(case when i.state.stateGroup <> com.taskflow.api.entity.enums.StateGroup.CANCELLED
+                       then 1 else 0 end), 0) as total,
                    coalesce(sum(case when i.state.stateGroup = :completed then 1 else 0 end), 0) as completed
             from Cycle c join c.issues i
             where c.id in :ids and i.type <> com.taskflow.api.entity.enums.IssueType.STORY

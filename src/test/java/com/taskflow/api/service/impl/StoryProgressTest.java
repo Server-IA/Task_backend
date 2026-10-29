@@ -19,6 +19,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import jakarta.persistence.EntityManager;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -32,6 +34,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -55,6 +59,8 @@ class StoryProgressTest {
     private ActivityService activityService;
     @Mock
     private NotificationService notificationService;
+    @Mock
+    private EntityManager entityManager;
 
     @InjectMocks
     private StoryProgress progress;
@@ -177,6 +183,54 @@ class StoryProgressTest {
             progress.childChanged(task, null, luis, true);
 
             verify(issueRepository, never()).countChildrenOf(any());
+            verify(issueRepository, never()).lockById(any());
+        }
+
+        @Test
+        void antesDeContarBloqueaLaHistoriaYLaVuelveALeer() {
+            Issue task = child(IssueType.TASK, inProgress, 41);
+            children(count(IssueType.TASK, StateGroup.STARTED, 1));
+
+            progress.childChanged(task, null, luis, true);
+
+            // Lo pendiente se escribe, la fila se bloquea y la historia se relee antes de decidir nada
+            InOrder order = inOrder(entityManager, issueRepository);
+            order.verify(entityManager).flush();
+            order.verify(issueRepository).lockById(story.getId());
+            order.verify(entityManager).refresh(story);
+            order.verify(issueRepository).countChildrenOf(story.getId());
+        }
+
+        @Test
+        void siElProjectManagerLaCerroMientrasTantoNoLaReabre() {
+            Issue task = child(IssueType.TASK, inProgress, 41);
+            State done = state("Done", StateGroup.COMPLETED);
+            // Al releerla después del bloqueo, ya está cerrada
+            doAnswer(call -> {
+                story.setState(done);
+                return null;
+            }).when(entityManager).refresh(story);
+            children(count(IssueType.TASK, StateGroup.STARTED, 1));
+
+            progress.childChanged(task, null, luis, true);
+
+            assertThat(story.getState()).isSameAs(done);
+            verify(activityService, never()).record(any(), any(), any(), any(), any());
+        }
+
+        @Test
+        void alCambiarDeHistoriaBloqueaLasDosSiempreEnElMismoOrden() {
+            Issue other = issue(IssueType.STORY, inProgress, 16);
+            Issue task = child(IssueType.TASK, inProgress, 41);
+            lenient().when(issueRepository.countChildrenOf(any())).thenReturn(List.of());
+
+            progress.childChanged(task, other, luis, false);
+
+            // Las dos primeras: las dos historias en orden de id (después cada una se vuelve a bloquear, ya sin espera)
+            org.mockito.ArgumentCaptor<UUID> locked = org.mockito.ArgumentCaptor.forClass(UUID.class);
+            verify(issueRepository, times(4)).lockById(locked.capture());
+            List<UUID> sorted = java.util.stream.Stream.of(story.getId(), other.getId()).sorted().toList();
+            assertThat(locked.getAllValues().subList(0, 2)).isEqualTo(sorted);
         }
     }
 
@@ -221,6 +275,17 @@ class StoryProgressTest {
             progress.childChanged(task, null, luis, false);
 
             verify(notificationService).notifyStoryReady(eq(story), anyCollection(), eq(luis));
+        }
+
+        @Test
+        void siTodasSusTareasSeCancelaronNoEstaLista() {
+            Issue task = child(IssueType.TASK, inProgress, 45);
+            children(count(IssueType.TASK, StateGroup.CANCELLED, 2));
+
+            progress.childChanged(task, null, luis, false);
+
+            verify(notificationService, never()).notifyStoryReady(any(), anyCollection(), any());
+            assertThat(story.isReviewNotified()).isFalse();
         }
 
         @Test

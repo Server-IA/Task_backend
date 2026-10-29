@@ -21,4 +21,9 @@ public interface VerificationTokenRepository extends JpaRepository<VerificationT
             where t.user.id = :userId and t.type = :type and t.used = false
             """)
     int invalidateAll(@Param("userId") UUID userId, @Param("type") VerificationTokenType type);
+
+    /** Limpieza programada: los usados y los vencidos ya no sirven. */
+    @Modifying
+    @Query("delete from VerificationToken t where t.used = true or t.expiresAt < :now")
+    int deleteUsedOrExpired(@Param("now") java.time.Instant now);
 }

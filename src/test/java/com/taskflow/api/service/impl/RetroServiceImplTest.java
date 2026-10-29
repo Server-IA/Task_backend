@@ -187,8 +187,39 @@ class RetroServiceImplTest {
             assertThat(retro.notes()).isEmpty();
             verify(noteRepository, never()).findAllByCycleId(cycle.getId());
             assertThat(retro.myVotesLeft()).isEqualTo(RetroServiceImpl.MAX_VOTES);
-            assertThat(retro.summary()).isEqualTo(new RetroResponse.RetroSummary(1, 5, 2, 1, 2.0));
+            // La cancelada no suma al total (como en el avance del ciclo): 1 completada + 2 + 1 que se movieron
+            assertThat(retro.summary()).isEqualTo(new RetroResponse.RetroSummary(1, 4, 2, 1, 2.0));
             assertThat(retro.previousActions()).isEmpty();
+        }
+
+        @Test
+        void unCicloCerradoUsaLaFotoDelCierreAunqueSusTareasCambienDespues() {
+            cycle.setClosedAt(now);
+            cycle.setClosedCompletedCount(10);
+            cycle.setClosedTotalCount(12);
+            cycle.setClosedCycleTimeDays(3.5);
+            cycle.setCarriedToCycle(2);
+            // Después del cierre una tarea se reabrió y pasó a otro ciclo: en el ciclo queda solo una
+            cycle.getIssues().add(completedIssue(Duration.ofDays(3), Duration.ofDays(1)));
+            when(cycleRepository.findAllByProjectId(project.getId())).thenReturn(List.of(cycle));
+
+            RetroResponse retro = retroService.getRetro(SLUG, project.getId(), cycle.getId(), member.getId());
+
+            assertThat(retro.summary()).isEqualTo(new RetroResponse.RetroSummary(10, 12, 2, 0, 3.5));
+        }
+
+        @Test
+        void lasHistoriasNoCuentanEnElResumen() {
+            cycle.setRetroStartedAt(null);
+            Issue story = completedIssue(Duration.ofDays(9), Duration.ofDays(1));
+            story.setType(com.taskflow.api.entity.enums.IssueType.STORY);
+            cycle.getIssues().add(story);
+            cycle.getIssues().add(completedIssue(Duration.ofDays(3), Duration.ofDays(1)));
+            when(cycleRepository.findAllByProjectId(project.getId())).thenReturn(List.of(cycle));
+
+            RetroResponse retro = retroService.getRetro(SLUG, project.getId(), cycle.getId(), member.getId());
+
+            assertThat(retro.summary()).isEqualTo(new RetroResponse.RetroSummary(1, 1, 0, 0, 2.0));
         }
 
         @Test

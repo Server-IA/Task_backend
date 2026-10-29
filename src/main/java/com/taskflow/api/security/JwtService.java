@@ -50,16 +50,18 @@ public class JwtService {
         return accessExpiration.toSeconds();
     }
 
-    /** Devuelve el usuario del token, o vacío si la firma no es válida o ya expiró. */
-    public Optional<UserPrincipal> parse(String token) {
+    /** Devuelve el usuario del token y cuándo se emitió, o vacío si la firma no es válida o ya expiró. */
+    public Optional<AccessToken> parse(String token) {
         try {
             Claims claims = Jwts.parser()
                     .verifyWith(key)
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
-            return Optional.of(UserPrincipal.fromToken(
-                    UUID.fromString(claims.getSubject()), claims.get("email", String.class)));
+            UserPrincipal principal = UserPrincipal.fromToken(
+                    UUID.fromString(claims.getSubject()), claims.get("email", String.class));
+            return Optional.of(new AccessToken(principal,
+                    claims.getIssuedAt() == null ? null : claims.getIssuedAt().toInstant()));
         } catch (JwtException | IllegalArgumentException e) {
             return Optional.empty();
         }

@@ -49,6 +49,7 @@ public class CycleServiceImpl implements CycleService {
 
     static final String CLOSED_EDIT_MESSAGE = "El ciclo está cerrado: ya no se pueden cambiar su nombre ni sus fechas";
     static final String CLOSED_ADD_MESSAGE = "El ciclo está cerrado: ya no se le pueden agregar tareas";
+    static final String CLOSED_REMOVE_MESSAGE = "El ciclo está cerrado: ya no se le pueden quitar tareas";
     static final String ALREADY_CLOSED_MESSAGE = "El ciclo ya está cerrado";
     static final String NOT_STARTED_MESSAGE = "El ciclo todavía no ha empezado: no se puede cerrar";
     static final String NO_NEXT_CYCLE_MESSAGE =
@@ -144,18 +145,29 @@ public class CycleServiceImpl implements CycleService {
     @Override
     @Transactional
     public CycleResponse addIssues(String slug, UUID projectId, UUID cycleId, UUID userId, IssueIdsRequest request) {
-        Cycle cycle = findCycle(slug, projectId, cycleId);
+        // Con la fila del ciclo bloqueada: no se agregan tareas mientras el project manager lo cierra
+        Cycle cycle = findCycleForUpdate(lookup.project(slug, projectId), cycleId);
         if (cycle.isClosed()) {
             throw new ConflictException(CLOSED_ADD_MESSAGE);
         }
         List<Issue> issues = support.findIssues(cycle.getProject(), request.issueIds());
         User actor = lookup.user(userId);
+        // El ciclo del que sale cada tarea (también uno cerrado: su resumen quedó guardado al cerrarlo), para el
+        // historial («de Sprint 1 a Sprint 2»)
+        Map<UUID, String> previousCycle = new HashMap<>();
+        for (Issue issue : issues) {
+            issue.getCycles().stream()
+                    .filter(other -> !other.getId().equals(cycle.getId()))
+                    .findFirst()
+                    .ifPresent(other -> previousCycle.put(issue.getId(), other.getName()));
+        }
 
         // Un issue solo puede estar en un ciclo: se saca de cualquier otro antes de agregarlo.
         cycleRepository.removeIssuesFromOtherCycles(cycle.getId(), issues.stream().map(Issue::getId).toList());
         for (Issue issue : issues) {
             if (cycle.getIssues().add(issue)) {
-                activityService.record(issue, actor, ActivityField.CYCLE, null, cycle.getName());
+                activityService.record(issue, actor, ActivityField.CYCLE, previousCycle.get(issue.getId()),
+                        cycle.getName());
             }
         }
         return toResponse(cycleRepository.saveAndFlush(cycle));
@@ -164,7 +176,10 @@ public class CycleServiceImpl implements CycleService {
     @Override
     @Transactional
     public CycleResponse removeIssue(String slug, UUID projectId, UUID cycleId, UUID issueId, UUID userId) {
-        Cycle cycle = findCycle(slug, projectId, cycleId);
+        Cycle cycle = findCycleForUpdate(lookup.project(slug, projectId), cycleId);
+        if (cycle.isClosed()) {
+            throw new ConflictException(CLOSED_REMOVE_MESSAGE);
+        }
         Issue issue = cycle.getIssues().stream()
                 .filter(candidate -> candidate.getId().equals(issueId))
                 .findFirst()
@@ -179,7 +194,8 @@ public class CycleServiceImpl implements CycleService {
     public CloseCyclePreviewResponse closePreview(String slug, UUID projectId, UUID cycleId) {
         Project project = lookup.project(slug, projectId);
         Cycle cycle = findCycle(project, cycleId);
-        List<Issue> issues = cycle.getIssues().stream().sorted(BY_NUMBER).toList();
+        // Cuenta el trabajo (tareas y bugs), como el avance del ciclo: las historias no
+        List<Issue> issues = cycle.getIssues().stream().filter(PlanningSupport::isWork).sorted(BY_NUMBER).toList();
         List<Issue> completed = issues.stream().filter(PlanningSupport::isCompleted).toList();
         List<Issue> unfinished = issues.stream().filter(PlanningSupport::isOpen).toList();
         Cycle next = nextCycle(cycle, cycleRepository.findAllByProjectId(project.getId()), today());
@@ -197,7 +213,9 @@ public class CycleServiceImpl implements CycleService {
     @Transactional
     public CloseCycleResponse close(String slug, UUID projectId, UUID cycleId, UUID userId, CloseCycleRequest request) {
         Project project = lookup.project(slug, projectId);
-        Cycle cycle = findCycle(project, cycleId);
+        // Con la fila bloqueada: dos cierres a la vez (un doble clic) se ejecutan en fila y el segundo recibe 409, y
+        // nadie agrega una tarea al ciclo mientras se cierra
+        Cycle cycle = findCycleForUpdate(project, cycleId);
         if (cycle.isClosed()) {
             throw new ConflictException(ALREADY_CLOSED_MESSAGE);
         }
@@ -245,8 +263,19 @@ public class CycleServiceImpl implements CycleService {
         Instant now = Instant.now();
         cycle.setClosedAt(now);
         cycle.setClosedBy(actor);
-        cycle.setCarriedToCycle(toCycle.size());
-        cycle.setCarriedToBacklog(toBacklog.size());
+        // Las cuentas del cierre son del trabajo (tareas y bugs); las historias abiertas se mueven igual, pero no cuentan
+        int carriedToCycle = (int) toCycle.stream().filter(PlanningSupport::isWork).count();
+        int carriedToBacklog = (int) toBacklog.stream().filter(PlanningSupport::isWork).count();
+        cycle.setCarriedToCycle(carriedToCycle);
+        cycle.setCarriedToBacklog(carriedToBacklog);
+        // Foto del cierre para la retrospectiva: no cambia aunque después una tarea se reabra o cambie de ciclo
+        List<Issue> completed = cycle.getIssues().stream()
+                .filter(PlanningSupport::isWork)
+                .filter(PlanningSupport::isCompleted)
+                .toList();
+        cycle.setClosedCompletedCount(completed.size());
+        cycle.setClosedTotalCount(completed.size() + carriedToCycle + carriedToBacklog);
+        cycle.setClosedCycleTimeDays(PlanningSupport.cycleTimeDays(completed));
         boolean retroStarts = Boolean.TRUE.equals(request.startRetro()) && cycle.getRetroStartedAt() == null;
         if (retroStarts) {
             cycle.setRetroStartedAt(now);
@@ -255,7 +284,7 @@ public class CycleServiceImpl implements CycleService {
         if (retroStarts) {
             notificationService.notifyRetroStarted(saved, actor);
         }
-        return new CloseCycleResponse(toResponse(saved), toCycle.size(), toBacklog.size(),
+        return new CloseCycleResponse(toResponse(saved), carriedToCycle, carriedToBacklog,
                 saved.getRetroStartedAt() != null);
     }
 
@@ -323,6 +352,12 @@ public class CycleServiceImpl implements CycleService {
 
     private Cycle findCycle(Project project, UUID cycleId) {
         return cycleRepository.findByIdAndProjectId(cycleId, project.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Ciclo no encontrado"));
+    }
+
+    /** El ciclo con su fila bloqueada hasta el final de la transacción. */
+    private Cycle findCycleForUpdate(Project project, UUID cycleId) {
+        return cycleRepository.findForUpdate(cycleId, project.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Ciclo no encontrado"));
     }
 

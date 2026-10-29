@@ -62,7 +62,9 @@ public final class DescriptionTasks {
                     toggles.add(new Toggle(now.text(), now.checked()));
                 }
             }
-            return new Diff(!toggles.isEmpty(), toggles.stream().filter(toggle -> !toggle.text().isEmpty()).toList());
+            // Las casillas sin texto no dejan entrada propia: si solo cambiaron esas, cuenta como «editó la descripción»
+            List<Toggle> named = toggles.stream().filter(toggle -> !toggle.text().isEmpty()).toList();
+            return new Diff(!named.isEmpty(), named);
         }
         // Hubo otra edición: las casillas se emparejan por texto (la primera «X» de antes con la primera de ahora)
         Map<String, Deque<TaskItem>> previous = new HashMap<>();

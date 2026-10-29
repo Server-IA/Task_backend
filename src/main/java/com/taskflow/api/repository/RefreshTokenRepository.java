@@ -21,6 +21,20 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
     @Query("update RefreshToken t set t.revoked = true where t.user.id = :userId and t.revoked = false")
     int revokeAllByUserId(@Param("userId") UUID userId);
 
+    /**
+     * Rota el token de forma atómica: lo marca como usado solo si nadie lo usó antes. Devuelve 0 si otra petición se
+     * adelantó (el mismo token usado dos veces a la vez cuenta como reutilizado). La fila queda bloqueada hasta el
+     * final de la transacción, así la segunda petición espera y ve el cambio de la primera.
+     */
+    @Modifying
+    @Query("update RefreshToken t set t.revoked = true where t.id = :id and t.revoked = false")
+    int revokeIfActive(@Param("id") UUID id);
+
+    /** Limpieza programada: los vencidos (los rotados se guardan hasta vencer, para detectar su reutilización). */
+    @Modifying
+    @Query("delete from RefreshToken t where t.expiresAt < :now")
+    int deleteExpired(@Param("now") java.time.Instant now);
+
     @Modifying
     @Query("delete from RefreshToken t where t.user.id = :userId")
     int deleteAllByUserId(@Param("userId") UUID userId);

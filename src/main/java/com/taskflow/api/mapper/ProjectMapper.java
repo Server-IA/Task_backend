@@ -15,14 +15,19 @@ import com.taskflow.api.entity.ProjectMember;
 import com.taskflow.api.entity.SavedView;
 import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.TemplateChecklistItem;
+import com.taskflow.api.repository.ProjectCounts;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 
 @Mapper(uses = UserMapper.class)
 public interface ProjectMapper {
 
-    @Mapping(target = "workspaceId", source = "workspace.id")
-    ProjectResponse toResponse(Project project);
+    /** {@code counts}: sus contadores ({@code ProjectRepository.countIssues}). */
+    @Mapping(target = "id", source = "project.id")
+    @Mapping(target = "workspaceId", source = "project.workspace.id")
+    @Mapping(target = "createdAt", source = "project.createdAt")
+    @Mapping(target = "updatedAt", source = "project.updatedAt")
+    ProjectResponse toResponse(Project project, ProjectCounts counts);
 
     /** Referencia corta (nombre, identificador y color): la de las tareas, el feed y las dependencias. */
     ProjectRefResponse toRef(Project project);
@@ -39,6 +44,9 @@ public interface ProjectMapper {
 
     TemplateChecklistItemResponse toTemplateItemResponse(TemplateChecklistItem item);
 
-    /** {@code mine}: la vista es del usuario que la pide; {@code issueCount}: tareas que cumplen sus filtros. */
-    SavedViewResponse toSavedViewResponse(SavedView view, boolean mine, long issueCount);
+    /**
+     * {@code mine}: la vista es del usuario que la pide; {@code issueCount}: tareas que cumplen sus filtros
+     * ({@code null} cuando no se calcula, por ejemplo al reordenar).
+     */
+    SavedViewResponse toSavedViewResponse(SavedView view, boolean mine, Long issueCount);
 }
