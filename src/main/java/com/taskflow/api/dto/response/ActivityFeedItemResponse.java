@@ -17,6 +17,8 @@ public record ActivityFeedItemResponse(
         String newValue,
         Instant createdAt,
         IssueSummaryResponse issue,
-        ProjectRefResponse project
+        ProjectRefResponse project,
+        /** Archivo de un {@code ATTACHMENT} mientras exista; {@code null} en los demás cambios o si se eliminó. */
+        FileRefResponse file
 ) {
 }

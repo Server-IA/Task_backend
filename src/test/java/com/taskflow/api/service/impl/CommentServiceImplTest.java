@@ -13,6 +13,7 @@ import com.taskflow.api.repository.IssueRepository;
 import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.service.ActivityService;
+import com.taskflow.api.service.FileService;
 import com.taskflow.api.service.NotificationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -63,6 +64,8 @@ class CommentServiceImplTest {
     @Mock
     private CollaborationMapper mapper;
 
+    @Mock
+    private FileService fileService;
     @InjectMocks
     private CommentServiceImpl commentService;
 

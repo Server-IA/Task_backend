@@ -40,4 +40,9 @@ public class IssueActivity extends BaseEntity {
 
     @Column(name = "new_value", columnDefinition = "text")
     private String newValue;
+
+    /** Archivo de un {@code ATTACHMENT} mientras exista ({@code null} si se borró o en los demás cambios). */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "file_id")
+    private StoredFile file;
 }

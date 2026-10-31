@@ -87,6 +87,8 @@ public record IssueResponse(
         boolean readyForReview,
         /** Historias: cuándo y quién la cerró («Cerrada por Ana · 12 nov»); {@code null} mientras esté abierta. */
         Instant closedAt,
-        UserSummaryResponse closedBy
+        UserSummaryResponse closedBy,
+        /** Adjuntos de la tarea (el clip de las tarjetas y las filas); las imágenes de los textos no cuentan. */
+        int attachmentCount
 ) {
 }

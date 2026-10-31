@@ -6,6 +6,7 @@ import com.taskflow.api.dto.response.ActivityResponse;
 import com.taskflow.api.dto.response.ActivitySummaryResponse;
 import com.taskflow.api.dto.response.PageResponse;
 import com.taskflow.api.entity.Issue;
+import com.taskflow.api.entity.StoredFile;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.enums.ActivityField;
 
@@ -26,6 +27,12 @@ public interface ActivityService {
      * actualización (la entrada conserva la hora en que empezó).
      */
     void recordDescriptionEdit(Issue issue, User actor);
+
+    /**
+     * Registra que {@code actor} adjuntó ({@code added}) o eliminó un archivo de la sección «Adjuntos»: «Ana adjuntó
+     * «mockup.png»». Al adjuntar, la entrada apunta al archivo (el feed muestra su tamaño y su miniatura).
+     */
+    void recordAttachment(Issue issue, User actor, StoredFile file, boolean added);
 
     /**
      * Registra que {@code actor} marcó ({@code checked}) o desmarcó la casilla {@code text} de la descripción. Si lo

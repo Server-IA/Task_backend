@@ -10,6 +10,7 @@ import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.Notification;
 import com.taskflow.api.entity.ProjectMember;
 import com.taskflow.api.entity.User;
+import com.taskflow.api.entity.Workspace;
 import com.taskflow.api.entity.enums.NotificationType;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ResourceNotFoundException;
@@ -29,6 +30,8 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
@@ -48,6 +51,8 @@ public class NotificationServiceImpl implements NotificationService {
     /** Tamaño máximo de una página pedida con cursor. */
     static final int MAX_CURSOR_PAGE_SIZE = 100;
     private static final Set<NotificationType> ALL_TYPES = EnumSet.allOf(NotificationType.class);
+    /** Un aviso de espacio por workspace como mucho cada tanto (borrar y volver a subir no lo repite). */
+    static final Duration STORAGE_WARNING_INTERVAL = Duration.ofDays(7);
 
     private final NotificationRepository notificationRepository;
     private final ProjectMemberRepository projectMemberRepository;
@@ -199,6 +204,23 @@ public class NotificationServiceImpl implements NotificationService {
             // Sin autor: el aviso lo manda TaskFlow
             Notification notification = notification(user, null, NotificationType.STORY_READY, message);
             notification.setIssue(story);
+            notificationRepository.save(notification);
+        });
+    }
+
+    @Override
+    @Transactional
+    public void notifyStorageWarning(Workspace workspace, Collection<User> managers, int percent, String quota) {
+        if (notificationRepository.existsByWorkspaceIdAndTypeAndCreatedAtAfter(workspace.getId(),
+                NotificationType.STORAGE_WARNING, Instant.now().minus(STORAGE_WARNING_INTERVAL))) {
+            return;
+        }
+        String message = "«" + workspace.getName() + "» ya usa el " + percent + " % de sus " + quota
+                + " para archivos. Libera espacio en Ajustes › Almacenamiento: al llegar al 100 % no se podrán subir "
+                + "archivos nuevos.";
+        distinct(managers).forEach(user -> {
+            Notification notification = notification(user, null, NotificationType.STORAGE_WARNING, message);
+            notification.setWorkspace(workspace);
             notificationRepository.save(notification);
         });
     }

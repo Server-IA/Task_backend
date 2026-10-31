@@ -17,6 +17,7 @@ import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.service.CommentService;
+import com.taskflow.api.service.FileService;
 import com.taskflow.api.service.NotificationService;
 import com.taskflow.api.util.MentionParser;
 import com.taskflow.api.util.TextCut;
@@ -44,6 +45,7 @@ public class CommentServiceImpl implements CommentService {
     private final NotificationService notificationService;
     private final ResourceLookup lookup;
     private final CollaborationMapper mapper;
+    private final FileService fileService;
 
     @Override
     @Transactional(readOnly = true)
@@ -105,7 +107,11 @@ public class CommentServiceImpl implements CommentService {
         if (!isAuthor && !isManager) {
             throw new ForbiddenException("Solo el autor o el project manager pueden borrar el comentario");
         }
+        String body = comment.getBody();
         commentRepository.delete(comment);
+        // Sus imágenes se borran con él (las que no aparecen en otro texto del proyecto)
+        commentRepository.flush();
+        fileService.releaseInlineImages(comment.getIssue().getProject(), body);
     }
 
     /**

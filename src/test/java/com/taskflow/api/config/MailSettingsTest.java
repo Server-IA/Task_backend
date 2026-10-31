@@ -30,6 +30,13 @@ class MailSettingsTest {
     }
 
     @Test
+    void soloMailLogLinksTrueExplicitoEscribeElEnlaceAunqueElCorreoSalga() {
+        assertThat(properties("smtp", "", true, "http://localhost:5173").logMailLinksAlways()).isTrue();
+        assertThat(properties("smtp", "", null, "http://localhost:5173").logMailLinksAlways()).isFalse();
+        assertThat(properties("smtp", "", false, "http://localhost:5173").logMailLinksAlways()).isFalse();
+    }
+
+    @Test
     void resendSinApiKeyFueraDeLocalhostNoArranca() {
         assertThatThrownBy(() -> ResendConfig.checkMailSettings(
                 properties("resend", "", null, "https://taskflow.example.com")))

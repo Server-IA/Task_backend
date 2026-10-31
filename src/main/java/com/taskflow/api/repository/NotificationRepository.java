@@ -34,6 +34,9 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
                 or exists (select 1 from WorkspaceMember wm where wm.workspace = c.project.workspace
                            and wm.user.id = :recipientId
                            and wm.role = com.taskflow.api.entity.enums.WorkspaceRole.OWNER))))
+            and (n.workspace is null or exists (select 1 from WorkspaceMember wm where wm.workspace = n.workspace
+                           and wm.user.id = :recipientId
+                           and wm.role = com.taskflow.api.entity.enums.WorkspaceRole.OWNER))
             """;
 
     /**
@@ -42,7 +45,7 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
      * puede ver ({@link #ACCESSIBLE}).
      */
     @EntityGraph(attributePaths = {"actor", "issue", "issue.project", "issue.project.workspace",
-            "cycle", "cycle.project", "cycle.project.workspace", "comment"})
+            "cycle", "cycle.project", "cycle.project.workspace", "comment", "workspace"})
     @Query(value = """
             select n from Notification n
             where n.recipient.id = :recipientId and n.type in :types and (:unreadOnly = false or n.read = false)
@@ -61,7 +64,7 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
      * de la bandeja (lo más nuevo primero y, a igual fecha, por id descendente), sin contar el total.
      */
     @EntityGraph(attributePaths = {"actor", "issue", "issue.project", "issue.project.workspace",
-            "cycle", "cycle.project", "cycle.project.workspace", "comment"})
+            "cycle", "cycle.project", "cycle.project.workspace", "comment", "workspace"})
     @Query("""
             select n from Notification n
             where n.recipient.id = :recipientId and n.type in :types and (:unreadOnly = false or n.read = false)
@@ -86,8 +89,11 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
                    @Param("unreadOnly") boolean unreadOnly);
 
     @EntityGraph(attributePaths = {"actor", "issue", "issue.project", "issue.project.workspace",
-            "cycle", "cycle.project", "cycle.project.workspace", "comment"})
+            "cycle", "cycle.project", "cycle.project.workspace", "comment", "workspace"})
     Optional<Notification> findByIdAndRecipientId(UUID id, UUID recipientId);
+
+    /** Si ya se avisó a alguien de que el workspace está por llenarse después de {@code after}. */
+    boolean existsByWorkspaceIdAndTypeAndCreatedAtAfter(UUID workspaceId, NotificationType type, Instant after);
 
     /** Limpieza programada: borra las leídas creadas antes de {@code before}. */
     @Modifying

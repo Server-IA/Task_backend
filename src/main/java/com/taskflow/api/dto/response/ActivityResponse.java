@@ -16,6 +16,8 @@ public record ActivityResponse(
         String oldValue,
         String newValue,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        /** Archivo de un {@code ATTACHMENT} mientras exista; {@code null} en los demás cambios o si se eliminó. */
+        FileRefResponse file
 ) {
 }

@@ -52,6 +52,11 @@ public class Notification extends BaseEntity {
     @JoinColumn(name = "comment_id")
     private Comment comment;
 
+    /** Workspace de un {@code STORAGE_WARNING}; {@code null} en las demás. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "workspace_id")
+    private Workspace workspace;
+
     @Column(name = "is_read", nullable = false)
     private boolean read = false;
 }

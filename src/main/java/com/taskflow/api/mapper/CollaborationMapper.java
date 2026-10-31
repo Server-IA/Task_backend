@@ -4,16 +4,20 @@ import com.taskflow.api.dto.response.ActivityFeedItemResponse;
 import com.taskflow.api.dto.response.ActivityResponse;
 import com.taskflow.api.dto.response.CommentResponse;
 import com.taskflow.api.dto.response.DailyNoteResponse;
+import com.taskflow.api.dto.response.FileRefResponse;
 import com.taskflow.api.dto.response.NotificationCommentResponse;
 import com.taskflow.api.dto.response.NotificationCycleResponse;
 import com.taskflow.api.dto.response.NotificationIssueResponse;
 import com.taskflow.api.dto.response.NotificationResponse;
+import com.taskflow.api.dto.response.NotificationWorkspaceResponse;
 import com.taskflow.api.entity.Comment;
 import com.taskflow.api.entity.Cycle;
 import com.taskflow.api.entity.DailyNote;
 import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.IssueActivity;
 import com.taskflow.api.entity.Notification;
+import com.taskflow.api.entity.StoredFile;
+import com.taskflow.api.entity.Workspace;
 import com.taskflow.api.util.MentionParser;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
@@ -51,4 +55,12 @@ public interface CollaborationMapper {
     }
 
     DailyNoteResponse toDailyNoteResponse(DailyNote note);
+
+    NotificationWorkspaceResponse toNotificationWorkspace(Workspace workspace);
+
+    /** El archivo de una entrada del historial ({@code ATTACHMENT}); {@code null} si ya no existe. */
+    default FileRefResponse toFileRef(StoredFile file) {
+        return file == null ? null : new FileRefResponse(file.getId(), file.getFileName(), file.getContentType(),
+                file.getSizeBytes(), file.isImage());
+    }
 }

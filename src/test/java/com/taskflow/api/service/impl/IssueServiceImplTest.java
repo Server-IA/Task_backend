@@ -29,6 +29,7 @@ import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.service.ActivityService;
+import com.taskflow.api.service.FileService;
 import com.taskflow.api.service.IssueChecklistService;
 import com.taskflow.api.service.IssueRelationService;
 import com.taskflow.api.service.NotificationService;
@@ -103,6 +104,8 @@ class IssueServiceImplTest {
     private ResourceLookup lookup;
     @Mock
     private IssueMapper issueMapper;
+    @Mock
+    private FileService fileService;
 
     @InjectMocks
     private IssueServiceImpl issueService;
