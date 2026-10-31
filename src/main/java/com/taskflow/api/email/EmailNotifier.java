@@ -88,8 +88,10 @@ public class EmailNotifier {
     }
 
     private void send(String to, String subject, String template, String actionLink, Map<String, Object> variables) {
-        if (actionLink != null && !properties.mail().enabled() && properties.logMailLinks()) {
-            // Solo en desarrollo: sin proveedor de correo, el enlace se muestra en el log para probar el flujo.
+        boolean logLink = properties.logMailLinksAlways() || (!properties.mail().enabled() && properties.logMailLinks());
+        if (actionLink != null && logLink) {
+            // Solo en desarrollo: sin proveedor de correo (o con MAIL_LOG_LINKS=true, por si el SMTP falla), el
+            // enlace se muestra en el log para probar el flujo.
             log.info("[Desarrollo] Enlace del correo '{}': {}", subject, actionLink);
         }
         Context context = new Context(ES);

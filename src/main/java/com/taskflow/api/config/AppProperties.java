@@ -77,4 +77,12 @@ public record AppProperties(
         Boolean explicit = mail == null ? null : mail.logLinks();
         return explicit != null ? explicit : localFrontend();
     }
+
+    /**
+     * Si los enlaces van al log aunque haya proveedor de correo: solo con {@code MAIL_LOG_LINKS=true} explícito (en
+     * desarrollo, para no perder el enlace si el SMTP falla). Vacío no basta.
+     */
+    public boolean logMailLinksAlways() {
+        return mail != null && Boolean.TRUE.equals(mail.logLinks());
+    }
 }
