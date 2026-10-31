@@ -50,6 +50,8 @@ docker compose up -d          # PostgreSQL 16 (5432) y Mailpit (bandeja de corre
 | `FRONTEND_URL` | Origen permitido por CORS y base de los enlaces de los correos (por defecto `http://localhost:5173`) |
 | `FORWARD_HEADERS_STRATEGY` | `none` (por defecto) o `native` detrás de un proxy (Dokploy/Traefik): ver [Docker / despliegue](#docker--despliegue) |
 | `SPRINGDOC_ENABLED` | Swagger UI y `/v3/api-docs` (por defecto `true`; el frontend genera sus tipos con `/v3/api-docs`). `false` los apaga |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | Cloudflare R2 (archivos e imágenes). Endpoint `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com`, región `auto`; `R2_ENDPOINT` lo reemplaza (opcional). Sin credenciales la API arranca, pero subir o ver archivos responde 503. El bucket es privado y su CORS debe permitir `GET`, `PUT` y `HEAD` desde `FRONTEND_URL` con cabeceras `*` (y exponer `ETag`) |
+| `STORAGE_CLEANUP_CRON` | Limpieza de archivos (por defecto cada hora, `0 15 * * * *`): subidas sin confirmar de más de 24 h e imágenes pegadas que ya no están en ningún texto desde hace 7 días |
 | `NOTIFICATION_RETENTION_DAYS`, `MAINTENANCE_CRON` | Limpieza diaria: notificaciones leídas de más de 90 días, tokens vencidos o usados (por defecto a las 3:30, `0 30 3 * * *`, en `app.timezone`) |
 
 El archivo `.env` está en `.gitignore`; nunca se suben secretos.
@@ -188,6 +190,9 @@ Todas las respuestas de error tienen la misma forma (`errors` solo aparece en va
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET / PATCH | `/users/me` | Ver / editar perfil (`{ fullName?, avatarUrl? }`) |
+| POST | `/users/me/avatar` | `{ contentType, size }` → subida firmada de la foto de perfil (la recorta el navegador a 512 × 512 WebP; PNG/JPG/WebP hasta 5 MB). Ver [Archivos](#archivos) |
+| POST | `/users/me/avatar/{fileId}/confirm` | Confirma la foto y la pone en el perfil: `avatarUrl` pasa a ser `/files/<id>` (la anterior se borra) |
+| DELETE | `/users/me/avatar` | Quita la foto (vuelven las iniciales) |
 | PATCH | `/users/me/password` | `{ currentPassword, newPassword }` → devuelve un `AuthResponse` nuevo (las demás sesiones se cierran) |
 
 ### Workspaces e invitaciones
@@ -701,6 +706,45 @@ entradas por proyecto, de más a menos (solo proyectos con actividad):
 (y va primera); `12` busca el número en todos los proyectos. Después, las actualizadas más
 recientemente.
 
+### Archivos
+
+Adjuntos de las tareas, imágenes pegadas en descripciones y comentarios, y fotos de perfil, en **Cloudflare R2**
+(bucket privado). El navegador sube y descarga directo de R2 con **URLs firmadas**; la API nunca pasa los bytes.
+
+- **Tipos**: imágenes PNG, JPG, GIF y WebP hasta **5 MB**; PDF, DOCX, XLSX, PPTX, TXT, MD, CSV y ZIP hasta
+  **10 MB**. Lo demás (ejecutables, HTML, SVG…) se rechaza. La extensión decide el tipo; el `contentType` declarado
+  debe corresponderle (o venir vacío) y se guarda el canónico.
+- **Subir** (3 pasos): `POST …/files` valida y firma un `PUT` que incluye el tipo y el tamaño (R2 rechaza otro
+  archivo); el navegador hace `PUT url` con exactamente `headers`; `POST …/files/{id}/confirm` comprueba en R2 (HEAD y
+  los primeros bytes) que llegó lo firmado. Si no coincide, lo borra y responde 400 `UPLOAD_REJECTED`.
+- **Ver**: el Markdown guarda una referencia estable, `![nombre](/files/<id>)`, nunca una URL que vence. El frontend
+  pide las URLs en lote con `GET /files/urls?ids=…` (1 h; volver a pedirlas antes de `expiresAt`). Lo mismo con
+  `avatarUrl` cuando es `/files/<id>`. Imágenes y PDF se abren en el navegador; lo demás se descarga con su nombre.
+- **Permisos**: subir y ver, cualquiera con acceso al proyecto; eliminar, quien lo subió o un project manager. Las
+  URLs solo se firman para archivos de proyectos accesibles y fotos de quien comparte un workspace: un id ajeno no
+  viene, aunque se adivine.
+- **Cuota**: 2 GB por workspace (adjuntos e imágenes de sus tareas; las fotos de perfil no cuentan). Al pedir una
+  subida cuentan también las que están en curso; si no cabe, 409 `STORAGE_FULL`. Al pasar el 90 % los project
+  managers reciben `STORAGE_WARNING` en la Bandeja.
+- **Sin huérfanos**: borrar un archivo, una tarea, un proyecto o un workspace deja las claves de sus objetos en
+  `storage_deletions` (un trigger, en la misma transacción) y se borran de R2 después del commit y cada minuto (si R2
+  falla, se reintenta). Cada hora se borran las subidas sin confirmar de más de 24 h y las imágenes pegadas que no
+  están en ningún texto del proyecto desde hace 7 días. Borrar un comentario borra sus imágenes (salvo las que
+  siguen en otro texto del proyecto).
+- **Historial**: adjuntar o eliminar un adjunto queda como `ATTACHMENT` (`newValue`/`oldValue` = nombre; `file:
+  { id, fileName, contentType, size, image }` mientras exista). Las imágenes de los textos no se registran ni
+  cuentan para el clip (`IssueResponse.attachmentCount`).
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| POST | `/workspaces/{slug}/projects/{projectId}/files` | `{ purpose: ATTACHMENT \| INLINE_IMAGE, issueId?, fileName, contentType, size }` → `{ file, url, method: "PUT", headers, expiresAt, storage }`. `issueId` obligatorio en un adjunto; en una imagen de «Nueva tarea» puede faltar (se liga a la tarea al crearla con ese Markdown) |
+| POST | `/workspaces/{slug}/projects/{projectId}/files/{fileId}/confirm` | Confirmar (quien la pidió) → `FileResponse`. 409 `UPLOAD_MISSING` si todavía no está en R2 |
+| DELETE | `/workspaces/{slug}/projects/{projectId}/files/{fileId}` | Eliminar (quien lo subió o PM); también cancela una subida en curso |
+| GET | `/workspaces/{slug}/projects/{projectId}/issues/{issueId}/attachments` | Adjuntos confirmados de la tarea |
+| GET | `/files/urls?ids=a,b&download=false` | URLs firmadas (hasta 100 ids): `[{ id, url, expiresAt, fileName, contentType, size, image }]`; `download=true` descarga todo |
+| GET | `/workspaces/{slug}/storage/usage` | `{ usedBytes, quotaBytes, percent, warning, full }` (cualquier miembro) |
+| GET | `/workspaces/{slug}/storage` | Pestaña «Almacenamiento» (PM): `usage`, `byType` (`IMAGES`, `DOCUMENTS`, `OTHER`), `byProject` y `largest` (10) |
+
 ### Notificaciones
 
 Nunca se avisa a quien hizo la acción. Cada notificación trae
@@ -724,6 +768,8 @@ comentario se borró). Tipos (`type`):
   (`"Ana abrió la retrospectiva de «Sprint 1»: agrega tus notas"`). Solo en la app (sin correo).
 - `STORY_READY`: una historia quedó lista para revisar (a los project managers, sin `actor`:
   `"WEB-15 está lista para revisar: Pantalla de perfil de usuario"`). Solo en la app.
+- `STORAGE_WARNING`: el workspace pasó el 90 % de su espacio para archivos (a los project managers, sin `actor`, como
+  mucho una vez por semana). Trae `workspace: { id, slug, name }` en lugar de tarea. Solo en la app.
 
 | Método | Ruta | Descripción |
 |---|---|---|
@@ -768,7 +814,9 @@ historias), `issues.closed_at`/`closed_by_id` y `issues.review_notified`, el tip
 los ciclos (`closed_completed_count`, `closed_total_count`, `closed_cycle_time_days`) e índices; `V26` agrega
 `users.credentials_version` (la versión que llevan los access tokens en el claim `cv`; 1 para quien ya había cambiado
 su contraseña), rellena la foto del cierre de los ciclos cerrados antes de `V25` con sus tareas de ese momento y agrega
-el índice del cursor de la bandeja.
+el índice del cursor de la bandeja. `V27` crea `stored_files` (archivos en R2), la cola `storage_deletions` con el
+trigger que la llena al borrar archivos (también en cascada), `issue_activities.file_id`, `notifications.workspace_id`
+y el tipo `STORAGE_WARNING`.
 Las entidades usan **UUID** y `created_at`/`updated_at`. Las tablas intermedias puras
 (`issue_assignees`, `issue_labels`, `cycle_issues`, `module_issues`, `issue_template_labels`,
 `retro_note_votes`) usan clave compuesta.

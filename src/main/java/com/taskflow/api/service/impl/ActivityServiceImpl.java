@@ -9,6 +9,7 @@ import com.taskflow.api.dto.response.PageResponse;
 import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.IssueActivity;
 import com.taskflow.api.entity.Project;
+import com.taskflow.api.entity.StoredFile;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.Workspace;
 import com.taskflow.api.entity.enums.ActivityField;
@@ -87,6 +88,19 @@ public class ActivityServiceImpl implements ActivityService {
             return;
         }
         record(issue, actor, ActivityField.DESCRIPTION, null, null);
+    }
+
+    @Override
+    @Transactional
+    public void recordAttachment(Issue issue, User actor, StoredFile file, boolean added) {
+        IssueActivity activity = new IssueActivity();
+        activity.setIssue(issue);
+        activity.setActor(actor);
+        activity.setField(ActivityField.ATTACHMENT);
+        activity.setOldValue(added ? null : file.getFileName());
+        activity.setNewValue(added ? file.getFileName() : null);
+        activity.setFile(added ? file : null);
+        activityRepository.save(activity);
     }
 
     @Override

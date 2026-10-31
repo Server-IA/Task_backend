@@ -67,6 +67,13 @@ class ControllerPermissionsTest {
             "UserController.getProfile",
             "UserController.updateProfile",
             "UserController.changePassword",
+            // Mi foto de perfil (subirla, confirmarla y quitarla)
+            "UserController.startAvatarUpload",
+            "UserController.confirmAvatar",
+            "UserController.removeAvatar",
+            // URLs firmadas de archivos: el servicio solo firma los de proyectos accesibles y las fotos de quien
+            // comparte un workspace (un id ajeno, aunque se adivine, no viene)
+            "FileController.resolveUrls",
             // Mis notificaciones (lista, contadores, marcar como leídas)
             "NotificationController.getMyNotifications",
             "NotificationController.countUnread",
@@ -204,6 +211,14 @@ class ControllerPermissionsTest {
         rule(CommentController.class, "getComments", ACCESS);
         rule(SearchController.class, "byCodes", MEMBER);
         rule(WorkspaceController.class, "getMembers", MEMBER);
+        // Archivos: subir y ver, cualquier miembro del proyecto (borrar uno ajeno lo valida el servicio: quien lo
+        // subió o un project manager); el almacenamiento del workspace, el project manager (el uso, cualquiera)
+        rule(ProjectFileController.class, "createUpload", ACCESS);
+        rule(ProjectFileController.class, "confirmUpload", ACCESS);
+        rule(ProjectFileController.class, "deleteFile", ACCESS);
+        rule(ProjectFileController.class, "getAttachments", ACCESS);
+        rule(StorageController.class, "getReport", MANAGER);
+        rule(StorageController.class, "getUsage", MEMBER);
     }
 
     /** Un endpoint: su controlador y su método. */

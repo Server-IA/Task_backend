@@ -32,7 +32,7 @@ class GlobalExceptionHandlerTest {
         IssueResponse current = new IssueResponse(UUID.randomUUID(), "WEB-4", 4, UUID.randomUUID(), null, null, "Título",
                 "Lo que guardó Luis", 7, at, luis, null, null, null, null, null, 0, List.of(), List.of(), null,
                 List.of(), 0, 0, 0, List.of(), List.of(), 0, 0, 0, 0, null, null, null, null, null, null, 0, 0, 0, 0, 0,
-                false, null, null);
+                false, null, null, 0);
 
         ResponseEntity<DescriptionConflictResponse> response =
                 handler.handleDescriptionConflict(new DescriptionConflictException(current));

@@ -41,6 +41,7 @@ import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.service.ActivityService;
+import com.taskflow.api.service.FileService;
 import com.taskflow.api.service.IssueChecklistService;
 import com.taskflow.api.service.IssueRelationService;
 import com.taskflow.api.service.IssueService;
@@ -93,6 +94,7 @@ public class IssueServiceImpl implements IssueService {
     private final StoryProgress storyProgress;
     private final ResourceLookup lookup;
     private final IssueMapper issueMapper;
+    private final FileService fileService;
 
     @Override
     @Transactional(readOnly = true)
@@ -156,6 +158,8 @@ public class IssueServiceImpl implements IssueService {
         issue.setSortOrder(SortOrderCalculator.endOfColumn(issueRepository.findMaxSortOrder(state.getId())));
         issueRepository.save(issue);
         setChecklistCounts(issue, checklistService.createAll(issue, request.checklist()));
+        // Las imágenes pegadas en «Nueva tarea» se subieron sin tarea: desde ahora se borran con ella
+        fileService.claimInlineImages(issue, issue.getDescription());
 
         activityService.record(issue, actor, ActivityField.CREATED, null, issue.getTitle());
         notificationService.notifyAssigned(issue, actor, issue.getAssignees());

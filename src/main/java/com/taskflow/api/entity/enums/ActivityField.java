@@ -29,5 +29,10 @@ public enum ActivityField {
     DESCRIPTION_CHECKED,
     DESCRIPTION_UNCHECKED,
     TYPE,
-    STORY_AUTO_STATE
+    STORY_AUTO_STATE,
+    /**
+     * Se adjuntó ({@code newValue} = nombre del archivo) o se eliminó ({@code oldValue} = nombre) un archivo de la
+     * sección «Adjuntos». Las imágenes pegadas en un texto no se registran.
+     */
+    ATTACHMENT
 }

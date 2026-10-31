@@ -52,6 +52,13 @@ class MentionParserTest {
     }
 
     @Test
+    void enElExtractoLasImagenesSubidasSonSuNombre() {
+        String body = "Así quedó:\n\n![mockup perfil.png](/files/" + luis + ")\n\n![](/files/" + luis + ") ok";
+
+        assertThat(MentionParser.excerpt(body, 200)).isEqualTo("Así quedó: [imagen: mockup perfil.png] [imagen] ok");
+    }
+
+    @Test
     void elExtractoSeCortaSinPartirUnaMencion() {
         String body = "Hola @[Luis](" + luis + ") " + "x".repeat(300);
 

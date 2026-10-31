@@ -75,6 +75,20 @@ app:
   maintenance:
     cron: ${MAINTENANCE_CRON:0 30 3 * * *}
     notification-retention-days: ${NOTIFICATION_RETENTION_DAYS:90}
+  # Archivos e imágenes en Cloudflare R2 (bucket privado; se ven con URLs firmadas). Sin credenciales, subir responde 503
+  storage:
+    account-id: ${R2_ACCOUNT_ID:}
+    access-key-id: ${R2_ACCESS_KEY_ID:}
+    secret-access-key: ${R2_SECRET_ACCESS_KEY:}
+    bucket: ${R2_BUCKET:taskflow-files}
+    # Endpoint S3 explícito (opcional). Vacío: https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com
+    endpoint: ${R2_ENDPOINT:}
+    workspace-quota-bytes: 2147483648
+    upload-url-ttl: 15m
+    download-url-ttl: 1h
+    # Cola de borrado de objetos (StorageCleanup) y limpieza de subidas abandonadas
+    drain-interval: PT1M
+    cleanup-cron: ${STORAGE_CLEANUP_CRON:0 15 * * * *}
   tokens:
     email-verification-hours: 24
     password-reset-minutes: 60

@@ -227,6 +227,11 @@ public class Issue extends BaseEntity {
             + "where c.issue_id = id and c.kind = 'CRITERION' and c.done)")
     private int criteriaDone;
 
+    /** Adjuntos confirmados (el clip de las tarjetas); las imágenes pegadas en los textos no cuentan. */
+    @Formula("(select count(*) from stored_files f where f.issue_id = id and f.kind = 'ATTACHMENT' "
+            + "and f.status = 'READY')")
+    private int attachmentCount;
+
     // ----- Historias (solo se calculan si la tarea es una historia; en las demás valen 0) -----
 
     /** Tareas ({@code TASK}) hijas de la historia, sin contar las canceladas: el «y» de «x de y tareas». */

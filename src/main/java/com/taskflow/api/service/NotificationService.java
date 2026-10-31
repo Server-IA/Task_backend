@@ -8,6 +8,7 @@ import com.taskflow.api.entity.Comment;
 import com.taskflow.api.entity.Cycle;
 import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.User;
+import com.taskflow.api.entity.Workspace;
 import com.taskflow.api.entity.enums.NotificationType;
 import org.springframework.data.domain.Pageable;
 
@@ -80,4 +81,10 @@ public interface NotificationService {
      * ({@code STORY_READY}). Lo manda TaskFlow (sin autor); no se avisa a quien hizo el cambio que la dejó lista.
      */
     void notifyStoryReady(Issue story, Collection<User> managers, User actor);
+
+    /**
+     * Avisa a los project managers ({@code managers}) de que el workspace pasó el 90 % de su espacio para archivos
+     * ({@code STORAGE_WARNING}). Lo manda TaskFlow (sin autor), como mucho una vez por semana por workspace.
+     */
+    void notifyStorageWarning(Workspace workspace, Collection<User> managers, int percent, String quota);
 }

@@ -39,7 +39,9 @@ public enum RateLimitRule {
     /** Invitaciones que recibe cada correo, de cualquier workspace: nadie recibe una avalancha de correos. */
     INVITE_RECIPIENT(null, 3, Duration.ofHours(1)),
     /** Intentos de cambiar la contraseña (adivinar la actual con una sesión robada). */
-    CHANGE_PASSWORD(null, 5, Duration.ofMinutes(15));
+    CHANGE_PASSWORD(null, 5, Duration.ofMinutes(15)),
+    /** Subidas que pide cada persona (adjuntos, imágenes y foto de perfil): frena llenar el bucket con un script. */
+    UPLOADS(null, 300, Duration.ofHours(1));
 
     private final String method;
     private final String path;
