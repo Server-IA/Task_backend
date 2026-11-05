@@ -40,7 +40,7 @@ public class LabelServiceImpl implements LabelService {
     public LabelResponse create(String slug, UUID projectId, LabelRequest request) {
         Project project = lookup.project(slug, projectId);
         lookup.lockProject(project);
-        String name = HumanNames.clean(request.name());
+        String name = HumanNames.required(request.name(), "name");
         ensureNameAvailable(project, name);
 
         Label label = new Label();
@@ -57,7 +57,7 @@ public class LabelServiceImpl implements LabelService {
         lookup.lockProject(project);
         Label label = labelRepository.findByIdAndProjectId(labelId, project.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Etiqueta no encontrada"));
-        String name = HumanNames.clean(request.name());
+        String name = HumanNames.required(request.name(), "name");
         if (!name.equalsIgnoreCase(label.getName())) {
             ensureNameAvailable(project, name);
         }

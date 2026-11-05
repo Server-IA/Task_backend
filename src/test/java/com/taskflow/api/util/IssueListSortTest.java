@@ -78,7 +78,29 @@ class IssueListSortTest {
                     .isInstanceOf(BadRequestException.class)
                     .hasMessageContaining("No se puede ordenar por");
         }
-        assertThat(describe(IssueListSort.withTieBreakers(PageRequest.of(0, 20, Sort.by("due_date_2")))))
-                .isEqualTo("due_date_2,asc sequenceId,asc");
+        assertThatThrownBy(() -> IssueListSort.withTieBreakers(PageRequest.of(0, 20, Sort.by("due_date_2"))))
+                .isInstanceOf(BadRequestException.class);
+    }
+
+    @Test
+    void noOrdenaPorColeccionesQueRepetianTareasEntrePaginas() {
+        // sort=assignees (o labels, cycles, modules) hacía un join a la colección: una tarea con dos asignados salía
+        // dos veces, totalElements contaba de más y la página siguiente repetía tareas
+        for (String property : List.of("assignees", "labels", "cycles", "modules", "createdBy", "parent", "project",
+                "state", "description")) {
+            assertThatThrownBy(() -> IssueListSort.withTieBreakers(PageRequest.of(0, 20, Sort.by(property))))
+                    .as(property)
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessageContaining(property);
+        }
+    }
+
+    @Test
+    void losOrdenesDelFrontendSiguenValiendo() {
+        for (String property : List.of("sortOrder", "priorityRank", "sequenceId", "updatedAt", "dueDate", "title",
+                "createdAt", "type", "priority", "startDate")) {
+            assertThat(IssueListSort.withTieBreakers(PageRequest.of(0, 20, Sort.by(property))).getSort()
+                    .getOrderFor(property)).as(property).isNotNull();
+        }
     }
 }

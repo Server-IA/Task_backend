@@ -66,14 +66,15 @@ public class WorkspaceServiceImpl implements WorkspaceService {
         if (workspaceRepository.countByOwnerId(userId) >= MAX_OWNED_WORKSPACES) {
             throw new ConflictException(WORKSPACE_LIMIT_MESSAGE, ConflictException.WORKSPACE_LIMIT);
         }
-        String slug = request.slug() != null ? request.slug() : generateUniqueSlug(request.name());
+        String name = HumanNames.required(request.name(), "name");
+        String slug = request.slug() != null ? request.slug() : generateUniqueSlug(name);
         ensureNotReserved(slug);
         if (workspaceRepository.existsBySlug(slug)) {
             throw new ConflictException("El slug '" + slug + "' ya está en uso");
         }
 
         Workspace workspace = new Workspace();
-        workspace.setName(HumanNames.clean(request.name()));
+        workspace.setName(name);
         workspace.setSlug(slug);
         workspace.setOwner(owner);
         workspaceRepository.save(workspace);
@@ -93,10 +94,7 @@ public class WorkspaceServiceImpl implements WorkspaceService {
     public WorkspaceResponse update(String slug, UUID userId, UpdateWorkspaceRequest request) {
         Workspace workspace = lookup.workspace(slug);
         if (request.name() != null) {
-            if (request.name().isBlank()) {
-                throw new BadRequestException("El nombre no puede estar vacío");
-            }
-            workspace.setName(HumanNames.clean(request.name()));
+            workspace.setName(HumanNames.required(request.name(), "name"));
         }
         if (request.slug() != null && !request.slug().equals(workspace.getSlug())) {
             ensureNotReserved(request.slug());

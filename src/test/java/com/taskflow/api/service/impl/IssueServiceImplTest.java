@@ -585,6 +585,16 @@ class IssueServiceImplTest {
         }
 
         @Test
+        void antesDeBorrarlaSueltaLasImagenesQueSiguenEnOtroTexto() {
+            // Si no, se borraban en cascada con la tarea aunque otra tarea las mostrara (descripción copiada)
+            issueService.delete(SLUG, project.getId(), issue.getId(), creator.getId());
+
+            InOrder order = inOrder(fileService, issueRepository);
+            order.verify(fileService).keepSharedInlineImages(issue);
+            order.verify(issueRepository).delete(issue);
+        }
+
+        @Test
         void elProjectManagerPuedeEliminarCualquierTarea() {
             UUID pmId = UUID.randomUUID();
             when(workspaceMemberRepository.findRole(SLUG, pmId)).thenReturn(Optional.of(WorkspaceRole.OWNER));

@@ -419,6 +419,60 @@ class AuthServiceImplTest {
             return token;
         }
 
+        @Test
+        void logoutConElTokenVivoBorraLaSesionYLosQueApuntanAEl() {
+            User user = user("ana@test.com");
+            RefreshToken live = active(user);
+            lockedRefresh(user, live);
+
+            authService.logout("rt");
+
+            // También el anterior (rotado hace poco y apuntando a este): reusarlo es un 401 y no cierra los otros equipos
+            verify(refreshTokenRepository).deleteSession(user.getId(), List.of(live.getId()));
+            verify(refreshTokenRepository, never()).revokeAllByUserId(any());
+        }
+
+        @Test
+        void logoutConUnTokenYaRotadoBorraTambienSuSucesorVivo() {
+            // El navegador recargó antes de guardar el token nuevo y luego se cerró sesión con el viejo: el sucesor
+            // seguía sirviendo una semana después del logout
+            User user = user("ana@test.com");
+            RefreshToken live = active(user);
+            RefreshToken middle = rotated(user, live, Instant.now().minusSeconds(5));
+            RefreshToken stored = rotated(user, middle, Instant.now().minusSeconds(60));
+            lockedRefresh(user, stored);
+            when(refreshTokenRepository.findById(middle.getId())).thenReturn(Optional.of(middle));
+            when(refreshTokenRepository.findById(live.getId())).thenReturn(Optional.of(live));
+
+            authService.logout("rt");
+
+            verify(refreshTokenRepository).deleteSession(user.getId(),
+                    List.of(stored.getId(), middle.getId(), live.getId()));
+        }
+
+        @Test
+        void logoutNoSigueSucesoresDeOtroUsuario() {
+            User user = user("ana@test.com");
+            RefreshToken foreign = active(user("otro@test.com"));
+            RefreshToken stored = rotated(user, foreign, Instant.now().minusSeconds(5));
+            lockedRefresh(user, stored);
+            when(refreshTokenRepository.findById(foreign.getId())).thenReturn(Optional.of(foreign));
+
+            authService.logout("rt");
+
+            verify(refreshTokenRepository).deleteSession(user.getId(), List.of(stored.getId()));
+        }
+
+        @Test
+        void logoutConUnTokenDesconocidoNoHaceNada() {
+            when(refreshTokenRepository.findUserIdByTokenHash(anyString())).thenReturn(Optional.empty());
+
+            authService.logout("rt");
+
+            verify(refreshTokenRepository, never()).deleteSession(any(), any());
+            verifyNoInteractions(userRepository);
+        }
+
         private void lockedRefresh(User user, RefreshToken stored) {
             when(refreshTokenRepository.findUserIdByTokenHash(anyString())).thenReturn(Optional.of(user.getId()));
             when(userRepository.lockCredentials(user.getId())).thenReturn(Optional.of(locked("hash-actual", 0)));

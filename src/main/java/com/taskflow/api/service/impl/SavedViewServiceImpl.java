@@ -42,6 +42,8 @@ public class SavedViewServiceImpl implements SavedViewService {
     static final String REORDER_EMPTY = "Indica el nuevo orden de las vistas compartidas o de tus vistas personales";
     static final String DUPLICATE_SHARED = "Ya hay una vista compartida llamada «%s» en este proyecto";
     static final String DUPLICATE_PERSONAL = "Ya tienes una vista personal llamada «%s» en este proyecto";
+    /** Un project manager deja de compartir la vista de otra persona: la vista vuelve a las personales de su dueño. */
+    static final String DUPLICATE_OWNER_PERSONAL = "%s ya tiene una vista personal llamada «%s» en este proyecto";
 
     private final SavedViewRepository viewRepository;
     private final IssueRepository issueRepository;
@@ -66,9 +68,9 @@ public class SavedViewServiceImpl implements SavedViewService {
         }
         User owner = lookup.user(userId);
         lookup.lockProject(project);
-        String name = HumanNames.clean(request.name());
+        String name = HumanNames.required(request.name(), "name");
         List<SavedView> group = group(project, shared, owner);
-        ensureNameAvailable(group, null, name, shared);
+        ensureNameAvailable(group, null, name, shared, null);
 
         SavedView view = new SavedView();
         view.setProject(project);
@@ -92,15 +94,13 @@ public class SavedViewServiceImpl implements SavedViewService {
             throw new ForbiddenException("Solo el project manager puede compartir vistas");
         }
 
-        String name = request.name() == null ? view.getName() : HumanNames.clean(request.name());
-        if (name.isEmpty()) {
-            throw new BadRequestException("El nombre no puede estar vacío");
-        }
+        String name = request.name() == null ? view.getName() : HumanNames.required(request.name(), "name");
         boolean shared = request.shared() == null ? view.isShared() : request.shared();
         // Un nombre nuevo o un cambio de grupo (compartir o dejar de compartir) no puede repetir otro del grupo destino
         if (!name.equals(view.getName()) || shared != view.isShared()) {
             lookup.lockProject(project);
-            ensureNameAvailable(group(project, shared, view.getOwner()), view, name, shared);
+            ensureNameAvailable(group(project, shared, view.getOwner()), view, name, shared,
+                    view.getOwner().getId().equals(userId) ? null : view.getOwner());
         }
         view.setName(name);
         if (request.filters() != null) {
@@ -216,13 +216,17 @@ public class SavedViewServiceImpl implements SavedViewService {
      * Dentro de un grupo (las compartidas del proyecto o las personales de su dueño) no se repiten nombres, sin
      * importar mayúsculas ni espacios de más. {@code self}: la vista que se edita (puede conservar su nombre).
      */
-    private static void ensureNameAvailable(List<SavedView> group, SavedView self, String name, boolean shared) {
+    private static void ensureNameAvailable(List<SavedView> group, SavedView self, String name, boolean shared,
+                                            User otherOwner) {
         String key = nameKey(name);
         boolean taken = group.stream()
                 .filter(other -> self == null || !other.getId().equals(self.getId()))
                 .anyMatch(other -> nameKey(other.getName()).equals(key));
         if (taken) {
-            throw new ConflictException(String.format(shared ? DUPLICATE_SHARED : DUPLICATE_PERSONAL, name),
+            String message = shared ? String.format(DUPLICATE_SHARED, name)
+                    : otherOwner != null ? String.format(DUPLICATE_OWNER_PERSONAL, otherOwner.getFullName(), name)
+                    : String.format(DUPLICATE_PERSONAL, name);
+            throw new ConflictException(message,
                     ConflictException.NAME_TAKEN);
         }
     }

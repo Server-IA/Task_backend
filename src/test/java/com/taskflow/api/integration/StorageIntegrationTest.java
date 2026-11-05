@@ -5,6 +5,7 @@ import com.taskflow.api.dto.request.CommentRequest;
 import com.taskflow.api.dto.request.CreateIssueRequest;
 import com.taskflow.api.dto.request.CreateProjectRequest;
 import com.taskflow.api.dto.request.CreateUploadRequest;
+import com.taskflow.api.dto.request.UpdateIssueRequest;
 import com.taskflow.api.dto.request.CreateUploadRequest.UploadPurpose;
 import com.taskflow.api.dto.request.CreateWorkspaceRequest;
 import com.taskflow.api.dto.request.AvatarUploadRequest;
@@ -390,6 +391,38 @@ class StorageIntegrationTest {
         assertThat(values("SELECT file_name FROM stored_files WHERE issue_id = '" + task.id() + "'"))
                 .containsExactly("compartida.png");
         verify(storage, timeout(5000)).delete(ownKey);
+    }
+
+    @Test
+    void borrarUnaTareaNoBorraLasImagenesQueSiguenEnOtroTexto() {
+        // La descripción con la imagen se copió y pegó en otra tarea (el Markdown lleva el mismo /files/<id>): borrar la
+        // primera borraba la imagen en cascada y la otra se quedaba con la imagen rota
+        IssueResponse original = issue(web, "Original", null);
+        FileResponse copied = upload(web, pm, original.id(), UploadPurpose.INLINE_IMAGE, "copiada.png", "image/png", 10);
+        FileResponse inComment = upload(web, pm, original.id(), UploadPurpose.INLINE_IMAGE, "comentada.png",
+                "image/png", 10);
+        FileResponse own = upload(web, pm, original.id(), UploadPurpose.INLINE_IMAGE, "propia.png", "image/png", 10);
+        issueService.update(slug, web, original.id(), pm.getId(), new UpdateIssueRequest(null,
+                "![copiada.png](/files/" + copied.id() + ") ![propia.png](/files/" + own.id() + ")",
+                null, null, null, null, null, null, null, null, null, null, null, null, null));
+        IssueResponse other = issue(web, "Copia", "Igual: ![copiada.png](/files/" + copied.id() + ")");
+        commentService.create(slug, web, other.id(), luis.getId(),
+                new CommentRequest("Mira ![comentada.png](/files/" + inComment.id() + ")"));
+        String ownKey = keyOf(own.id());
+
+        issueService.delete(slug, web, original.id(), pm.getId());
+
+        // Las que siguen en otro texto quedan (sin tarea); la que solo estaba en la tarea borrada se va a la cola
+        assertThat(values("SELECT file_name FROM stored_files WHERE id IN ('" + copied.id() + "', '" + inComment.id()
+                + "', '" + own.id() + "') ORDER BY file_name")).containsExactly("comentada.png", "copiada.png");
+        assertThat(value("SELECT count(*) FROM stored_files WHERE issue_id IS NULL AND id IN ('" + copied.id()
+                + "', '" + inComment.id() + "')")).isEqualTo("2");
+        assertThat(queued()).contains(ownKey).doesNotContain(keyOf(copied.id()));
+        assertThat(fileService.resolveUrls(luis.getId(), List.of(copied.id(), inComment.id()), false)).hasSize(2);
+        // La limpieza programada las respeta mientras estén en algún texto
+        sql("UPDATE stored_files SET created_at = now() - interval '30 days' WHERE id = '" + copied.id() + "'");
+        storageCleanup.purgeAbandoned();
+        assertThat(value("SELECT count(*) FROM stored_files WHERE id = '" + copied.id() + "'")).isEqualTo("1");
     }
 
     @Test

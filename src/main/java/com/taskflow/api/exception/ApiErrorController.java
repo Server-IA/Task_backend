@@ -34,8 +34,15 @@ public class ApiErrorController implements ErrorController {
         writer.writeError(response, status.value(), message(status));
     }
 
+    /**
+     * El estado del error que llegó aquí. Sin él, alguien pidió {@code /error} directamente (no es un error reenviado):
+     * esa ruta no existe para la API (404; antes respondía 500, un error del servidor que no ocurrió).
+     */
     static HttpStatus status(HttpServletRequest request) {
         Object code = request.getAttribute(RequestDispatcher.ERROR_STATUS_CODE);
+        if (code == null && request.getAttribute(RequestDispatcher.ERROR_REQUEST_URI) == null) {
+            return HttpStatus.NOT_FOUND;
+        }
         if (code instanceof Integer value) {
             HttpStatus status = HttpStatus.resolve(value);
             if (status != null && status.isError()) {

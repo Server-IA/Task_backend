@@ -36,10 +36,7 @@ public class UserServiceImpl implements UserService {
     public UserResponse updateProfile(UUID userId, UpdateProfileRequest request) {
         User user = findUser(userId);
         if (request.fullName() != null) {
-            if (request.fullName().isBlank()) {
-                throw new BadRequestException("El nombre no puede estar vacío");
-            }
-            user.setFullName(HumanNames.clean(request.fullName()));
+            user.setFullName(HumanNames.required(request.fullName(), "fullName"));
         }
         String avatarUrl = request.avatarUrl() == null ? null : request.avatarUrl().trim();
         if (avatarUrl != null && !avatarUrl.equals(user.getAvatarUrl())) {

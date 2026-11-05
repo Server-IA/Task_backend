@@ -59,7 +59,7 @@ public class IssueTemplateServiceImpl implements IssueTemplateService {
     @Transactional
     public IssueTemplateResponse create(String slug, UUID projectId, IssueTemplateRequest request) {
         Project project = lookup.project(slug, projectId);
-        String name = HumanNames.clean(request.name());
+        String name = HumanNames.required(request.name(), "name");
         ensureNameAvailable(project, name);
 
         List<IssueTemplate> existing = ordered(project);
@@ -85,10 +85,7 @@ public class IssueTemplateServiceImpl implements IssueTemplateService {
         Project project = lookup.project(slug, projectId);
         IssueTemplate template = findTemplate(project, templateId);
         if (request.name() != null) {
-            String name = HumanNames.clean(request.name());
-            if (name.isEmpty()) {
-                throw new BadRequestException("El nombre no puede estar vacío");
-            }
+            String name = HumanNames.required(request.name(), "name");
             if (!name.equalsIgnoreCase(template.getName())) {
                 ensureNameAvailable(project, name);
             }

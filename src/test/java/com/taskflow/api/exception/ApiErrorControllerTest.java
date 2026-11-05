@@ -74,4 +74,15 @@ class ApiErrorControllerTest {
         assertThat(errorFor(200, "*/*").getStatus()).isEqualTo(500);
         assertThat(errorFor("x", "*/*").getStatus()).isEqualTo(500);
     }
+
+    @Test
+    void pedirErrorDirectamenteEs404YNo500() throws IOException {
+        // GET /error sin que haya un error reenviado (un escáner, un enlace): antes respondía 500
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/error");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        controller.error(request, response);
+
+        assertThat(response.getStatus()).isEqualTo(404);
+        assertThat(body(response).get("message").asString()).isEqualTo("Ruta no encontrada");
+    }
 }

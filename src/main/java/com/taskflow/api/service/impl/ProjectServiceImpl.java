@@ -76,7 +76,7 @@ public class ProjectServiceImpl implements ProjectService {
 
         Project project = new Project();
         project.setWorkspace(workspace);
-        project.setName(HumanNames.clean(request.name()));
+        project.setName(HumanNames.required(request.name(), "name"));
         project.setIdentifier(identifier);
         project.setDescription(blankToNull(request.description()));
         project.setColor(request.color() != null
@@ -104,10 +104,7 @@ public class ProjectServiceImpl implements ProjectService {
     public ProjectResponse update(String slug, UUID projectId, UpdateProjectRequest request) {
         Project project = lookup.project(slug, projectId);
         if (request.name() != null) {
-            if (request.name().isBlank()) {
-                throw new BadRequestException("El nombre no puede estar vacío");
-            }
-            project.setName(HumanNames.clean(request.name()));
+            project.setName(HumanNames.required(request.name(), "name"));
         }
         if (request.identifier() != null) {
             String identifier = request.identifier().toUpperCase(Locale.ROOT);

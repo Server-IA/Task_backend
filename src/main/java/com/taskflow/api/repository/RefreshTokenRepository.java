@@ -52,7 +52,11 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
     @Query("delete from RefreshToken t where t.user.id = :userId")
     int deleteAllByUserId(@Param("userId") UUID userId);
 
+    /**
+     * Logout: borra los tokens de la sesión ({@code ids}: el token y sus sucesores) y los que apuntan a alguno de ellos
+     * como sucesor (los rotados hace poco: reusarlos ya no tiene a quién reemplazar y es un 401 sin más).
+     */
     @Modifying
-    @Query("delete from RefreshToken t where t.tokenHash = :tokenHash")
-    int deleteByTokenHash(@Param("tokenHash") String tokenHash);
+    @Query("delete from RefreshToken t where t.user.id = :userId and (t.id in :ids or t.replacedBy in :ids)")
+    int deleteSession(@Param("userId") UUID userId, @Param("ids") Collection<UUID> ids);
 }

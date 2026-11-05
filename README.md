@@ -163,7 +163,10 @@ Todas las respuestas de error tienen la misma forma (`errors` solo aparece en va
   de BCrypt: con tildes, ñ o emojis caben menos de 72 caracteres; si no, 400).
 - El **access token dura 15 min** y el **refresh token 7 días**. Cada refresh **rota** el token:
   hay que guardar el nuevo. Si se reutiliza un refresh token ya usado, se cierran todas las
-  sesiones del usuario (protección contra robo).
+  sesiones del usuario (protección contra robo), salvo dentro de los 30 s siguientes a su rotación
+  (`REFRESH_REUSE_GRACE_SECONDS`, dos recargas seguidas): ahí recibe un par nuevo de la misma sesión.
+- `logout` cierra **esa sesión entera**: el token enviado, sus sucesores (aunque se envíe uno ya rotado) y
+  los rotados hace poco que apuntan a ellos. Las demás sesiones del usuario siguen.
 - Login sin verificar el email → `403 "Debes verificar tu correo antes de iniciar sesión"`.
 - Rate limit por IP: login 5/min, registro 3/10 min, olvidé mi contraseña y reenviar
   verificación 3/15 min (la ruta se compara decodificada: `/auth/%6Cogin` cuenta como login).
@@ -400,7 +403,8 @@ GET /issues?state=<id>&state=<id>&priority=HIGH&assignee=<userId>&label=<id>
 `search` busca en el título y también por código (`WEB-12` o `12`). `blocked=true` deja solo las
 tareas con al menos un bloqueo abierto (`blocked=false`, las que no tienen): el «N bloqueadas» del
 encabezado es el `totalElements` de `?blocked=true&size=1` con los mismos filtros. Tamaño máximo de
-página: 200.
+página: 200. `sort` admite `sortOrder`, `priorityRank`, `priority`, `sequenceId`, `title`, `type`,
+`createdAt`, `updatedAt`, `dueDate`, `startDate`, `startedAt`, `completedAt` y `closedAt` (cualquier otro: 400).
 Respuesta paginada:
 
 ```json

@@ -44,6 +44,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -54,6 +55,8 @@ import java.util.UUID;
 public class AuthServiceImpl implements AuthService {
 
     private static final String TOKEN_TYPE = "Bearer";
+    /** Sucesores que sigue el logout (una sesión de 7 días que se renueva cada 15 minutos rota unas 700 veces). */
+    static final int MAX_SESSION_CHAIN = 2_000;
     static final String WRONG_CURRENT_PASSWORD = "La contraseña actual no es correcta";
     static final String INVALID_RESET_TOKEN = "El enlace para restablecer la contraseña no es válido o ya expiró";
 
@@ -80,7 +83,7 @@ public class AuthServiceImpl implements AuthService {
         User user = new User();
         user.setEmail(email);
         user.setPasswordHash(passwordEncoder.encode(request.password()));
-        user.setFullName(HumanNames.clean(request.fullName()));
+        user.setFullName(HumanNames.required(request.fullName(), "fullName"));
         userRepository.save(user);
 
         String token = createVerificationToken(user, VerificationTokenType.EMAIL_VERIFICATION,
@@ -232,10 +235,37 @@ public class AuthServiceImpl implements AuthService {
         return issued.response();
     }
 
+    /**
+     * Cierra la sesión del token: él, sus sucesores (los tokens que lo reemplazaron al rotar, hasta el vivo) y los que
+     * apuntan a ellos como sucesor. Antes se borraba solo el token recibido: con uno ya rotado (el navegador recargó
+     * antes de guardar el nuevo, o lo usó otra persona dentro del margen) el sucesor vivo seguía sirviendo una semana
+     * después del logout; y con el vivo, reusar el anterior dentro del margen contaba como robo y cerraba también las
+     * sesiones de los otros equipos. Las demás sesiones del usuario no se tocan.
+     */
     @Override
     @Transactional
     public void logout(String refreshToken) {
-        refreshTokenRepository.deleteByTokenHash(TokenUtils.sha256(refreshToken));
+        String hash = TokenUtils.sha256(refreshToken);
+        UUID userId = refreshTokenRepository.findUserIdByTokenHash(hash).orElse(null);
+        if (userId == null) {
+            return;
+        }
+        // Como en refresh: un refresh simultáneo de la misma sesión termina antes (y su token nuevo se borra aquí) o
+        // espera y ya no encuentra la sesión
+        userRepository.lockCredentials(userId);
+        refreshTokenRepository.findByTokenHash(hash).ifPresent(token -> {
+            List<UUID> session = new ArrayList<>();
+            RefreshToken current = token;
+            while (current != null && session.size() < MAX_SESSION_CHAIN) {
+                session.add(current.getId());
+                current = current.getReplacedBy() == null ? null
+                        : refreshTokenRepository.findById(current.getReplacedBy())
+                                .filter(next -> next.getUser().getId().equals(userId))
+                                .filter(next -> !session.contains(next.getId()))
+                                .orElse(null);
+            }
+            refreshTokenRepository.deleteSession(userId, session);
+        });
     }
 
     @Override

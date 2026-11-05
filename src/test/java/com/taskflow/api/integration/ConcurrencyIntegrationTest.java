@@ -337,6 +337,36 @@ class ConcurrencyIntegrationTest {
     }
 
     @Test
+    void logoutConElTokenViejoCierraTambienElSucesorVivo() {
+        // Dos recargas: la respuesta del refresh se perdió y el navegador se quedó con el token viejo; cerrar sesión
+        // con él dejaba vivo el sucesor (servía una semana más)
+        AuthResponse session = login();
+        AuthResponse other = login();
+        AuthResponse rotated = authService.refresh(session.refreshToken());
+        authService.logout(session.refreshToken());
+
+        assertThatThrownBy(() -> authService.refresh(rotated.refreshToken()))
+                .isInstanceOf(UnauthorizedException.class);
+        // Solo esa sesión: la del otro equipo sigue
+        assertThat(authService.refresh(other.refreshToken()).accessToken()).isNotBlank();
+        assertThat(activeTokens()).isEqualTo("1");
+    }
+
+    @Test
+    void reusarElTokenAnteriorTrasElLogoutNoCierraLasOtrasSesiones() {
+        // Otra pestaña con el token anterior (rotado hace segundos) pide un refresh después del logout: es un 401, no
+        // un robo que cierre también la sesión del otro equipo
+        AuthResponse session = login();
+        AuthResponse other = login();
+        AuthResponse rotated = authService.refresh(session.refreshToken());
+        authService.logout(rotated.refreshToken());
+
+        assertThatThrownBy(() -> authService.refresh(session.refreshToken()))
+                .isInstanceOf(UnauthorizedException.class);
+        assertThat(authService.refresh(other.refreshToken()).accessToken()).isNotBlank();
+    }
+
+    @Test
     void trasCambiarLaContrasenaElTokenViejoNoTieneMargen() {
         AuthResponse session = login();
         AuthResponse rotated = authService.refresh(session.refreshToken());

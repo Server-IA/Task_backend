@@ -120,7 +120,7 @@ public class CycleServiceImpl implements CycleService {
 
         Cycle cycle = new Cycle();
         cycle.setProject(project);
-        cycle.setName(HumanNames.clean(request.name()));
+        cycle.setName(HumanNames.required(request.name(), "name"));
         cycle.setDescription(PlanningSupport.blankToNull(request.description()));
         cycle.setStartDate(request.startDate());
         cycle.setEndDate(request.endDate());
@@ -142,10 +142,7 @@ public class CycleServiceImpl implements CycleService {
             throw new ConflictException(CLOSED_EDIT_MESSAGE);
         }
         if (request.name() != null) {
-            if (request.name().isBlank()) {
-                throw new BadRequestException("El nombre no puede estar vacío");
-            }
-            cycle.setName(HumanNames.clean(request.name()));
+            cycle.setName(HumanNames.required(request.name(), "name"));
         }
         if (request.description() != null) {
             cycle.setDescription(PlanningSupport.blankToNull(request.description()));

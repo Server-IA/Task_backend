@@ -56,7 +56,7 @@ public class StateServiceImpl implements StateService {
     public StateResponse create(String slug, UUID projectId, CreateStateRequest request) {
         Project project = lookup.project(slug, projectId);
         lookup.lockProject(project);
-        String name = HumanNames.clean(request.name());
+        String name = HumanNames.required(request.name(), "name");
         ensureNameAvailable(project, name);
 
         int position = request.position() != null
@@ -75,10 +75,7 @@ public class StateServiceImpl implements StateService {
         }
         State state = findState(project, stateId);
         if (request.name() != null) {
-            String name = HumanNames.clean(request.name());
-            if (name.isEmpty()) {
-                throw new BadRequestException("El nombre no puede estar vacío");
-            }
+            String name = HumanNames.required(request.name(), "name");
             if (!name.equalsIgnoreCase(state.getName())) {
                 ensureNameAvailable(project, name);
             }

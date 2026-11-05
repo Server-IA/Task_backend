@@ -461,6 +461,25 @@ class SavedViewServiceImplTest {
         }
 
         @Test
+        void alDejarDeCompartirLaVistaDeOtroElMensajeNombraASuDueno() {
+            // La vista vuelve a las personales de su dueño: «Ya tienes…» le hablaba al project manager, que no la tiene
+            User owner = user(true);
+            owner.setFullName("Ana Pérez");
+            SavedView shared = view(owner, true, 0);
+            shared.setName("Equipo");
+            sharedGroup(shared);
+            SavedView ownersPersonal = view(owner, false, 0);
+            ownersPersonal.setName("EQUIPO");
+            personalGroup(owner, ownersPersonal);
+
+            assertThatThrownBy(() -> viewService.update(SLUG, project.getId(), shared.getId(), pm.getId(),
+                    new UpdateSavedViewRequest(null, null, false, null)))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessage("Ana Pérez ya tiene una vista personal llamada «Equipo» en este proyecto");
+            assertThat(shared.isShared()).isTrue();
+        }
+
+        @Test
         void reordenaDentroDeSuGrupo() {
             SavedView a = view(member, false, 0);
             SavedView b = view(member, false, 1);

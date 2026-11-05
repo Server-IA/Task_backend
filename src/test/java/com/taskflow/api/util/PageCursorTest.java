@@ -41,4 +41,16 @@ class PageCursorTest {
             assertThatThrownBy(() -> PageCursor.parse(bad)).as(bad).isInstanceOf(BadRequestException.class);
         }
     }
+
+    @Test
+    void unaFechaQuePostgresNoAdmiteEs400DelCursor() {
+        // Llegaba a la consulta: PostgreSQL la rechazaba y la respuesta hablaba de «caracteres no permitidos»
+        UUID id = UUID.randomUUID();
+        for (String date : new String[] {"+1000000000-12-31T23:59:59Z", "-50000-01-01T00:00:00Z", "0000-12-31T23:59:59Z"}) {
+            assertThatThrownBy(() -> PageCursor.parse(date + "," + id)).as(date)
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessageContaining("cursor");
+        }
+        assertThat(PageCursor.parse("9999-12-31T00:00:00Z," + id).createdAt().toString()).startsWith("9999");
+    }
 }

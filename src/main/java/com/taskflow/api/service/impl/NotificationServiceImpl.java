@@ -20,6 +20,7 @@ import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.service.NotificationService;
 import com.taskflow.api.util.PageCursor;
+import com.taskflow.api.util.PageLimits;
 import com.taskflow.api.util.TextCut;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Limit;
@@ -87,7 +88,8 @@ public class NotificationServiceImpl implements NotificationService {
             pageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
                     Sort.by(byDate, new Sort.Order(byDate.getDirection(), "id")));
         }
-        Page<Notification> page = notificationRepository.findMine(userId, filter, unreadOnly, pageable);
+        Page<Notification> page = notificationRepository.findMine(userId, filter, unreadOnly,
+                PageLimits.reachable(pageable));
         return PageResponse.from(page, mapper::toNotificationResponse,
                 newestFirst ? NotificationServiceImpl::cursorOf : null);
     }

@@ -411,6 +411,8 @@ public class IssueServiceImpl implements IssueService {
             issueRepository.lockChildrenOf(issue.getId());
         }
         Issue parent = issue.getParent();
+        // Sus imágenes pegadas se borran con ella (en cascada), salvo las que también están en otro texto del proyecto
+        fileService.keepSharedInlineImages(issue);
         issueRepository.delete(issue);
         if (parent != null && parent.isStory()) {
             // Sin esta tarea (o bug), la historia puede quedar lista para revisar
