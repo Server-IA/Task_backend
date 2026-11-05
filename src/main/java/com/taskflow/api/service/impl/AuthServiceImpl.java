@@ -44,6 +44,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -136,7 +137,7 @@ public class AuthServiceImpl implements AuthService {
         rateLimitService.refund(RateLimitRule.LOGIN_ACCOUNT_IP, accountAndIp);
         rateLimitService.refund(RateLimitRule.LOGIN_ACCOUNT, email);
 
-        AuthResponse response = issueTokens(user, credentials.getCredentialsVersion());
+        AuthResponse response = issueTokens(user, credentials.getCredentialsVersion()).response();
         emailNotifier.sendLoginAlert(user, client, Instant.now());
         return response;
     }
@@ -163,35 +164,72 @@ public class AuthServiceImpl implements AuthService {
                 .orElseThrow(() -> new UnauthorizedException("Refresh token inválido"));
         // Primero la fila del usuario, como el cambio de contraseña: si hay uno en curso, se espera a que termine y
         // entonces el token ya no existe. Sin este bloqueo, un refresh simultáneo podía crear un token nuevo que el
-        // borrado del cambio de contraseña no veía.
+        // borrado del cambio de contraseña no veía. También pone en fila los refresh del mismo usuario: el segundo ve
+        // lo que dejó el primero.
         LockedCredentials credentials = userRepository.lockCredentials(userId)
                 .orElseThrow(() -> new UnauthorizedException("Refresh token inválido"));
         // Se lee después del bloqueo (es lo primero que carga esta transacción): ve lo que dejó un cambio de contraseña
         RefreshToken stored = refreshTokenRepository.findByTokenHash(hash)
                 .orElseThrow(() -> new UnauthorizedException("Refresh token inválido"));
+        Instant now = Instant.now();
 
         if (stored.isRevoked()) {
-            // Reutilizar un token ya rotado indica que pudo ser robado: se cierran todas las sesiones.
-            log.warn("Refresh token reutilizado para el usuario {}; se revocan todas sus sesiones", userId);
-            refreshTokenRepository.revokeAllByUserId(userId);
-            throw new UnauthorizedException("Refresh token inválido");
+            RefreshToken successor = reuseGraceSuccessor(stored, now);
+            if (successor == null) {
+                // Reutilizar un token ya rotado indica que pudo ser robado: se cierran todas las sesiones.
+                log.warn("Refresh token reutilizado para el usuario {}; se revocan todas sus sesiones", userId);
+                refreshTokenRepository.revokeAllByUserId(userId);
+                throw new UnauthorizedException("Refresh token inválido");
+            }
+            // Dentro del margen: lo normal es una recarga de la página que no alcanzó a guardar el token nuevo (la
+            // respuesta del refresh anterior se perdió al recargar). En vez de cerrar todo, se rota el sucesor (que
+            // nadie guardó) y se emite otro par. La cadena sigue con un solo token vivo: si el viejo lo usaba un
+            // ladrón, el dueño del sucesor lo usará pasado el margen y eso sí cierra todas las sesiones.
+            log.debug("Refresh token rotado hace {} ms reutilizado dentro del margen por el usuario {}; se rota su "
+                    + "sucesor", Duration.between(stored.getRevokedAt(), now).toMillis(), userId);
+            return rotate(successor, credentials, now, List.of(stored.getId(), successor.getId()));
         }
-        if (!stored.isUsable(Instant.now())) {
+        if (!stored.isUsable(now)) {
             throw new UnauthorizedException("El refresh token expiró, inicia sesión de nuevo");
         }
+        return rotate(stored, credentials, now, List.of(stored.getId()));
+    }
 
-        User user = stored.getUser();
+    /**
+     * El sucesor vivo de un token rotado hace menos del margen, o {@code null} si no tiene margen: se revocó por otra
+     * causa (reutilización detectada), se rotó hace más del margen, o su sucesor ya no está vivo (se usó, se cerró con
+     * logout o se revocó). Un cambio de contraseña borra todos los tokens: el viejo ya no llega hasta aquí.
+     */
+    private RefreshToken reuseGraceSuccessor(RefreshToken stored, Instant now) {
+        if (!stored.rotatedWithin(properties.tokens().refreshReuseGrace(), now)) {
+            return null;
+        }
+        return refreshTokenRepository.findById(stored.getReplacedBy())
+                .filter(successor -> successor.getUser().getId().equals(stored.getUser().getId()))
+                .filter(successor -> successor.isUsable(now))
+                .orElse(null);
+    }
+
+    /**
+     * Revoca {@code current} y emite un par nuevo; los tokens de {@code chain} (los de la cadena que se acaban de
+     * revocar) quedan apuntando al nuevo como su sucesor.
+     */
+    private AuthResponse rotate(RefreshToken current, LockedCredentials credentials, Instant now, List<UUID> chain) {
+        User user = current.getUser();
         if (!user.isActive()) {
             throw new UnauthorizedException("La cuenta está desactivada");
         }
         // Atómico: si dos peticiones usan el mismo token a la vez, solo una lo rota; la otra cuenta como reutilización.
-        if (refreshTokenRepository.revokeIfActive(stored.getId()) == 0) {
+        // (Con el bloqueo del usuario no debería pasar: es la última defensa.)
+        if (refreshTokenRepository.revokeIfActive(current.getId(), now) == 0) {
             log.warn("Refresh token usado dos veces a la vez por el usuario {}; se revocan todas sus sesiones",
                     user.getId());
             refreshTokenRepository.revokeAllByUserId(user.getId());
             throw new UnauthorizedException("Refresh token inválido");
         }
-        return issueTokens(user, credentials.getCredentialsVersion());
+        IssuedTokens issued = issueTokens(user, credentials.getCredentialsVersion());
+        refreshTokenRepository.linkReplacement(chain, issued.refreshTokenId());
+        return issued.response();
     }
 
     @Override
@@ -277,10 +315,14 @@ public class AuthServiceImpl implements AuthService {
     }
 
     private AuthResponse issueTokens(User user) {
-        return issueTokens(user, user.getCredentialsVersion());
+        return issueTokens(user, user.getCredentialsVersion()).response();
     }
 
-    private AuthResponse issueTokens(User user, int credentialsVersion) {
+    /** El par emitido y el id del refresh token nuevo (para anotarlo como sucesor del que se rotó). */
+    private record IssuedTokens(AuthResponse response, UUID refreshTokenId) {
+    }
+
+    private IssuedTokens issueTokens(User user, int credentialsVersion) {
         String rawRefreshToken = TokenUtils.generateToken();
         RefreshToken refreshToken = new RefreshToken();
         refreshToken.setUser(user);
@@ -289,8 +331,8 @@ public class AuthServiceImpl implements AuthService {
         refreshTokenRepository.save(refreshToken);
 
         String accessToken = jwtService.generateAccessToken(user.getId(), user.getEmail(), credentialsVersion);
-        return new AuthResponse(accessToken, rawRefreshToken, TOKEN_TYPE,
-                jwtService.getAccessExpirationSeconds(), userMapper.toResponse(user));
+        return new IssuedTokens(new AuthResponse(accessToken, rawRefreshToken, TOKEN_TYPE,
+                jwtService.getAccessExpirationSeconds(), userMapper.toResponse(user)), refreshToken.getId());
     }
 
     /** Crea un token nuevo (invalidando los anteriores del mismo tipo) y devuelve su valor en claro. */

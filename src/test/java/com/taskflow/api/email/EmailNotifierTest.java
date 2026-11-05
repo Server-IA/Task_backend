@@ -54,7 +54,7 @@ class EmailNotifierTest {
                 new AppProperties.Mail("smtp", "", "TaskFlow <test@test.com>"),
                 APP,
                 "America/Bogota",
-                new AppProperties.Tokens(24, 60, 7));
+                new AppProperties.Tokens(24, 60, 7, 30));
         notifier = new EmailNotifier(emailService, templateEngine, properties);
     }
 

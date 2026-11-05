@@ -51,7 +51,7 @@ class InvitationServiceImplTest {
     @BeforeEach
     void setUp() {
         AppProperties properties = new AppProperties(null, null, "http://localhost:5173", "America/Bogota",
-                new AppProperties.Tokens(24, 60, 7));
+                new AppProperties.Tokens(24, 60, 7, 30));
         invitationService = new InvitationServiceImpl(invitationRepository, memberRepository,
                 lookup, workspaceMapper, emailNotifier, properties, new RateLimitService());
         Workspace workspace = new Workspace();

@@ -4,6 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.ConstructorBinding;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.Locale;
 import java.util.Set;
 
@@ -70,7 +71,16 @@ public record AppProperties(
         }
     }
 
-    public record Tokens(long emailVerificationHours, long passwordResetMinutes, long invitationDays) {
+    /**
+     * @param refreshReuseGraceSeconds margen para volver a usar un refresh token recién rotado sin que cuente como robo
+     *                                 (dos recargas seguidas de la página). 0 lo desactiva
+     */
+    public record Tokens(long emailVerificationHours, long passwordResetMinutes, long invitationDays,
+                         long refreshReuseGraceSeconds) {
+
+        public Duration refreshReuseGrace() {
+            return Duration.ofSeconds(Math.max(0, refreshReuseGraceSeconds));
+        }
     }
 
     /** {@code FRONTEND_URL} apunta a esta máquina (desarrollo local). */
