@@ -17,6 +17,7 @@ import com.taskflow.api.mapper.PlanningMapper;
 import com.taskflow.api.repository.ProjectModuleRepository;
 import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.service.ModuleService;
+import com.taskflow.api.util.HumanNames;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -62,7 +63,7 @@ public class ModuleServiceImpl implements ModuleService {
 
         ProjectModule module = new ProjectModule();
         module.setProject(project);
-        module.setName(request.name().trim());
+        module.setName(HumanNames.clean(request.name()));
         module.setDescription(PlanningSupport.blankToNull(request.description()));
         module.setStartDate(request.startDate());
         module.setTargetDate(request.targetDate());
@@ -84,7 +85,7 @@ public class ModuleServiceImpl implements ModuleService {
             if (request.name().isBlank()) {
                 throw new BadRequestException("El nombre no puede estar vacío");
             }
-            module.setName(request.name().trim());
+            module.setName(HumanNames.clean(request.name()));
         }
         if (request.description() != null) {
             module.setDescription(PlanningSupport.blankToNull(request.description()));

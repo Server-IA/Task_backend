@@ -28,6 +28,7 @@ import com.taskflow.api.repository.ProjectRepository;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.service.ProjectService;
+import com.taskflow.api.util.HumanNames;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -75,7 +76,7 @@ public class ProjectServiceImpl implements ProjectService {
 
         Project project = new Project();
         project.setWorkspace(workspace);
-        project.setName(request.name().trim());
+        project.setName(HumanNames.clean(request.name()));
         project.setIdentifier(identifier);
         project.setDescription(blankToNull(request.description()));
         project.setColor(request.color() != null
@@ -106,7 +107,7 @@ public class ProjectServiceImpl implements ProjectService {
             if (request.name().isBlank()) {
                 throw new BadRequestException("El nombre no puede estar vacío");
             }
-            project.setName(request.name().trim());
+            project.setName(HumanNames.clean(request.name()));
         }
         if (request.identifier() != null) {
             String identifier = request.identifier().toUpperCase(Locale.ROOT);

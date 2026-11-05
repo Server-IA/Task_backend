@@ -11,6 +11,7 @@ import com.taskflow.api.entity.SavedViewFilters;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.enums.IssueType;
 import com.taskflow.api.exception.BadRequestException;
+import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.ProjectMapper;
@@ -18,6 +19,7 @@ import com.taskflow.api.repository.IssueRepository;
 import com.taskflow.api.repository.IssueSpecifications;
 import com.taskflow.api.repository.SavedViewRepository;
 import com.taskflow.api.service.SavedViewService;
+import com.taskflow.api.util.HumanNames;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -37,6 +40,8 @@ public class SavedViewServiceImpl implements SavedViewService {
 
     static final String REORDER_SHARED_FORBIDDEN = "Solo el project manager puede ordenar las vistas compartidas";
     static final String REORDER_EMPTY = "Indica el nuevo orden de las vistas compartidas o de tus vistas personales";
+    static final String DUPLICATE_SHARED = "Ya hay una vista compartida llamada «%s» en este proyecto";
+    static final String DUPLICATE_PERSONAL = "Ya tienes una vista personal llamada «%s» en este proyecto";
 
     private final SavedViewRepository viewRepository;
     private final IssueRepository issueRepository;
@@ -60,14 +65,18 @@ public class SavedViewServiceImpl implements SavedViewService {
             throw new ForbiddenException("Solo el project manager puede crear vistas compartidas");
         }
         User owner = lookup.user(userId);
+        lookup.lockProject(project);
+        String name = HumanNames.clean(request.name());
+        List<SavedView> group = group(project, shared, owner);
+        ensureNameAvailable(group, null, name, shared);
 
         SavedView view = new SavedView();
         view.setProject(project);
         view.setOwner(owner);
-        view.setName(request.name().trim());
+        view.setName(name);
         view.setShared(shared);
         view.setFilters(normalize(request.filters()));
-        view.setPosition(group(project, shared, owner).size());
+        view.setPosition(group.size());
         return toResponse(viewRepository.save(view), userId);
     }
 
@@ -83,13 +92,17 @@ public class SavedViewServiceImpl implements SavedViewService {
             throw new ForbiddenException("Solo el project manager puede compartir vistas");
         }
 
-        if (request.name() != null) {
-            String name = request.name().trim();
-            if (name.isEmpty()) {
-                throw new BadRequestException("El nombre no puede estar vacío");
-            }
-            view.setName(name);
+        String name = request.name() == null ? view.getName() : HumanNames.clean(request.name());
+        if (name.isEmpty()) {
+            throw new BadRequestException("El nombre no puede estar vacío");
         }
+        boolean shared = request.shared() == null ? view.isShared() : request.shared();
+        // Un nombre nuevo o un cambio de grupo (compartir o dejar de compartir) no puede repetir otro del grupo destino
+        if (!name.equals(view.getName()) || shared != view.isShared()) {
+            lookup.lockProject(project);
+            ensureNameAvailable(group(project, shared, view.getOwner()), view, name, shared);
+        }
+        view.setName(name);
         if (request.filters() != null) {
             view.setFilters(normalize(request.filters()));
         }
@@ -197,6 +210,25 @@ public class SavedViewServiceImpl implements SavedViewService {
                 ? viewRepository.findAllByProjectIdAndSharedTrueOrderByPositionAscCreatedAtAsc(project.getId())
                 : viewRepository.findAllByProjectIdAndOwnerIdAndSharedFalseOrderByPositionAscCreatedAtAsc(
                         project.getId(), owner.getId());
+    }
+
+    /**
+     * Dentro de un grupo (las compartidas del proyecto o las personales de su dueño) no se repiten nombres, sin
+     * importar mayúsculas ni espacios de más. {@code self}: la vista que se edita (puede conservar su nombre).
+     */
+    private static void ensureNameAvailable(List<SavedView> group, SavedView self, String name, boolean shared) {
+        String key = nameKey(name);
+        boolean taken = group.stream()
+                .filter(other -> self == null || !other.getId().equals(self.getId()))
+                .anyMatch(other -> nameKey(other.getName()).equals(key));
+        if (taken) {
+            throw new ConflictException(String.format(shared ? DUPLICATE_SHARED : DUPLICATE_PERSONAL, name),
+                    ConflictException.NAME_TAKEN);
+        }
+    }
+
+    private static String nameKey(String name) {
+        return HumanNames.clean(name).toLowerCase(Locale.ROOT);
     }
 
     private static List<SavedView> without(List<SavedView> views, SavedView excluded) {

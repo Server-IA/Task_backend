@@ -22,6 +22,7 @@ import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.service.IssueTemplateService;
+import com.taskflow.api.util.HumanNames;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -58,7 +59,7 @@ public class IssueTemplateServiceImpl implements IssueTemplateService {
     @Transactional
     public IssueTemplateResponse create(String slug, UUID projectId, IssueTemplateRequest request) {
         Project project = lookup.project(slug, projectId);
-        String name = request.name().trim();
+        String name = HumanNames.clean(request.name());
         ensureNameAvailable(project, name);
 
         List<IssueTemplate> existing = ordered(project);
@@ -84,7 +85,7 @@ public class IssueTemplateServiceImpl implements IssueTemplateService {
         Project project = lookup.project(slug, projectId);
         IssueTemplate template = findTemplate(project, templateId);
         if (request.name() != null) {
-            String name = request.name().trim();
+            String name = HumanNames.clean(request.name());
             if (name.isEmpty()) {
                 throw new BadRequestException("El nombre no puede estar vacío");
             }

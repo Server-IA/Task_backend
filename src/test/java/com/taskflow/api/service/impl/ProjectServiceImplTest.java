@@ -136,6 +136,22 @@ class ProjectServiceImplTest {
     }
 
     @Test
+    void elNombreSeGuardaSinEspaciosDeMasAlCrearYAlEditar() {
+        workspaceWithManager();
+
+        projectService.create(SLUG, UUID.randomUUID(), new CreateProjectRequest("  Sitio \t  web ", "WEB", null, null));
+
+        Project project = savedProject();
+        assertThat(project.getName()).isEqualTo("Sitio web");
+
+        project.setId(UUID.randomUUID());
+        when(lookup.project(SLUG, project.getId())).thenReturn(project);
+        when(projectRepository.saveAndFlush(project)).thenReturn(project);
+        projectService.update(SLUG, project.getId(), new UpdateProjectRequest(" Portal   de  clientes", null, null, null));
+        assertThat(project.getName()).isEqualTo("Portal de clientes");
+    }
+
+    @Test
     void editarCambiaElColorSoloSiSeEnvia() {
         Project project = new Project();
         project.setId(UUID.randomUUID());

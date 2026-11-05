@@ -141,7 +141,7 @@ class AuthServiceImplTest {
             when(userRepository.existsByEmail("ana@test.com")).thenReturn(false);
             when(passwordEncoder.encode("Clave1234")).thenReturn("bcrypt-hash");
 
-            authService.register(new RegisterRequest("Ana@Test.com", "Clave1234", " Ana Pérez "));
+            authService.register(new RegisterRequest("Ana@Test.com", "Clave1234", " Ana \t  Pérez "));
 
             ArgumentCaptor<User> saved = ArgumentCaptor.forClass(User.class);
             verify(userRepository).save(saved.capture());

@@ -30,6 +30,7 @@ import com.taskflow.api.security.UserPrincipal;
 import com.taskflow.api.service.AuthService;
 import com.taskflow.api.util.ClientInfo;
 import com.taskflow.api.util.ClientKeys;
+import com.taskflow.api.util.HumanNames;
 import com.taskflow.api.util.TokenUtils;
 import io.github.bucket4j.ConsumptionProbe;
 import lombok.RequiredArgsConstructor;
@@ -78,7 +79,7 @@ public class AuthServiceImpl implements AuthService {
         User user = new User();
         user.setEmail(email);
         user.setPasswordHash(passwordEncoder.encode(request.password()));
-        user.setFullName(request.fullName().trim());
+        user.setFullName(HumanNames.clean(request.fullName()));
         userRepository.save(user);
 
         String token = createVerificationToken(user, VerificationTokenType.EMAIL_VERIFICATION,

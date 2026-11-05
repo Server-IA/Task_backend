@@ -9,6 +9,7 @@ import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.ProjectMapper;
 import com.taskflow.api.repository.LabelRepository;
 import com.taskflow.api.service.LabelService;
+import com.taskflow.api.util.HumanNames;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,7 +40,7 @@ public class LabelServiceImpl implements LabelService {
     public LabelResponse create(String slug, UUID projectId, LabelRequest request) {
         Project project = lookup.project(slug, projectId);
         lookup.lockProject(project);
-        String name = request.name().trim();
+        String name = HumanNames.clean(request.name());
         ensureNameAvailable(project, name);
 
         Label label = new Label();
@@ -56,7 +57,7 @@ public class LabelServiceImpl implements LabelService {
         lookup.lockProject(project);
         Label label = labelRepository.findByIdAndProjectId(labelId, project.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Etiqueta no encontrada"));
-        String name = request.name().trim();
+        String name = HumanNames.clean(request.name());
         if (!name.equalsIgnoreCase(label.getName())) {
             ensureNameAvailable(project, name);
         }

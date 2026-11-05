@@ -16,6 +16,9 @@ public class ConflictException extends ApiException {
     /** Crear un workspace más de los que permite {@code WorkspaceServiceImpl.MAX_OWNED_WORKSPACES}. */
     public static final String WORKSPACE_LIMIT = "WORKSPACE_LIMIT";
 
+    /** Un nombre que ya usa otro elemento del mismo grupo (por ejemplo, otra vista guardada compartida). */
+    public static final String NAME_TAKEN = "NAME_TAKEN";
+
     public ConflictException(String message) {
         super(HttpStatus.CONFLICT, message);
     }
