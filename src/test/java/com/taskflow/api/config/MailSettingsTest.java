@@ -58,4 +58,17 @@ class MailSettingsTest {
                 properties("smtp", "", null, "https://taskflow.example.com")))
                 .doesNotThrowAnyException();
     }
+
+    @Test
+    void frontendUrlSinBarraFinalParaQueLosEnlacesNoTenganDobleBarra() {
+        // FRONTEND_URL=https://taskflow.example.com/ armaba https://taskflow.example.com//verify-email?token=…
+        assertThat(properties("smtp", "", null, "https://taskflow.example.com/").frontendUrl())
+                .isEqualTo("https://taskflow.example.com");
+        assertThat(properties("smtp", "", null, " https://taskflow.example.com// ").frontendUrl())
+                .isEqualTo("https://taskflow.example.com");
+        assertThat(properties("smtp", "", null, "http://localhost:5173").frontendUrl())
+                .isEqualTo("http://localhost:5173");
+        assertThat(properties("smtp", "", null, null).frontendUrl()).isNull();
+        assertThat(properties("smtp", "", null, "http://localhost:5173/").localFrontend()).isTrue();
+    }
 }

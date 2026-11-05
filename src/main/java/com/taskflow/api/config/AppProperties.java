@@ -21,6 +21,20 @@ public record AppProperties(
 
     private static final Set<String> LOCAL_HOSTS = Set.of("localhost", "127.0.0.1", "[::1]", "::1");
 
+    /**
+     * {@code FRONTEND_URL} sin espacios ni barra final: los enlaces de los correos se arman como
+     * {@code frontendUrl + "/verify-email?…"}, y con {@code https://app.example.com/} salían con doble barra
+     * ({@code https://app.example.com//verify-email}), una ruta que el frontend no reconoce.
+     */
+    public AppProperties {
+        if (frontendUrl != null) {
+            frontendUrl = frontendUrl.strip();
+            while (frontendUrl.endsWith("/")) {
+                frontendUrl = frontendUrl.substring(0, frontendUrl.length() - 1);
+            }
+        }
+    }
+
     public record Jwt(String secret, long accessExpirationMinutes, long refreshExpirationDays) {
     }
 

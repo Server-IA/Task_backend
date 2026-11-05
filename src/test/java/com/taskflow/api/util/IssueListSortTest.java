@@ -66,4 +66,19 @@ class IssueListSortTest {
         assertThat(describe(IssueListSort.withTieBreakers(PageRequest.of(0, 20, Sort.by("title")))))
                 .isEqualTo("title,asc sequenceId,asc");
     }
+
+    @Test
+    void loQueNoEsUnNombreDeCampoEs400YNo500() {
+        // ?sort=-createdAt (o con espacios o paréntesis) llegaba a Spring Data, que lanzaba
+        // InvalidDataAccessApiUsageException: el listado de tareas respondía 500
+        for (String property : List.of("-createdAt", "createdAt)", "title asc", "(title)", "length(title)", "title;drop",
+                " title", "title ")) {
+            assertThatThrownBy(() -> IssueListSort.withTieBreakers(PageRequest.of(0, 20, Sort.by(property))))
+                    .as(property)
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessageContaining("No se puede ordenar por");
+        }
+        assertThat(describe(IssueListSort.withTieBreakers(PageRequest.of(0, 20, Sort.by("due_date_2")))))
+                .isEqualTo("due_date_2,asc sequenceId,asc");
+    }
 }

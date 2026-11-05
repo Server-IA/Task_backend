@@ -5,6 +5,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 
+import java.util.regex.Pattern;
+
 /**
  * Orden del listado de tareas. {@code sort=priorityRank,asc} pone primero las urgentes, luego alta, media, baja y
  * sin prioridad; dentro de la misma prioridad van por fecha límite (las que no tienen al final). Cualquier orden
@@ -19,6 +21,9 @@ public final class IssueListSort {
 
     private static final String NUMBER = "sequenceId";
 
+    /** Un campo de la tarea: letras, dígitos y guion bajo (sin puntos, espacios ni paréntesis). */
+    private static final Pattern PROPERTY = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
+
     private IssueListSort() {
     }
 
@@ -28,6 +33,8 @@ public final class IssueListSort {
      * <p>
      * Solo se ordena por campos de la propia tarea: una ruta con punto ({@code createdBy.passwordHash},
      * {@code assignees.email}) haría un join a otra entidad y dejaría ordenar por datos que la API no muestra (400).
+     * Tampoco algo que no sea un nombre de campo ({@code -createdAt}, {@code title )}, {@code length(title)}): Spring
+     * Data lo rechazaba con una excepción que llegaba como 500 (400).
      */
     public static Pageable withTieBreakers(Pageable pageable) {
         if (pageable.isUnpaged()) {
@@ -35,7 +42,7 @@ public final class IssueListSort {
         }
         Sort sort = pageable.getSort();
         for (Sort.Order order : sort) {
-            if (order.getProperty().contains(".")) {
+            if (!PROPERTY.matcher(order.getProperty()).matches()) {
                 throw new BadRequestException("No se puede ordenar por '" + order.getProperty() + "'");
             }
         }
