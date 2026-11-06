@@ -2,6 +2,7 @@ package com.taskflow.api.service.impl;
 
 import com.taskflow.api.dto.request.CreateWorkspaceRequest;
 import com.taskflow.api.dto.request.UpdateMemberRoleRequest;
+import com.taskflow.api.dto.request.UpdateWorkspaceRequest;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.Workspace;
 import com.taskflow.api.entity.WorkspaceMember;
@@ -81,6 +82,16 @@ class WorkspaceServiceImplTest {
                 .hasMessage(WorkspaceServiceImpl.WORKSPACE_LIMIT_MESSAGE)
                 .extracting("code").isEqualTo(ConflictException.WORKSPACE_LIMIT);
         verify(workspaceRepository, never()).save(any());
+    }
+
+    @Test
+    void elNombreSeGuardaSinEspaciosDeMas() {
+        when(lookup.workspace(SLUG)).thenReturn(workspace);
+        member(creator, WorkspaceRole.OWNER);
+
+        workspaceService.update(SLUG, creator.getId(), new UpdateWorkspaceRequest("  Equipo    Diseño ", null));
+
+        assertThat(workspace.getName()).isEqualTo("Equipo Diseño");
     }
 
     private static User user(String name) {

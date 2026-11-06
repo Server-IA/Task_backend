@@ -1,7 +1,6 @@
 package com.taskflow.api.dto.request;
 
 import com.taskflow.api.entity.enums.RetroColumn;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
@@ -15,7 +14,8 @@ public record RetroNoteRequest(
         @NotNull(message = "La columna es obligatoria: WENT_WELL, IMPROVE o ACTION")
         RetroColumn column,
 
-        @NotBlank(message = "El texto es obligatorio")
+        @NotNull(message = "El texto es obligatorio")
+        @Visible(message = "El texto es obligatorio")
         @Size(max = 500, message = "El texto no puede superar 500 caracteres")
         String text,
 

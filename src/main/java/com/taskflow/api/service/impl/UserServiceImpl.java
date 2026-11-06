@@ -10,6 +10,7 @@ import com.taskflow.api.mapper.UserMapper;
 import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.service.FileService;
 import com.taskflow.api.service.UserService;
+import com.taskflow.api.util.HumanNames;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,10 +36,7 @@ public class UserServiceImpl implements UserService {
     public UserResponse updateProfile(UUID userId, UpdateProfileRequest request) {
         User user = findUser(userId);
         if (request.fullName() != null) {
-            if (request.fullName().isBlank()) {
-                throw new BadRequestException("El nombre no puede estar vacío");
-            }
-            user.setFullName(request.fullName().trim());
+            user.setFullName(HumanNames.required(request.fullName(), "fullName"));
         }
         String avatarUrl = request.avatarUrl() == null ? null : request.avatarUrl().trim();
         if (avatarUrl != null && !avatarUrl.equals(user.getAvatarUrl())) {

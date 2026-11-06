@@ -8,7 +8,8 @@ import jakarta.validation.constraints.Size;
  * elementos del mismo tipo de la tarea; si es mayor que el último, el elemento queda al final.
  */
 public record UpdateChecklistItemRequest(
-        @Size(min = 1, max = 500, message = "El texto debe tener entre 1 y 500 caracteres")
+        @Size(max = 500, message = "El texto no puede superar 500 caracteres")
+        @Visible(message = "El texto no puede estar vacío")
         String text,
 
         Boolean done,

@@ -10,7 +10,7 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * CORS: solo se permite el origen del frontend.
+ * CORS: solo se permite el origen del frontend (el de {@code FRONTEND_URL}, sin su ruta).
  */
 @Configuration
 public class CorsConfig {
@@ -18,7 +18,7 @@ public class CorsConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource(AppProperties properties) {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of(properties.frontendUrl()));
+        config.setAllowedOrigins(List.of(properties.frontendOrigin()));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
         config.setExposedHeaders(List.of("Retry-After"));

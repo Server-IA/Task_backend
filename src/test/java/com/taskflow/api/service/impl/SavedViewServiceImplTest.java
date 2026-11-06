@@ -13,6 +13,7 @@ import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.Workspace;
 import com.taskflow.api.entity.enums.IssuePriority;
 import com.taskflow.api.exception.BadRequestException;
+import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.ProjectMapper;
@@ -151,6 +152,54 @@ class SavedViewServiceImplTest {
         assertThat(views).extracting(SavedViewResponse::issueCount).containsExactly(4L, 2L);
     }
 
+    /**
+     * Bug hunt 3: una vista que filtra por una etiqueta (o estado, ciclo, módulo, persona) que ya no existe contaba 0
+     * tareas en la barra, mientras que el frontend, al abrirla, quita ese filtro y muestra las del resto.
+     */
+    @Test
+    void elConteoNoUsaLosIdsQueYaNoExistenEnElProyecto() {
+        UUID keptLabel = UUID.randomUUID();
+        UUID deletedLabel = UUID.randomUUID();
+        UUID state = UUID.randomUUID();
+        UUID formerMember = UUID.randomUUID();
+        SavedViewFilters filters = new SavedViewFilters(List.of(state), List.of(IssuePriority.HIGH),
+                List.of(formerMember), List.of(keptLabel, deletedLabel), "login", null, null, UUID.randomUUID(),
+                UUID.randomUUID(), true, null, null);
+        SavedViewServiceImpl.FilterTargets targets = SavedViewServiceImpl.FilterTargets.of(List.of(
+                new Object[] {"label", keptLabel}, new Object[] {"state", state},
+                new Object[] {"assignee", member.getId()}));
+
+        SavedViewFilters counted = SavedViewServiceImpl.withoutUnknown(filters, targets);
+
+        assertThat(counted.label()).containsExactly(keptLabel);
+        assertThat(counted.state()).containsExactly(state);
+        assertThat(counted.assignee()).isEmpty();
+        assertThat(counted.cycle()).isNull();
+        assertThat(counted.module()).isNull();
+        assertThat(counted.priority()).containsExactly(IssuePriority.HIGH);
+        assertThat(counted.search()).isEqualTo("login");
+        assertThat(counted.blocked()).isTrue();
+    }
+
+    @Test
+    void loQueExisteEnElProyectoSeConsultaUnaVezYSoloSiAlgunaVistaFiltraPorIds() {
+        SavedView plain = view(pm, true, 0);
+        SavedView byLabel = view(member, false, 0);
+        SavedView byState = view(member, false, 1);
+        byLabel.setFilters(new SavedViewFilters(List.of(), List.of(), List.of(), List.of(UUID.randomUUID()), null,
+                null, null, null, null, null, null, null));
+        byState.setFilters(new SavedViewFilters(List.of(UUID.randomUUID()), List.of(), List.of(), List.of(), null,
+                null, null, null, null, null, null, null));
+        when(viewRepository.findVisible(project.getId(), member.getId())).thenReturn(List.of(plain, byLabel, byState));
+
+        viewService.getViews(SLUG, project.getId(), member.getId());
+        verify(viewRepository).findFilterTargets(project.getId());
+
+        when(viewRepository.findVisible(project.getId(), pm.getId())).thenReturn(List.of(plain));
+        viewService.getViews(SLUG, project.getId(), pm.getId());
+        verify(viewRepository).findFilterTargets(any());
+    }
+
     @Test
     void losFiltrosDeLaVistaSonLosDelListadoDeTareas() {
         UUID state = UUID.randomUUID();
@@ -276,6 +325,59 @@ class SavedViewServiceImplTest {
         }
 
         @Test
+        void noRepiteElNombreDeOtraVistaPersonalSuyaSinImportarMayusculasNiEspacios() {
+            SavedView existing = view(member, false, 0);
+            existing.setName("Mis bugs");
+            personalGroup(member, existing);
+
+            assertThatThrownBy(() -> viewService.create(SLUG, project.getId(), member.getId(),
+                    new CreateSavedViewRequest("  mis   BUGS ", false, null)))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessage("Ya tienes una vista personal llamada «mis BUGS» en este proyecto")
+                    .extracting("code").isEqualTo(ConflictException.NAME_TAKEN);
+            verify(viewRepository, never()).save(any());
+        }
+
+        @Test
+        void noRepiteElNombreDeUnaCompartida() {
+            SavedView existing = view(pm, true, 0);
+            existing.setName("Sprint actual");
+            sharedGroup(existing);
+
+            assertThatThrownBy(() -> viewService.create(SLUG, project.getId(), pm.getId(),
+                    new CreateSavedViewRequest("Sprint Actual", true, null)))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessage("Ya hay una vista compartida llamada «Sprint Actual» en este proyecto");
+        }
+
+        @Test
+        void elMismoNombreSirveEnOtroGrupoOParaOtroUsuario() {
+            SavedView shared = view(pm, true, 0);
+            shared.setName("Bugs");
+            sharedGroup(shared);
+            SavedView othersPersonal = view(otherMember, false, 0);
+            othersPersonal.setName("Bugs");
+            personalGroup(otherMember, othersPersonal);
+            personalGroup(member);
+
+            viewService.create(SLUG, project.getId(), member.getId(), new CreateSavedViewRequest("Bugs", false, null));
+
+            verify(viewRepository).save(any(SavedView.class));
+        }
+
+        @Test
+        void colapsaLosEspaciosRepetidosDelNombre() {
+            personalGroup(member);
+
+            viewService.create(SLUG, project.getId(), member.getId(),
+                    new CreateSavedViewRequest(" Mis \t  bugs ", false, null));
+
+            ArgumentCaptor<SavedView> saved = ArgumentCaptor.forClass(SavedView.class);
+            verify(viewRepository).save(saved.capture());
+            assertThat(saved.getValue().getName()).isEqualTo("Mis bugs");
+        }
+
+        @Test
         void elProjectManagerCreaUnaCompartidaAlFinalDeLasCompartidas() {
             sharedGroup(view(pm, true, 0), view(pm, true, 1));
 
@@ -354,7 +456,9 @@ class SavedViewServiceImplTest {
             SavedView first = view(pm, false, 0);
             SavedView second = view(pm, false, 1);
             personalGroup(pm, first, second);
-            sharedGroup(view(otherMember, true, 0));
+            SavedView teamView = view(otherMember, true, 0);
+            teamView.setName("Del equipo");
+            sharedGroup(teamView);
 
             viewService.update(SLUG, project.getId(), first.getId(), pm.getId(),
                     new UpdateSavedViewRequest(null, null, true, null));
@@ -362,6 +466,65 @@ class SavedViewServiceImplTest {
             assertThat(first.isShared()).isTrue();
             assertThat(first.getPosition()).isEqualTo(1);
             assertThat(second.getPosition()).isZero();
+        }
+
+        @Test
+        void alRenombrarNoRepiteOtraDeSuGrupo() {
+            SavedView mine = view(member, false, 0);
+            SavedView other = view(member, false, 1);
+            other.setName("Pendientes");
+            personalGroup(member, mine, other);
+
+            assertThatThrownBy(() -> viewService.update(SLUG, project.getId(), mine.getId(), member.getId(),
+                    rename(" pendientes ")))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessage("Ya tienes una vista personal llamada «pendientes» en este proyecto");
+            assertThat(mine.getName()).isEqualTo("Vista 0");
+        }
+
+        @Test
+        void puedeCambiarSoloLasMayusculasDeSuPropioNombre() {
+            SavedView mine = view(member, false, 0);
+            personalGroup(member, mine);
+
+            viewService.update(SLUG, project.getId(), mine.getId(), member.getId(), rename("VISTA 0"));
+
+            assertThat(mine.getName()).isEqualTo("VISTA 0");
+        }
+
+        @Test
+        void alCompartirNoRepiteElNombreDeOtraCompartida() {
+            SavedView mine = view(pm, false, 0);
+            mine.setName("Bugs");
+            personalGroup(pm, mine);
+            SavedView shared = view(otherMember, true, 0);
+            shared.setName("BUGS");
+            sharedGroup(shared);
+
+            assertThatThrownBy(() -> viewService.update(SLUG, project.getId(), mine.getId(), pm.getId(),
+                    new UpdateSavedViewRequest(null, null, true, null)))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessage("Ya hay una vista compartida llamada «Bugs» en este proyecto");
+            assertThat(mine.isShared()).isFalse();
+        }
+
+        @Test
+        void alDejarDeCompartirLaVistaDeOtroElMensajeNombraASuDueno() {
+            // La vista vuelve a las personales de su dueño: «Ya tienes…» le hablaba al project manager, que no la tiene
+            User owner = user(true);
+            owner.setFullName("Ana Pérez");
+            SavedView shared = view(owner, true, 0);
+            shared.setName("Equipo");
+            sharedGroup(shared);
+            SavedView ownersPersonal = view(owner, false, 0);
+            ownersPersonal.setName("EQUIPO");
+            personalGroup(owner, ownersPersonal);
+
+            assertThatThrownBy(() -> viewService.update(SLUG, project.getId(), shared.getId(), pm.getId(),
+                    new UpdateSavedViewRequest(null, null, false, null)))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessage("Ana Pérez ya tiene una vista personal llamada «Equipo» en este proyecto");
+            assertThat(shared.isShared()).isTrue();
         }
 
         @Test

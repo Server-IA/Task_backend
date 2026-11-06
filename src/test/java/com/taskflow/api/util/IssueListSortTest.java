@@ -66,4 +66,41 @@ class IssueListSortTest {
         assertThat(describe(IssueListSort.withTieBreakers(PageRequest.of(0, 20, Sort.by("title")))))
                 .isEqualTo("title,asc sequenceId,asc");
     }
+
+    @Test
+    void loQueNoEsUnNombreDeCampoEs400YNo500() {
+        // ?sort=-createdAt (o con espacios o paréntesis) llegaba a Spring Data, que lanzaba
+        // InvalidDataAccessApiUsageException: el listado de tareas respondía 500
+        for (String property : List.of("-createdAt", "createdAt)", "title asc", "(title)", "length(title)", "title;drop",
+                " title", "title ")) {
+            assertThatThrownBy(() -> IssueListSort.withTieBreakers(PageRequest.of(0, 20, Sort.by(property))))
+                    .as(property)
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessageContaining("No se puede ordenar por");
+        }
+        assertThatThrownBy(() -> IssueListSort.withTieBreakers(PageRequest.of(0, 20, Sort.by("due_date_2"))))
+                .isInstanceOf(BadRequestException.class);
+    }
+
+    @Test
+    void noOrdenaPorColeccionesQueRepetianTareasEntrePaginas() {
+        // sort=assignees (o labels, cycles, modules) hacía un join a la colección: una tarea con dos asignados salía
+        // dos veces, totalElements contaba de más y la página siguiente repetía tareas
+        for (String property : List.of("assignees", "labels", "cycles", "modules", "createdBy", "parent", "project",
+                "state", "description")) {
+            assertThatThrownBy(() -> IssueListSort.withTieBreakers(PageRequest.of(0, 20, Sort.by(property))))
+                    .as(property)
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessageContaining(property);
+        }
+    }
+
+    @Test
+    void losOrdenesDelFrontendSiguenValiendo() {
+        for (String property : List.of("sortOrder", "priorityRank", "sequenceId", "updatedAt", "dueDate", "title",
+                "createdAt", "type", "priority", "startDate")) {
+            assertThat(IssueListSort.withTieBreakers(PageRequest.of(0, 20, Sort.by(property))).getSort()
+                    .getOrderFor(property)).as(property).isNotNull();
+        }
+    }
 }

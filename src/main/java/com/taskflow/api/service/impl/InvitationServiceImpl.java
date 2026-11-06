@@ -36,6 +36,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class InvitationServiceImpl implements InvitationService {
 
+    static final String INVALID = "La invitación no es válida o ya expiró";
+
     private final WorkspaceInvitationRepository invitationRepository;
     private final WorkspaceMemberRepository memberRepository;
     private final ResourceLookup lookup;
@@ -105,16 +107,34 @@ public class InvitationServiceImpl implements InvitationService {
         return workspaceMapper.toInvitationDetails(findPending(token));
     }
 
+    /**
+     * Con la invitación bloqueada: dos aceptaciones a la vez (doble clic, el enlace abierto en dos pestañas) van en fila.
+     * Antes la segunda respondía 409 (las dos creaban el miembro) o, si llegaba después, 400 «no es válida o ya expiró»
+     * aunque la persona ya había entrado. Ahora, mientras la invitación no venza, volver a aceptarla quien ya es miembro
+     * gracias a ella responde el workspace otra vez.
+     */
     @Override
     @Transactional
     public WorkspaceResponse accept(String token, UUID userId) {
-        WorkspaceInvitation invitation = findPending(token);
+        Instant now = Instant.now();
+        WorkspaceInvitation invitation = invitationRepository.lockByTokenHash(TokenUtils.sha256(token))
+                .filter(found -> found.getExpiresAt().isAfter(now))
+                .orElseThrow(() -> new BadRequestException(INVALID));
         User user = lookup.user(userId);
-        if (!user.getEmail().equalsIgnoreCase(invitation.getEmail())) {
+        boolean sameEmail = user.getEmail().equalsIgnoreCase(invitation.getEmail());
+        Workspace workspace = invitation.getWorkspace();
+        if (invitation.isAccepted()) {
+            // Ya aceptada: solo quien la aceptó y sigue en el workspace la puede «volver a aceptar» (si salió o lo
+            // quitaron, el enlace ya no lo devuelve)
+            return memberRepository.findByWorkspaceIdAndUserId(workspace.getId(), userId)
+                    .filter(member -> sameEmail)
+                    .map(member -> workspaceMapper.toResponse(workspace, member.getRole()))
+                    .orElseThrow(() -> new BadRequestException(INVALID));
+        }
+        if (!sameEmail) {
             throw new ForbiddenException("Esta invitación fue enviada a otro correo");
         }
 
-        Workspace workspace = invitation.getWorkspace();
         WorkspaceRole role = memberRepository.findByWorkspaceIdAndUserId(workspace.getId(), userId)
                 .map(WorkspaceMember::getRole)
                 .orElseGet(() -> {
@@ -128,6 +148,6 @@ public class InvitationServiceImpl implements InvitationService {
     private WorkspaceInvitation findPending(String rawToken) {
         return invitationRepository.findByTokenHash(TokenUtils.sha256(rawToken))
                 .filter(invitation -> invitation.isPending(Instant.now()))
-                .orElseThrow(() -> new BadRequestException("La invitación no es válida o ya expiró"));
+                .orElseThrow(() -> new BadRequestException(INVALID));
     }
 }

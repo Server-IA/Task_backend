@@ -14,6 +14,7 @@ import com.taskflow.api.mapper.IssueMapper;
 import com.taskflow.api.repository.IssueChecklistItemRepository;
 import com.taskflow.api.repository.IssueRepository;
 import com.taskflow.api.service.IssueChecklistService;
+import com.taskflow.api.util.VisibleText;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -59,7 +60,8 @@ public class IssueChecklistServiceImpl implements IssueChecklistService {
         }
         List<IssueChecklistItem> siblings = siblings(issue, request.kind());
         int position = siblings.isEmpty() ? 0 : siblings.getLast().getPosition() + 1;
-        IssueChecklistItem item = new IssueChecklistItem(issue, request.kind(), request.text().trim(), position);
+        IssueChecklistItem item = new IssueChecklistItem(issue, request.kind(), VisibleText.strip(request.text()),
+                position);
         ChecklistItemResponse response = issueMapper.toChecklistItemResponse(itemRepository.save(item));
         issueRepository.touchChecklist(issue.getId(), Instant.now());
         return response;
@@ -73,7 +75,7 @@ public class IssueChecklistServiceImpl implements IssueChecklistService {
         IssueChecklistItem item = findItem(issue, itemId);
         Instant now = Instant.now();
         if (request.text() != null) {
-            String text = request.text().trim();
+            String text = VisibleText.strip(request.text());
             if (text.isEmpty()) {
                 throw new BadRequestException("El texto no puede estar vacío");
             }
@@ -126,7 +128,7 @@ public class IssueChecklistServiceImpl implements IssueChecklistService {
         }
         Map<ChecklistItemKind, Integer> nextPosition = new EnumMap<>(ChecklistItemKind.class);
         List<IssueChecklistItem> items = requests.stream()
-                .map(request -> new IssueChecklistItem(issue, request.kind(), request.text().trim(),
+                .map(request -> new IssueChecklistItem(issue, request.kind(), VisibleText.strip(request.text()),
                         nextPosition.merge(request.kind(), 1, Integer::sum) - 1))
                 .toList();
         return itemRepository.saveAll(items);

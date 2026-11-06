@@ -31,6 +31,7 @@ import com.taskflow.api.service.IssueService;
 import com.taskflow.api.service.NotificationService;
 import com.taskflow.api.service.RetroService;
 import com.taskflow.api.util.TextCut;
+import com.taskflow.api.util.VisibleText;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -98,7 +99,8 @@ public class RetroServiceImpl implements RetroService {
         Project project = lookup.project(slug, projectId);
         Cycle cycle = findCycle(project, cycleId);
         ensureOpen(cycle);
-        RetroNote note = new RetroNote(cycle, request.column(), request.text().strip(), lookup.user(userId));
+        RetroNote note = new RetroNote(cycle, request.column(), VisibleText.strip(request.text()),
+                lookup.user(userId));
         if (request.ownerId() != null) {
             note.setOwner(findOwner(project, note, request.ownerId()));
         }
@@ -115,10 +117,10 @@ public class RetroServiceImpl implements RetroService {
         RetroNote note = findNote(cycle, noteId);
         ensureAuthorOrManager(project, note, userId, "editarla");
         if (request.text() != null) {
-            if (request.text().isBlank()) {
+            if (VisibleText.isBlank(request.text())) {
                 throw new BadRequestException("El texto no puede estar vacío");
             }
-            note.setText(request.text().strip());
+            note.setText(VisibleText.strip(request.text()));
         }
         if (Boolean.TRUE.equals(request.clearOwner())) {
             note.setOwner(null);

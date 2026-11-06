@@ -93,3 +93,6 @@ app:
     email-verification-hours: 24
     password-reset-minutes: 60
     invitation-days: 7
+    # Margen para reutilizar un refresh token recién rotado (dos recargas seguidas de la página) sin cerrar todas las
+    # sesiones. Pasado el margen, reutilizarlo cuenta como robo. 0 lo desactiva
+    refresh-reuse-grace-seconds: ${REFRESH_REUSE_GRACE_SECONDS:30}

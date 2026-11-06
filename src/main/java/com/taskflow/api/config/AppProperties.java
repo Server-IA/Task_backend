@@ -4,6 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.ConstructorBinding;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.Locale;
 import java.util.Set;
 
@@ -20,6 +21,20 @@ public record AppProperties(
 ) {
 
     private static final Set<String> LOCAL_HOSTS = Set.of("localhost", "127.0.0.1", "[::1]", "::1");
+
+    /**
+     * {@code FRONTEND_URL} sin espacios ni barra final: los enlaces de los correos se arman como
+     * {@code frontendUrl + "/verify-email?…"}, y con {@code https://app.example.com/} salían con doble barra
+     * ({@code https://app.example.com//verify-email}), una ruta que el frontend no reconoce.
+     */
+    public AppProperties {
+        if (frontendUrl != null) {
+            frontendUrl = frontendUrl.strip();
+            while (frontendUrl.endsWith("/")) {
+                frontendUrl = frontendUrl.substring(0, frontendUrl.length() - 1);
+            }
+        }
+    }
 
     public record Jwt(String secret, long accessExpirationMinutes, long refreshExpirationDays) {
     }
@@ -56,7 +71,37 @@ public record AppProperties(
         }
     }
 
-    public record Tokens(long emailVerificationHours, long passwordResetMinutes, long invitationDays) {
+    /**
+     * @param refreshReuseGraceSeconds margen para volver a usar un refresh token recién rotado sin que cuente como robo
+     *                                 (dos recargas seguidas de la página). 0 lo desactiva
+     */
+    public record Tokens(long emailVerificationHours, long passwordResetMinutes, long invitationDays,
+                         long refreshReuseGraceSeconds) {
+
+        public Duration refreshReuseGrace() {
+            return Duration.ofSeconds(Math.max(0, refreshReuseGraceSeconds));
+        }
+    }
+
+    /**
+     * El origen de {@code FRONTEND_URL} ({@code esquema://host[:puerto]}), el único que CORS deja llamar a la API. Un
+     * origen nunca lleva ruta: con el frontend en una subruta ({@code https://example.com/app}) se comparaba
+     * {@code https://example.com/app} con el {@code Origin: https://example.com} del navegador y se rechazaban todas las
+     * peticiones. Los enlaces de los correos sí usan la URL completa.
+     */
+    public String frontendOrigin() {
+        if (frontendUrl == null || frontendUrl.isBlank()) {
+            return frontendUrl;
+        }
+        try {
+            URI uri = URI.create(frontendUrl);
+            if (uri.getScheme() == null || uri.getRawAuthority() == null) {
+                return frontendUrl;
+            }
+            return uri.getScheme().toLowerCase(Locale.ROOT) + "://" + uri.getRawAuthority().toLowerCase(Locale.ROOT);
+        } catch (IllegalArgumentException ex) {
+            return frontendUrl;
+        }
     }
 
     /** {@code FRONTEND_URL} apunta a esta máquina (desarrollo local). */

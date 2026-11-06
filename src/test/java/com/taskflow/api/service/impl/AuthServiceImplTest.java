@@ -42,6 +42,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -90,7 +91,7 @@ class AuthServiceImplTest {
                 new AppProperties.Mail("resend", "", "TaskFlow <test@test.com>"),
                 "http://localhost:5173",
                 "America/Bogota",
-                new AppProperties.Tokens(24, 60, 7));
+                new AppProperties.Tokens(24, 60, 7, 30));
         authService = new AuthServiceImpl(userRepository, refreshTokenRepository, verificationTokenRepository,
                 authenticationManager, passwordEncoder, jwtService, emailNotifier, userMapper, properties,
                 rateLimitService, credentialsGuard);
@@ -141,7 +142,7 @@ class AuthServiceImplTest {
             when(userRepository.existsByEmail("ana@test.com")).thenReturn(false);
             when(passwordEncoder.encode("Clave1234")).thenReturn("bcrypt-hash");
 
-            authService.register(new RegisterRequest("Ana@Test.com", "Clave1234", " Ana Pérez "));
+            authService.register(new RegisterRequest("Ana@Test.com", "Clave1234", " Ana \t  Pérez "));
 
             ArgumentCaptor<User> saved = ArgumentCaptor.forClass(User.class);
             verify(userRepository).save(saved.capture());
@@ -207,7 +208,7 @@ class AuthServiceImplTest {
                     .thenReturn(Optional.of(user.getId()));
             when(userRepository.lockCredentials(user.getId())).thenReturn(Optional.of(locked("hash-actual", 2)));
             when(refreshTokenRepository.findByTokenHash(TokenUtils.sha256("rt"))).thenReturn(Optional.of(stored));
-            when(refreshTokenRepository.revokeIfActive(stored.getId())).thenReturn(1);
+            when(refreshTokenRepository.revokeIfActive(eq(stored.getId()), any())).thenReturn(1);
             when(jwtService.generateAccessToken(user.getId(), user.getEmail(), 2)).thenReturn("nuevo-access");
 
             AuthResponse response = authService.refresh("rt");
@@ -217,10 +218,13 @@ class AuthServiceImplTest {
             order.verify(userRepository).lockCredentials(user.getId());
             order.verify(refreshTokenRepository).findByTokenHash(TokenUtils.sha256("rt"));
             // La rotación es un UPDATE condicional (atómico), no un cambio en la entidad leída
-            verify(refreshTokenRepository).revokeIfActive(stored.getId());
+            verify(refreshTokenRepository).revokeIfActive(eq(stored.getId()), any());
             assertThat(response.accessToken()).isEqualTo("nuevo-access");
             assertThat(response.refreshToken()).isNotBlank().isNotEqualTo("rt");
-            verify(refreshTokenRepository).save(any(RefreshToken.class));
+            ArgumentCaptor<RefreshToken> saved = ArgumentCaptor.forClass(RefreshToken.class);
+            verify(refreshTokenRepository).save(saved.capture());
+            // El rotado queda apuntando a su sucesor (así una recarga dentro del margen no cierra la sesión)
+            verify(refreshTokenRepository).linkReplacement(List.of(stored.getId()), saved.getValue().getId());
         }
 
         @Test
@@ -239,6 +243,125 @@ class AuthServiceImplTest {
         }
 
         @Test
+        void reutilizarloDentroDelMargenRotaElSucesorYNoCierraLasSesiones() {
+            // Dos recargas seguidas: la primera rotó el token pero el navegador no alcanzó a guardar el nuevo
+            User user = user("ana@test.com");
+            RefreshToken successor = active(user);
+            RefreshToken stored = rotated(user, successor, Instant.now().minusSeconds(5));
+            lockedRefresh(user, stored);
+            when(refreshTokenRepository.findById(successor.getId())).thenReturn(Optional.of(successor));
+            when(refreshTokenRepository.revokeIfActive(eq(successor.getId()), any())).thenReturn(1);
+            when(jwtService.generateAccessToken(user.getId(), user.getEmail(), 0)).thenReturn("nuevo-access");
+
+            AuthResponse response = authService.refresh("rt");
+
+            assertThat(response.accessToken()).isEqualTo("nuevo-access");
+            assertThat(response.refreshToken()).isNotBlank().isNotEqualTo("rt");
+            verify(refreshTokenRepository, never()).revokeAllByUserId(any());
+            // El sucesor (que nadie guardó) se rota: la cadena sigue con un solo token vivo, el nuevo
+            verify(refreshTokenRepository).revokeIfActive(eq(successor.getId()), any());
+            ArgumentCaptor<RefreshToken> saved = ArgumentCaptor.forClass(RefreshToken.class);
+            verify(refreshTokenRepository).save(saved.capture());
+            verify(refreshTokenRepository).linkReplacement(List.of(stored.getId(), successor.getId()),
+                    saved.getValue().getId());
+        }
+
+        @Test
+        void reutilizarloPasadoElMargenRevocaTodasLasSesiones() {
+            User user = user("ana@test.com");
+            RefreshToken successor = active(user);
+            RefreshToken stored = rotated(user, successor, Instant.now().minusSeconds(31));
+            lockedRefresh(user, stored);
+
+            assertThatThrownBy(() -> authService.refresh("rt"))
+                    .isInstanceOf(UnauthorizedException.class);
+            verify(refreshTokenRepository).revokeAllByUserId(user.getId());
+            verify(refreshTokenRepository, never()).revokeIfActive(any(), any());
+            verify(refreshTokenRepository, never()).save(any());
+        }
+
+        @Test
+        void sinSucesorNoHayMargen() {
+            // Revocado al detectar una reutilización (no por rotación): aunque sea reciente, cierra todo
+            User user = user("ana@test.com");
+            RefreshToken stored = rotated(user, null, Instant.now().minusSeconds(1));
+            lockedRefresh(user, stored);
+
+            assertThatThrownBy(() -> authService.refresh("rt"))
+                    .isInstanceOf(UnauthorizedException.class);
+            verify(refreshTokenRepository).revokeAllByUserId(user.getId());
+            verify(refreshTokenRepository, never()).findById(any());
+            verify(refreshTokenRepository, never()).save(any());
+        }
+
+        @Test
+        void siElSucesorYaNoEstaVivoNoHayMargen() {
+            // El sucesor ya se usó o se revocó (o se borró con logout): el token viejo no tiene a quién reemplazar
+            User user = user("ana@test.com");
+            RefreshToken successor = active(user);
+            successor.setRevoked(true);
+            RefreshToken stored = rotated(user, successor, Instant.now().minusSeconds(2));
+            lockedRefresh(user, stored);
+            when(refreshTokenRepository.findById(successor.getId())).thenReturn(Optional.of(successor));
+
+            assertThatThrownBy(() -> authService.refresh("rt"))
+                    .isInstanceOf(UnauthorizedException.class);
+            verify(refreshTokenRepository).revokeAllByUserId(user.getId());
+            verify(refreshTokenRepository, never()).save(any());
+        }
+
+        @Test
+        void siElSucesorSeBorroConLogoutNoHayMargen() {
+            User user = user("ana@test.com");
+            RefreshToken successor = active(user);
+            RefreshToken stored = rotated(user, successor, Instant.now().minusSeconds(2));
+            lockedRefresh(user, stored);
+            when(refreshTokenRepository.findById(successor.getId())).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> authService.refresh("rt"))
+                    .isInstanceOf(UnauthorizedException.class);
+            verify(refreshTokenRepository).revokeAllByUserId(user.getId());
+            verify(refreshTokenRepository, never()).save(any());
+        }
+
+        @Test
+        void conMargenCeroCualquierReutilizacionCierraTodo() {
+            AppProperties strict = new AppProperties(
+                    new AppProperties.Jwt("secreto-de-pruebas-con-mas-de-32-caracteres", 15, 7),
+                    new AppProperties.Mail("resend", "", "TaskFlow <test@test.com>"),
+                    "http://localhost:5173",
+                    "America/Bogota",
+                    new AppProperties.Tokens(24, 60, 7, 0));
+            AuthServiceImpl strictService = new AuthServiceImpl(userRepository, refreshTokenRepository,
+                    verificationTokenRepository, authenticationManager, passwordEncoder, jwtService, emailNotifier,
+                    userMapper, strict, rateLimitService, credentialsGuard);
+            User user = user("ana@test.com");
+            RefreshToken stored = rotated(user, active(user), Instant.now().minusMillis(100));
+            lockedRefresh(user, stored);
+
+            assertThatThrownBy(() -> strictService.refresh("rt"))
+                    .isInstanceOf(UnauthorizedException.class);
+            verify(refreshTokenRepository).revokeAllByUserId(user.getId());
+            verify(refreshTokenRepository, never()).save(any());
+        }
+
+        @Test
+        void unaCuentaDesactivadaNoUsaElMargen() {
+            User user = user("ana@test.com");
+            user.setActive(false);
+            RefreshToken successor = active(user);
+            RefreshToken stored = rotated(user, successor, Instant.now().minusSeconds(2));
+            lockedRefresh(user, stored);
+            when(refreshTokenRepository.findById(successor.getId())).thenReturn(Optional.of(successor));
+
+            assertThatThrownBy(() -> authService.refresh("rt"))
+                    .isInstanceOf(UnauthorizedException.class)
+                    .hasMessageContaining("desactivada");
+            verify(refreshTokenRepository, never()).revokeIfActive(any(), any());
+            verify(refreshTokenRepository, never()).save(any());
+        }
+
+        @Test
         void siOtraPeticionLoRotoAlMismoTiempoCuentaComoReutilizado() {
             User user = user("ana@test.com");
             RefreshToken stored = new RefreshToken();
@@ -247,7 +370,7 @@ class AuthServiceImplTest {
             stored.setExpiresAt(Instant.now().plus(1, ChronoUnit.DAYS));
             lockedRefresh(user, stored);
             // La otra petición ya lo marcó como usado entre la lectura y el UPDATE
-            when(refreshTokenRepository.revokeIfActive(stored.getId())).thenReturn(0);
+            when(refreshTokenRepository.revokeIfActive(eq(stored.getId()), any())).thenReturn(0);
 
             assertThatThrownBy(() -> authService.refresh("rt"))
                     .isInstanceOf(UnauthorizedException.class);
@@ -277,6 +400,48 @@ class AuthServiceImplTest {
             verify(refreshTokenRepository, never()).save(any());
             // No es una reutilización: no se cierran las sesiones nuevas
             verify(refreshTokenRepository, never()).revokeAllByUserId(any());
+        }
+
+        private static RefreshToken active(User user) {
+            RefreshToken token = new RefreshToken();
+            token.setId(UUID.randomUUID());
+            token.setUser(user);
+            token.setExpiresAt(Instant.now().plus(1, ChronoUnit.DAYS));
+            return token;
+        }
+
+        /** Un token rotado en {@code revokedAt}, reemplazado por {@code successor} ({@code null}: revocado sin rotar). */
+        private static RefreshToken rotated(User user, RefreshToken successor, Instant revokedAt) {
+            RefreshToken token = active(user);
+            token.setRevoked(true);
+            token.setRevokedAt(revokedAt);
+            token.setReplacedBy(successor == null ? null : successor.getId());
+            return token;
+        }
+
+        @Test
+        void logoutBorraLaSesionEnteraDelToken() {
+            // La cadena (sucesores y anteriores, a cualquier distancia) la recorre la consulta recursiva; aquí, que se
+            // pide con el token y el usuario, sin revocar las demás sesiones
+            User user = user("ana@test.com");
+            RefreshToken live = active(user);
+            RefreshToken stored = rotated(user, live, Instant.now().minusSeconds(60));
+            lockedRefresh(user, stored);
+
+            authService.logout("rt");
+
+            verify(refreshTokenRepository).deleteSession(user.getId(), stored.getId());
+            verify(refreshTokenRepository, never()).revokeAllByUserId(any());
+        }
+
+        @Test
+        void logoutConUnTokenDesconocidoNoHaceNada() {
+            when(refreshTokenRepository.findUserIdByTokenHash(anyString())).thenReturn(Optional.empty());
+
+            authService.logout("rt");
+
+            verify(refreshTokenRepository, never()).deleteSession(any(), any(UUID.class));
+            verifyNoInteractions(userRepository);
         }
 
         private void lockedRefresh(User user, RefreshToken stored) {

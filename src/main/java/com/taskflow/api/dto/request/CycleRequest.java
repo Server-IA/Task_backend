@@ -16,8 +16,10 @@ public record CycleRequest(
         @Size(max = 10000, message = "La descripción es demasiado larga")
         String description,
 
+        @PlanningDate
         LocalDate startDate,
 
+        @PlanningDate
         LocalDate endDate
 ) {
 }

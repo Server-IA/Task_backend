@@ -17,8 +17,10 @@ public record UpdateModuleRequest(
         @Size(max = 10000, message = "La descripción es demasiado larga")
         String description,
 
+        @PlanningDate
         LocalDate startDate,
 
+        @PlanningDate
         LocalDate targetDate,
 
         Boolean clearDates,

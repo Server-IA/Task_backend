@@ -11,12 +11,12 @@ import com.taskflow.api.entity.ProjectModule;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.enums.ActivityField;
 import com.taskflow.api.entity.enums.StateGroup;
-import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.PlanningMapper;
 import com.taskflow.api.repository.ProjectModuleRepository;
 import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.service.ModuleService;
+import com.taskflow.api.util.HumanNames;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -62,7 +62,7 @@ public class ModuleServiceImpl implements ModuleService {
 
         ProjectModule module = new ProjectModule();
         module.setProject(project);
-        module.setName(request.name().trim());
+        module.setName(HumanNames.required(request.name(), "name"));
         module.setDescription(PlanningSupport.blankToNull(request.description()));
         module.setStartDate(request.startDate());
         module.setTargetDate(request.targetDate());
@@ -81,10 +81,7 @@ public class ModuleServiceImpl implements ModuleService {
     public ModuleResponse update(String slug, UUID projectId, UUID moduleId, UpdateModuleRequest request) {
         ProjectModule module = findModule(slug, projectId, moduleId);
         if (request.name() != null) {
-            if (request.name().isBlank()) {
-                throw new BadRequestException("El nombre no puede estar vacío");
-            }
-            module.setName(request.name().trim());
+            module.setName(HumanNames.required(request.name(), "name"));
         }
         if (request.description() != null) {
             module.setDescription(PlanningSupport.blankToNull(request.description()));

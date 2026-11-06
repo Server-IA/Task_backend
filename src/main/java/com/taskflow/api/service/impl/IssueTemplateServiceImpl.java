@@ -22,6 +22,8 @@ import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.service.IssueTemplateService;
+import com.taskflow.api.util.HumanNames;
+import com.taskflow.api.util.VisibleText;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -58,7 +60,7 @@ public class IssueTemplateServiceImpl implements IssueTemplateService {
     @Transactional
     public IssueTemplateResponse create(String slug, UUID projectId, IssueTemplateRequest request) {
         Project project = lookup.project(slug, projectId);
-        String name = request.name().trim();
+        String name = HumanNames.required(request.name(), "name");
         ensureNameAvailable(project, name);
 
         List<IssueTemplate> existing = ordered(project);
@@ -84,10 +86,7 @@ public class IssueTemplateServiceImpl implements IssueTemplateService {
         Project project = lookup.project(slug, projectId);
         IssueTemplate template = findTemplate(project, templateId);
         if (request.name() != null) {
-            String name = request.name().trim();
-            if (name.isEmpty()) {
-                throw new BadRequestException("El nombre no puede estar vacío");
-            }
+            String name = HumanNames.required(request.name(), "name");
             if (!name.equalsIgnoreCase(template.getName())) {
                 ensureNameAvailable(project, name);
             }
@@ -204,7 +203,7 @@ public class IssueTemplateServiceImpl implements IssueTemplateService {
             return List.of();
         }
         return requests.stream()
-                .map(request -> new TemplateChecklistItem(request.kind(), request.text().trim()))
+                .map(request -> new TemplateChecklistItem(request.kind(), VisibleText.strip(request.text())))
                 .toList();
     }
 
@@ -224,7 +223,7 @@ public class IssueTemplateServiceImpl implements IssueTemplateService {
      * sin espacios sobrantes al principio y al final.
      */
     private static String blankToNull(String value, boolean trim) {
-        if (value == null || value.isBlank()) {
+        if (VisibleText.isBlank(value)) {
             return null;
         }
         return trim ? value.trim() : value;

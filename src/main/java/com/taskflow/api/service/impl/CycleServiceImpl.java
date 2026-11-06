@@ -27,6 +27,7 @@ import com.taskflow.api.repository.CycleRepository;
 import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.service.CycleService;
 import com.taskflow.api.service.NotificationService;
+import com.taskflow.api.util.HumanNames;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -119,7 +120,7 @@ public class CycleServiceImpl implements CycleService {
 
         Cycle cycle = new Cycle();
         cycle.setProject(project);
-        cycle.setName(request.name().trim());
+        cycle.setName(HumanNames.required(request.name(), "name"));
         cycle.setDescription(PlanningSupport.blankToNull(request.description()));
         cycle.setStartDate(request.startDate());
         cycle.setEndDate(request.endDate());
@@ -141,10 +142,7 @@ public class CycleServiceImpl implements CycleService {
             throw new ConflictException(CLOSED_EDIT_MESSAGE);
         }
         if (request.name() != null) {
-            if (request.name().isBlank()) {
-                throw new BadRequestException("El nombre no puede estar vacío");
-            }
-            cycle.setName(request.name().trim());
+            cycle.setName(HumanNames.required(request.name(), "name"));
         }
         if (request.description() != null) {
             cycle.setDescription(PlanningSupport.blankToNull(request.description()));
@@ -309,7 +307,7 @@ public class CycleServiceImpl implements CycleService {
             notificationService.notifyRetroStarted(saved, actor);
         }
         return new CloseCycleResponse(toResponse(saved), carriedToCycle, carriedToBacklog,
-                saved.getRetroStartedAt() != null);
+                saved.getRetroStartedAt() != null, retroStarts);
     }
 
     /**
@@ -330,7 +328,7 @@ public class CycleServiceImpl implements CycleService {
 
     /** Si la edición cambia el nombre o alguna fecha (lo que un ciclo cerrado ya no permite). */
     static boolean changesNameOrDates(Cycle cycle, UpdateCycleRequest request) {
-        if (request.name() != null && !request.name().trim().equals(cycle.getName())) {
+        if (request.name() != null && !HumanNames.clean(request.name()).equals(cycle.getName())) {
             return true;
         }
         LocalDate startDate = PlanningSupport.editedDate(cycle.getStartDate(), request.startDate(),

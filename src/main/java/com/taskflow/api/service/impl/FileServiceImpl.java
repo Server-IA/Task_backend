@@ -206,6 +206,12 @@ public class FileServiceImpl implements FileService {
 
     @Override
     @Transactional
+    public void keepSharedInlineImages(Issue issue) {
+        fileRepository.detachSharedInlineImages(issue.getId());
+    }
+
+    @Override
+    @Transactional
     public void releaseInlineImages(Project project, String markdown) {
         Set<UUID> ids = references(markdown);
         if (!ids.isEmpty() && fileRepository.deleteUnreferencedInlineImagesIn(ids, project.getId()) > 0) {

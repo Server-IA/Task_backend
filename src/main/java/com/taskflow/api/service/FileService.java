@@ -75,6 +75,13 @@ public interface FileService {
      */
     void releaseInlineImages(Project project, String markdown);
 
+    /**
+     * Antes de borrar una tarea: sus imágenes pegadas que también aparecen en otro texto del proyecto (la descripción o
+     * un comentario de otra tarea, una plantilla) dejan de ser de ella, así no se borran en cascada con ella. Quedan
+     * sin tarea y la limpieza programada las borra cuando ya no aparezcan en ningún texto.
+     */
+    void keepSharedInlineImages(Issue issue);
+
     /** Borra las fotos de perfil subidas del usuario (por ejemplo, al poner una URL externa). */
     void deleteAvatars(UUID userId);
 }

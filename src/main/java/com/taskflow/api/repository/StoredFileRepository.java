@@ -190,6 +190,27 @@ public interface StoredFileRepository extends JpaRepository<StoredFile, UUID> {
             """, nativeQuery = true)
     int deleteUnreferencedInlineImagesIn(@Param("ids") Collection<UUID> ids, @Param("projectId") UUID projectId);
 
+    /**
+     * Al borrar la tarea {@code issueId}: sus imágenes pegadas que aparecen también en otro texto del proyecto (la
+     * descripción o un comentario de otra tarea, una plantilla; por ejemplo, la descripción copiada y pegada en otra
+     * tarea) quedan sin tarea. Antes se borraban en cascada con ella y la otra tarea se quedaba con la imagen rota.
+     */
+    @Modifying
+    @Query(value = """
+            UPDATE stored_files f SET issue_id = NULL, updated_at = now()
+            WHERE f.issue_id = :issueId AND f.kind = 'INLINE_IMAGE'
+              AND (EXISTS (SELECT 1 FROM issues i
+                           WHERE i.project_id = f.project_id AND i.id <> :issueId
+                             AND strpos(i.description, '/files/' || f.id::text) > 0)
+                   OR EXISTS (SELECT 1 FROM comments c JOIN issues i ON i.id = c.issue_id
+                              WHERE i.project_id = f.project_id AND i.id <> :issueId
+                                AND strpos(c.body, '/files/' || f.id::text) > 0)
+                   OR EXISTS (SELECT 1 FROM issue_templates t
+                              WHERE t.project_id = f.project_id
+                                AND strpos(t.description, '/files/' || f.id::text) > 0))
+            """, nativeQuery = true)
+    int detachSharedInlineImages(@Param("issueId") UUID issueId);
+
     /** Fotos de perfil de usuarios que ya no existen. */
     @Modifying
     @Query("""

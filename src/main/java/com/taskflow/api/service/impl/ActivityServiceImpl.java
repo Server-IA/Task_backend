@@ -20,6 +20,7 @@ import com.taskflow.api.repository.IssueActivityRepository;
 import com.taskflow.api.repository.IssueRepository;
 import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.util.PageCursor;
+import com.taskflow.api.util.PageLimits;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
@@ -142,7 +143,7 @@ public class ActivityServiceImpl implements ActivityService {
         PageCursor cursor = PageCursor.parse(before);
         // Igual que el resto de listados paginados: página negativa = 0 y tamaño acotado.
         int pageSize = Math.clamp(size, 1, MAX_PAGE_SIZE);
-        Pageable pageable = PageRequest.of(Math.max(page, 0), pageSize);
+        Pageable pageable = PageLimits.reachable(PageRequest.of(Math.max(page, 0), pageSize));
         List<UUID> projectIds = projectAccess.projectIds(lookup.workspace(slug), userId);
         if (projectId != null) {
             // Un proyecto sin acceso (o de otro workspace) simplemente no tiene actividad visible.

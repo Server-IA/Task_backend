@@ -1,7 +1,9 @@
 package com.taskflow.api.repository;
 
 import com.taskflow.api.entity.WorkspaceInvitation;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -21,6 +23,14 @@ public interface WorkspaceInvitationRepository extends JpaRepository<WorkspaceIn
             """)
     Optional<WorkspaceInvitation> findByTokenHash(@Param("tokenHash") String tokenHash);
 
+    /**
+     * La invitación del token, con su fila bloqueada hasta el final de la transacción: dos aceptaciones a la vez (doble
+     * clic, dos pestañas) van en fila y la segunda ve la que hizo la primera.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select i from WorkspaceInvitation i where i.tokenHash = :tokenHash")
+    Optional<WorkspaceInvitation> lockByTokenHash(@Param("tokenHash") String tokenHash);
+
     @Query("""
             select i from WorkspaceInvitation i
             left join fetch i.invitedBy
@@ -35,4 +45,12 @@ public interface WorkspaceInvitationRepository extends JpaRepository<WorkspaceIn
     @Modifying
     @Query("delete from WorkspaceInvitation i where i.workspace.id = :workspaceId and i.email = :email and i.accepted = false")
     int deleteNotAccepted(@Param("workspaceId") UUID workspaceId, @Param("email") String email);
+
+    /**
+     * Limpieza programada: las vencidas, aceptadas o no (una aceptada se guarda hasta vencer para que volver a abrir el
+     * enlace lleve al workspace en vez de dar error). Antes no se borraban nunca.
+     */
+    @Modifying
+    @Query("delete from WorkspaceInvitation i where i.expiresAt < :now")
+    int deleteExpired(@Param("now") Instant now);
 }

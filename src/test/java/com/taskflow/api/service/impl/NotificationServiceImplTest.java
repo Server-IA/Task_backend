@@ -353,6 +353,21 @@ class NotificationServiceImplTest {
         assertThat(page.nextCursor()).isEqualTo("2026-10-29T14:03:07.500Z," + last.getId());
     }
 
+    /** Bug hunt 3: {@code ?sort=createdAt,desc,ignorecase} hacía {@code lower(createdAt)} en la consulta: un 500. */
+    @Test
+    void ordenarPorFechaSinDistinguirMayusculasNoLlegaALaConsulta() {
+        UUID me = UUID.randomUUID();
+        Pageable requested = PageRequest.of(0, 20, Sort.by(Sort.Order.desc("createdAt").ignoreCase()));
+        ArgumentCaptor<Pageable> used = ArgumentCaptor.forClass(Pageable.class);
+        when(notificationRepository.findMine(eq(me), any(), anyBoolean(), used.capture()))
+                .thenAnswer(invocation -> new PageImpl<>(List.of(), invocation.getArgument(3), 0));
+
+        notificationService.getMyNotifications(me, false, null, requested);
+
+        assertThat(used.getValue().getSort()).containsExactly(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
+        assertThat(used.getValue().getSort()).noneMatch(Sort.Order::isIgnoreCase);
+    }
+
     @Test
     void unCursorMalFormadoResponde400() {
         UUID me = UUID.randomUUID();

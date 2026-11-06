@@ -92,7 +92,9 @@ class ControllerPermissionsTest {
             "AuthController.forgotPassword",
             "AuthController.validateResetToken",
             "AuthController.resetPassword",
-            "InvitationController.getDetails");
+            "InvitationController.getDetails",
+            // /error: el formato común de los errores que no pasan por un controlador (público en SecurityConfig)
+            "ApiErrorController.error");
 
     /** Rutas públicas de {@code SecurityConfig} (permitAll). */
     private static final List<String> PUBLIC_PATTERNS = List.of("/api/v1/auth/**", "GET /api/v1/invitations/*");

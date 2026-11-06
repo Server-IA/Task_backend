@@ -1,6 +1,7 @@
 package com.taskflow.api.integration;
 
 import com.taskflow.api.dto.request.AddProjectMemberRequest;
+import com.taskflow.api.dto.request.ChangePasswordRequest;
 import com.taskflow.api.dto.request.CommentRequest;
 import com.taskflow.api.dto.request.CreateIssueRequest;
 import com.taskflow.api.dto.request.CreateProjectRequest;
@@ -45,13 +46,13 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
@@ -261,13 +262,13 @@ class ConcurrencyIntegrationTest {
     }
 
     /**
-     * Revisión de seguridad #6: el mismo refresh token usado dos veces a la vez solo se rota una vez; la otra petición
-     * cuenta como reutilización y cierra todas las sesiones.
+     * Revisión de seguridad #6, con el margen de reutilización: el mismo refresh token usado dos veces a la vez se rota
+     * una sola vez (el bloqueo del usuario pone las peticiones en fila); la segunda llega dentro del margen, así que
+     * rota el sucesor en vez de cerrar todas las sesiones. Las dos reciben un par y la cadena sigue con un token vivo.
      */
     @Test
-    void elMismoRefreshTokenUsadoDosVecesALaVezSoloRotaUnaVez() throws Exception {
-        AuthResponse session = authService.login(new LoginRequest(member.getEmail(), "Clave1234"),
-                new ClientInfo("127.0.0.1", "JUnit"));
+    void elMismoRefreshTokenUsadoDosVecesALaVezDaDosParesSinCerrarLaSesion() throws Exception {
+        AuthResponse session = login();
         UUID tokenId = UUID.fromString(value("SELECT id FROM refresh_tokens WHERE user_id = '" + member.getId()
                 + "'"));
 
@@ -280,22 +281,112 @@ class ConcurrencyIntegrationTest {
             other.commit();
         }
 
-        int rotated = 0;
-        int rejected = 0;
-        for (Future<AuthResponse> result : List.of(a, b)) {
-            try {
-                result.get(20, TimeUnit.SECONDS);
-                rotated++;
-            } catch (ExecutionException ex) {
-                assertThat(ex.getCause()).isInstanceOf(UnauthorizedException.class);
-                rejected++;
-            }
-        }
-        assertThat(rotated).isEqualTo(1);
-        assertThat(rejected).isEqualTo(1);
-        // La reutilización revoca también el token nuevo: hay que volver a iniciar sesión
-        assertThat(value("SELECT count(*) FROM refresh_tokens WHERE user_id = '" + member.getId()
-                + "' AND NOT revoked")).isEqualTo("0");
+        AuthResponse first = a.get(20, TimeUnit.SECONDS);
+        AuthResponse second = b.get(20, TimeUnit.SECONDS);
+        assertThat(first.refreshToken()).isNotEqualTo(second.refreshToken());
+        assertThat(activeTokens()).isEqualTo("1");
+
+        // Cualquiera de los dos sirve para seguir (el que quedó vivo, o el otro dentro del margen) y la sesión sigue
+        AuthResponse fromFirst = authService.refresh(first.refreshToken());
+        AuthResponse fromSecond = authService.refresh(second.refreshToken());
+        assertThat(authService.refresh(fromSecond.refreshToken()).accessToken()).isNotBlank();
+        assertThat(fromFirst.accessToken()).isNotBlank();
+        assertThat(activeTokens()).isEqualTo("1");
+    }
+
+    /** El fallo original: dos recargas seguidas mandaban el token ya rotado y cerraban todas las sesiones. */
+    @Test
+    void dosRecargasSeguidasNoCierranLaSesion() {
+        AuthResponse session = login();
+        AuthResponse other = login(); // otra sesión del mismo usuario (otro equipo)
+
+        authService.refresh(session.refreshToken()); // la respuesta se pierde al recargar
+        AuthResponse reloaded = authService.refresh(session.refreshToken());
+        AuthResponse thirdReload = authService.refresh(session.refreshToken());
+
+        assertThat(authService.refresh(thirdReload.refreshToken()).accessToken()).isNotBlank();
+        // La otra sesión no se tocó y esta sigue con un solo token vivo
+        assertThat(authService.refresh(other.refreshToken()).accessToken()).isNotBlank();
+        assertThat(activeTokens()).isEqualTo("2");
+        assertThat(reloaded.refreshToken()).isNotEqualTo(thirdReload.refreshToken());
+    }
+
+    @Test
+    void reutilizarloPasadoElMargenCierraTodasLasSesiones() {
+        AuthResponse session = login();
+        AuthResponse rotated = authService.refresh(session.refreshToken());
+        sql("UPDATE refresh_tokens SET revoked_at = now() - interval '1 minute' WHERE user_id = '" + member.getId()
+                + "' AND revoked");
+
+        assertThatThrownBy(() -> authService.refresh(session.refreshToken()))
+                .isInstanceOf(UnauthorizedException.class);
+        assertThat(activeTokens()).isEqualTo("0");
+        assertThatThrownBy(() -> authService.refresh(rotated.refreshToken()))
+                .isInstanceOf(UnauthorizedException.class);
+    }
+
+    @Test
+    void trasElLogoutElTokenViejoNoTieneMargen() {
+        AuthResponse session = login();
+        AuthResponse rotated = authService.refresh(session.refreshToken());
+        authService.logout(rotated.refreshToken());
+
+        assertThatThrownBy(() -> authService.refresh(session.refreshToken()))
+                .isInstanceOf(UnauthorizedException.class);
+        assertThat(activeTokens()).isEqualTo("0");
+    }
+
+    @Test
+    void logoutConElTokenViejoCierraTambienElSucesorVivo() {
+        // Dos recargas: la respuesta del refresh se perdió y el navegador se quedó con el token viejo; cerrar sesión
+        // con él dejaba vivo el sucesor (servía una semana más)
+        AuthResponse session = login();
+        AuthResponse other = login();
+        AuthResponse rotated = authService.refresh(session.refreshToken());
+        authService.logout(session.refreshToken());
+
+        assertThatThrownBy(() -> authService.refresh(rotated.refreshToken()))
+                .isInstanceOf(UnauthorizedException.class);
+        // Solo esa sesión: la del otro equipo sigue
+        assertThat(authService.refresh(other.refreshToken()).accessToken()).isNotBlank();
+        assertThat(activeTokens()).isEqualTo("1");
+    }
+
+    @Test
+    void reusarElTokenAnteriorTrasElLogoutNoCierraLasOtrasSesiones() {
+        // Otra pestaña con el token anterior (rotado hace segundos) pide un refresh después del logout: es un 401, no
+        // un robo que cierre también la sesión del otro equipo
+        AuthResponse session = login();
+        AuthResponse other = login();
+        AuthResponse rotated = authService.refresh(session.refreshToken());
+        authService.logout(rotated.refreshToken());
+
+        assertThatThrownBy(() -> authService.refresh(session.refreshToken()))
+                .isInstanceOf(UnauthorizedException.class);
+        assertThat(authService.refresh(other.refreshToken()).accessToken()).isNotBlank();
+    }
+
+    @Test
+    void trasCambiarLaContrasenaElTokenViejoNoTieneMargen() {
+        AuthResponse session = login();
+        AuthResponse rotated = authService.refresh(session.refreshToken());
+        AuthResponse changed = authService.changePassword(member.getId(),
+                new ChangePasswordRequest("Clave1234", "ClaveNueva5678"));
+
+        assertThatThrownBy(() -> authService.refresh(session.refreshToken()))
+                .isInstanceOf(UnauthorizedException.class);
+        assertThatThrownBy(() -> authService.refresh(rotated.refreshToken()))
+                .isInstanceOf(UnauthorizedException.class);
+        // Los tokens viejos ya no existen (no es una reutilización): la sesión del cambio sigue
+        assertThat(authService.refresh(changed.refreshToken()).accessToken()).isNotBlank();
+    }
+
+    private AuthResponse login() {
+        return authService.login(new LoginRequest(member.getEmail(), "Clave1234"), new ClientInfo("127.0.0.1", "JUnit"));
+    }
+
+    private String activeTokens() {
+        return value("SELECT count(*) FROM refresh_tokens WHERE user_id = '" + member.getId() + "' AND NOT revoked");
     }
 
     /**

@@ -16,6 +16,7 @@ import com.taskflow.api.repository.IssueRepository;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.service.IssueRelationService;
 import com.taskflow.api.service.StateService;
+import com.taskflow.api.util.HumanNames;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -55,7 +56,7 @@ public class StateServiceImpl implements StateService {
     public StateResponse create(String slug, UUID projectId, CreateStateRequest request) {
         Project project = lookup.project(slug, projectId);
         lookup.lockProject(project);
-        String name = request.name().trim();
+        String name = HumanNames.required(request.name(), "name");
         ensureNameAvailable(project, name);
 
         int position = request.position() != null
@@ -74,10 +75,7 @@ public class StateServiceImpl implements StateService {
         }
         State state = findState(project, stateId);
         if (request.name() != null) {
-            String name = request.name().trim();
-            if (name.isEmpty()) {
-                throw new BadRequestException("El nombre no puede estar vacío");
-            }
+            String name = HumanNames.required(request.name(), "name");
             if (!name.equalsIgnoreCase(state.getName())) {
                 ensureNameAvailable(project, name);
             }
@@ -160,7 +158,9 @@ public class StateServiceImpl implements StateService {
     @Transactional
     public void delete(String slug, UUID projectId, UUID stateId) {
         Project project = lookup.project(slug, projectId);
-        State state = findState(project, stateId);
+        // Bloqueado: si alguien está poniendo una tarea en él, se espera a que termine y entonces se ve la tarea
+        State state = stateRepository.findForUpdate(stateId, project.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Estado no encontrado"));
         if (stateRepository.countByProjectId(project.getId()) <= 1) {
             throw new ConflictException("El proyecto debe tener al menos un estado");
         }

@@ -5,6 +5,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 
+import java.util.Set;
+
 /**
  * Orden del listado de tareas. {@code sort=priorityRank,asc} pone primero las urgentes, luego alta, media, baja y
  * sin prioridad; dentro de la misma prioridad van por fecha límite (las que no tienen al final). Cualquier orden
@@ -19,6 +21,15 @@ public final class IssueListSort {
 
     private static final String NUMBER = "sequenceId";
 
+    /**
+     * Los campos por los que se puede ordenar: los de un solo valor de la propia tarea. Una colección
+     * ({@code assignees}, {@code labels}, {@code cycles}, {@code modules}) hacía un join que repetía cada tarea una vez
+     * por elemento: {@code totalElements} contaba de más y las páginas repetían tareas.
+     */
+    static final Set<String> SORTABLE = Set.of(
+            "sortOrder", PRIORITY, "priority", "sequenceId", "title", "type", "createdAt", "updatedAt", "dueDate",
+            "startDate", "startedAt", "completedAt", "closedAt");
+
     private IssueListSort() {
     }
 
@@ -26,8 +37,11 @@ public final class IssueListSort {
      * Agrega «luego número» al final (salvo que ya venga en el orden) y, si se ordena por prioridad, antes «luego fecha
      * límite».
      * <p>
-     * Solo se ordena por campos de la propia tarea: una ruta con punto ({@code createdBy.passwordHash},
-     * {@code assignees.email}) haría un join a otra entidad y dejaría ordenar por datos que la API no muestra (400).
+     * Solo se ordena por los campos de {@link #SORTABLE} (400 con cualquier otro): una ruta con punto
+     * ({@code createdBy.passwordHash}, {@code assignees.email}) haría un join a otra entidad y dejaría ordenar por datos
+     * que la API no muestra; una colección repetía tareas entre páginas; y algo que no es un nombre de campo
+     * ({@code -createdAt}, {@code title )}, {@code length(title)}) Spring Data lo rechazaba con una excepción que llegaba
+     * como 500.
      */
     public static Pageable withTieBreakers(Pageable pageable) {
         if (pageable.isUnpaged()) {
@@ -35,7 +49,7 @@ public final class IssueListSort {
         }
         Sort sort = pageable.getSort();
         for (Sort.Order order : sort) {
-            if (order.getProperty().contains(".")) {
+            if (!SORTABLE.contains(order.getProperty())) {
                 throw new BadRequestException("No se puede ordenar por '" + order.getProperty() + "'");
             }
         }
@@ -46,6 +60,6 @@ public final class IssueListSort {
         if (sort.getOrderFor(NUMBER) == null) {
             result = result.and(Sort.by(Sort.Direction.ASC, NUMBER));
         }
-        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), result);
+        return PageLimits.reachable(PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), result));
     }
 }
