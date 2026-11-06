@@ -473,7 +473,7 @@ cerrar por fecha de inicio (para un ciclo sin fechas, el primero que no ha termi
 POST /cycles/{cycleId}/close
 { "moveTo": "NEXT_CYCLE | BACKLOG", "targetCycleId": "uuid?",
   "overrides": [ { "issueId": "uuid", "moveTo": "BACKLOG" } ], "startRetro": true }
-→ { "cycle": CycleResponse, "movedToCycle": 2, "movedToBacklog": 1, "retroStarted": true }
+→ { "cycle": CycleResponse, "movedToCycle": 2, "movedToBacklog": 1, "retroStarted": true, "retroStartedNow": true }
 ```
 
 Las sin terminar van a `targetCycleId` (o, sin él, al siguiente ciclo) o salen del ciclo (`BACKLOG`,
@@ -488,7 +488,9 @@ resumen del ciclo cerrado no cambia porque se guarda al cerrarlo. Las historias 
 mueven con el resto, pero no cuentan en `movedToCycle`/`movedToBacklog` ni en la vista previa. Dos
 cierres a la vez (doble clic) se ejecutan en fila: el segundo recibe 409. `startRetro: true` abre la
 retrospectiva y avisa a los miembros del proyecto (notificación `RETRO_STARTED`, menos a quien la abre;
-solo en la app).
+solo en la app). `retroStarted` dice si la retro del ciclo está abierta (también si ya se había abierto
+antes); `retroStartedNow`, si la abrió este cierre y se avisó al equipo (si ya estaba abierta, no se
+vuelve a avisar y es `false`).
 
 ### Retrospectiva
 

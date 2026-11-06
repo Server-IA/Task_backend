@@ -284,6 +284,7 @@ class CycleServiceImplTest {
             assertThat(response.movedToCycle()).isEqualTo(2);
             assertThat(response.movedToBacklog()).isZero();
             assertThat(response.retroStarted()).isFalse();
+            assertThat(response.retroStartedNow()).isFalse();
             verifyNoInteractions(notificationService);
             assertThat(response.cycle().status()).isEqualTo(CycleStatus.COMPLETED);
             assertThat(response.cycle().closedAt()).isEqualTo(sprint.getClosedAt());
@@ -320,7 +321,8 @@ class CycleServiceImplTest {
             assertThat(sprint.getCarriedToBacklog()).isEqualTo(2);
             assertThat(sprint.getRetroStartedAt()).isNotNull();
             assertThat(response.retroStarted()).isTrue();
-            // Abrir la retro avisa al equipo
+            // Este cierre la abrió: avisa al equipo
+            assertThat(response.retroStartedNow()).isTrue();
             verify(notificationService).notifyRetroStarted(sprint, pm);
         }
 
@@ -385,7 +387,21 @@ class CycleServiceImplTest {
                     closeRequest(CycleMoveTarget.BACKLOG, null, true));
 
             assertThat(sprint.getRetroStartedAt()).isEqualTo(opened);
+            // Sigue abierta, pero no la abrió este cierre ni se avisó a nadie
             assertThat(response.retroStarted()).isTrue();
+            assertThat(response.retroStartedNow()).isFalse();
+            verifyNoInteractions(notificationService);
+        }
+
+        @Test
+        void conLaRetroYaAbiertaYSinPedirlaDiceQueEstaAbiertaPeroNoQueSeAbrioAhora() {
+            sprint.setRetroStartedAt(now.minus(Duration.ofDays(1)));
+
+            CloseCycleResponse response = cycleService.close(SLUG, project.getId(), sprint.getId(), pm.getId(),
+                    closeRequest(CycleMoveTarget.BACKLOG, null, false));
+
+            assertThat(response.retroStarted()).isTrue();
+            assertThat(response.retroStartedNow()).isFalse();
             verifyNoInteractions(notificationService);
         }
 

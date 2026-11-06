@@ -307,7 +307,7 @@ public class CycleServiceImpl implements CycleService {
             notificationService.notifyRetroStarted(saved, actor);
         }
         return new CloseCycleResponse(toResponse(saved), carriedToCycle, carriedToBacklog,
-                saved.getRetroStartedAt() != null);
+                saved.getRetroStartedAt() != null, retroStarts);
     }
 
     /**
