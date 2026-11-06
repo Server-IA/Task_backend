@@ -286,7 +286,7 @@ class IssueServiceImplTest {
 
         @BeforeEach
         void stubs() {
-            when(stateRepository.findByIdAndProjectId(done.getId(), project.getId())).thenReturn(Optional.of(done));
+            when(stateRepository.findForShare(done.getId(), project.getId())).thenReturn(Optional.of(done));
             lenient().when(issueRepository.saveAndFlush(any(Issue.class))).thenAnswer(invocation -> invocation.getArgument(0));
         }
 
@@ -366,9 +366,9 @@ class IssueServiceImplTest {
             lenient().when(lookup.user(author.getId())).thenReturn(author);
             lenient().when(issueRepository.saveAndFlush(any(Issue.class)))
                     .thenAnswer(invocation -> invocation.getArgument(0));
-            lenient().when(stateRepository.findByIdAndProjectId(done.getId(), project.getId()))
+            lenient().when(stateRepository.findForShare(done.getId(), project.getId()))
                     .thenReturn(Optional.of(done));
-            lenient().when(stateRepository.findByIdAndProjectId(todo.getId(), project.getId()))
+            lenient().when(stateRepository.findForShare(todo.getId(), project.getId()))
                     .thenReturn(Optional.of(todo));
         }
 
@@ -412,7 +412,7 @@ class IssueServiceImplTest {
         @Test
         void moverEntreDosEstadosCompletadosConservaLaFecha() {
             State deployed = state("Deployed", StateGroup.COMPLETED);
-            when(stateRepository.findByIdAndProjectId(deployed.getId(), project.getId()))
+            when(stateRepository.findForShare(deployed.getId(), project.getId()))
                     .thenReturn(Optional.of(deployed));
             Issue issue = issue(done, 1);
             Instant completedAt = Instant.parse("2026-10-20T15:00:00Z");
@@ -454,7 +454,7 @@ class IssueServiceImplTest {
             lenient().when(issueRepository.saveAndFlush(any(Issue.class)))
                     .thenAnswer(invocation -> invocation.getArgument(0));
             for (State state : List.of(todo, inProgress, review, done)) {
-                lenient().when(stateRepository.findByIdAndProjectId(state.getId(), project.getId()))
+                lenient().when(stateRepository.findForShare(state.getId(), project.getId()))
                         .thenReturn(Optional.of(state));
             }
         }
@@ -518,7 +518,7 @@ class IssueServiceImplTest {
             lenient().when(issueRepository.saveAndFlush(any(Issue.class)))
                     .thenAnswer(invocation -> invocation.getArgument(0));
             for (State state : List.of(todo, done, cancelled)) {
-                lenient().when(stateRepository.findByIdAndProjectId(state.getId(), project.getId()))
+                lenient().when(stateRepository.findForShare(state.getId(), project.getId()))
                         .thenReturn(Optional.of(state));
             }
         }
@@ -549,7 +549,7 @@ class IssueServiceImplTest {
         @Test
         void moverEntreEstadosCompletadosOCancelarNoAvisa() {
             State deployed = state("Deployed", StateGroup.COMPLETED);
-            when(stateRepository.findByIdAndProjectId(deployed.getId(), project.getId()))
+            when(stateRepository.findForShare(deployed.getId(), project.getId()))
                     .thenReturn(Optional.of(deployed));
             Issue completed = issue(done, 1);
             Issue open = issue(todo, 2);

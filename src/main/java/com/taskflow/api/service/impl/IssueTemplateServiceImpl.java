@@ -23,6 +23,7 @@ import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.service.IssueTemplateService;
 import com.taskflow.api.util.HumanNames;
+import com.taskflow.api.util.VisibleText;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -202,7 +203,7 @@ public class IssueTemplateServiceImpl implements IssueTemplateService {
             return List.of();
         }
         return requests.stream()
-                .map(request -> new TemplateChecklistItem(request.kind(), request.text().trim()))
+                .map(request -> new TemplateChecklistItem(request.kind(), VisibleText.strip(request.text())))
                 .toList();
     }
 
@@ -222,7 +223,7 @@ public class IssueTemplateServiceImpl implements IssueTemplateService {
      * sin espacios sobrantes al principio y al final.
      */
     private static String blankToNull(String value, boolean trim) {
-        if (value == null || value.isBlank()) {
+        if (VisibleText.isBlank(value)) {
             return null;
         }
         return trim ? value.trim() : value;

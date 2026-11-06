@@ -30,4 +30,17 @@ public interface SavedViewRepository extends JpaRepository<SavedView, UUID> {
     /** Grupo de las vistas personales de un usuario en el proyecto, en orden. */
     List<SavedView> findAllByProjectIdAndOwnerIdAndSharedFalseOrderByPositionAscCreatedAtAsc(UUID projectId,
                                                                                               UUID ownerId);
+
+    /**
+     * Lo que existe en el proyecto para los filtros de ids de una vista, como filas {@code [tipo, id]} (tipo:
+     * {@code state}, {@code label}, {@code cycle}, {@code module} o {@code assignee}, sus miembros). Con una sola consulta.
+     */
+    @Query(value = """
+            SELECT 'state', id FROM states WHERE project_id = :projectId
+            UNION ALL SELECT 'label', id FROM labels WHERE project_id = :projectId
+            UNION ALL SELECT 'cycle', id FROM cycles WHERE project_id = :projectId
+            UNION ALL SELECT 'module', id FROM modules WHERE project_id = :projectId
+            UNION ALL SELECT 'assignee', user_id FROM project_members WHERE project_id = :projectId
+            """, nativeQuery = true)
+    List<Object[]> findFilterTargets(@Param("projectId") UUID projectId);
 }

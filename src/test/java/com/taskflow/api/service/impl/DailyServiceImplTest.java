@@ -24,6 +24,7 @@ import com.taskflow.api.entity.enums.ActivityField;
 import com.taskflow.api.entity.enums.IssuePriority;
 import com.taskflow.api.entity.enums.IssueRelationType;
 import com.taskflow.api.entity.enums.StateGroup;
+import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.mapper.CollaborationMapper;
 import com.taskflow.api.mapper.IssueMapper;
 import com.taskflow.api.mapper.UserMapper;
@@ -51,6 +52,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
@@ -661,6 +663,37 @@ class DailyServiceImplTest {
 
             assertThat(response).isEmpty();
             verify(noteRepository).delete(existing);
+            verify(noteRepository, never()).saveAndFlush(any());
+        }
+
+        /** Bug hunt 3: una nota de puros espacios duros o de ancho cero se guardaba (se veía vacía). */
+        @Test
+        void unaNotaDeEspaciosInvisiblesTambienBorraLaNota() {
+            DailyNote existing = new DailyNote(project, WEDNESDAY);
+            when(noteRepository.findByProjectIdAndDate(project.getId(), WEDNESDAY)).thenReturn(Optional.of(existing));
+
+            Optional<DailyNoteResponse> response = dailyService.saveNote(SLUG, project.getId(), ana.getId(), WEDNESDAY,
+                    new DailyNoteRequest(" ​﻿ "));
+
+            assertThat(response).isEmpty();
+            verify(noteRepository).delete(existing);
+            verify(noteRepository, never()).saveAndFlush(any());
+        }
+
+        /**
+         * Bug hunt 3: {@code ?date=-999999999-01-01} respondía 500 (el día anterior no existe) y otras fechas fuera del
+         * rango de PostgreSQL, «el texto tiene caracteres no permitidos».
+         */
+        @Test
+        void unaFechaFueraDe1900A2999Responde400DelCampoDate() {
+            for (LocalDate bad : List.of(LocalDate.MIN, LocalDate.MAX, LocalDate.of(1, 1, 1), LocalDate.of(3000, 1, 1))) {
+                assertThatThrownBy(() -> dailyService.getDaily(SLUG, project.getId(), VIEWER, bad))
+                        .isInstanceOf(BadRequestException.class)
+                        .satisfies(ex -> assertThat(((BadRequestException) ex).getErrors()).containsKey("date"));
+                assertThatThrownBy(() -> dailyService.saveNote(SLUG, project.getId(), ana.getId(), bad,
+                        new DailyNoteRequest("Nota")))
+                        .isInstanceOf(BadRequestException.class);
+            }
             verify(noteRepository, never()).saveAndFlush(any());
         }
 

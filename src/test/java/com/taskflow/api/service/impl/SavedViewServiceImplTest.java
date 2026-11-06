@@ -152,6 +152,54 @@ class SavedViewServiceImplTest {
         assertThat(views).extracting(SavedViewResponse::issueCount).containsExactly(4L, 2L);
     }
 
+    /**
+     * Bug hunt 3: una vista que filtra por una etiqueta (o estado, ciclo, módulo, persona) que ya no existe contaba 0
+     * tareas en la barra, mientras que el frontend, al abrirla, quita ese filtro y muestra las del resto.
+     */
+    @Test
+    void elConteoNoUsaLosIdsQueYaNoExistenEnElProyecto() {
+        UUID keptLabel = UUID.randomUUID();
+        UUID deletedLabel = UUID.randomUUID();
+        UUID state = UUID.randomUUID();
+        UUID formerMember = UUID.randomUUID();
+        SavedViewFilters filters = new SavedViewFilters(List.of(state), List.of(IssuePriority.HIGH),
+                List.of(formerMember), List.of(keptLabel, deletedLabel), "login", null, null, UUID.randomUUID(),
+                UUID.randomUUID(), true, null, null);
+        SavedViewServiceImpl.FilterTargets targets = SavedViewServiceImpl.FilterTargets.of(List.of(
+                new Object[] {"label", keptLabel}, new Object[] {"state", state},
+                new Object[] {"assignee", member.getId()}));
+
+        SavedViewFilters counted = SavedViewServiceImpl.withoutUnknown(filters, targets);
+
+        assertThat(counted.label()).containsExactly(keptLabel);
+        assertThat(counted.state()).containsExactly(state);
+        assertThat(counted.assignee()).isEmpty();
+        assertThat(counted.cycle()).isNull();
+        assertThat(counted.module()).isNull();
+        assertThat(counted.priority()).containsExactly(IssuePriority.HIGH);
+        assertThat(counted.search()).isEqualTo("login");
+        assertThat(counted.blocked()).isTrue();
+    }
+
+    @Test
+    void loQueExisteEnElProyectoSeConsultaUnaVezYSoloSiAlgunaVistaFiltraPorIds() {
+        SavedView plain = view(pm, true, 0);
+        SavedView byLabel = view(member, false, 0);
+        SavedView byState = view(member, false, 1);
+        byLabel.setFilters(new SavedViewFilters(List.of(), List.of(), List.of(), List.of(UUID.randomUUID()), null,
+                null, null, null, null, null, null, null));
+        byState.setFilters(new SavedViewFilters(List.of(UUID.randomUUID()), List.of(), List.of(), List.of(), null,
+                null, null, null, null, null, null, null));
+        when(viewRepository.findVisible(project.getId(), member.getId())).thenReturn(List.of(plain, byLabel, byState));
+
+        viewService.getViews(SLUG, project.getId(), member.getId());
+        verify(viewRepository).findFilterTargets(project.getId());
+
+        when(viewRepository.findVisible(project.getId(), pm.getId())).thenReturn(List.of(plain));
+        viewService.getViews(SLUG, project.getId(), pm.getId());
+        verify(viewRepository).findFilterTargets(any());
+    }
+
     @Test
     void losFiltrosDeLaVistaSonLosDelListadoDeTareas() {
         UUID state = UUID.randomUUID();

@@ -23,6 +23,20 @@ public interface StateRepository extends JpaRepository<State, UUID> {
 
     Optional<State> findByIdAndProjectId(UUID id, UUID projectId);
 
+    /**
+     * El estado, con {@code FOR KEY SHARE} hasta el final de la transacción (el mismo bloqueo que toma la clave foránea
+     * al guardar la tarea, pero antes de mirar nada): quien pone una tarea en él (crearla, moverla) no se cruza con quien
+     * lo elimina. Si el borrado llegó primero, espera y ya no lo encuentra; si no, el borrado espera y ve la tarea. Antes
+     * la tarea fallaba con un 409 genérico por la clave foránea. No choca con renombrarlo, reordenarlo ni cambiarle el
+     * grupo (esos no tocan la clave).
+     */
+    @Query(value = "SELECT * FROM states WHERE id = :id AND project_id = :projectId FOR KEY SHARE", nativeQuery = true)
+    Optional<State> findForShare(@Param("id") UUID id, @Param("projectId") UUID projectId);
+
+    /** El estado, con {@code FOR UPDATE} hasta el final de la transacción (para eliminarlo; ver {@link #findForShare}). */
+    @Query(value = "SELECT * FROM states WHERE id = :id AND project_id = :projectId FOR UPDATE", nativeQuery = true)
+    Optional<State> findForUpdate(@Param("id") UUID id, @Param("projectId") UUID projectId);
+
     /** Estado por defecto para los issues nuevos: el primero del tablero. */
     Optional<State> findFirstByProjectIdOrderByPositionAsc(UUID projectId);
 

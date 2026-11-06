@@ -420,47 +420,18 @@ class AuthServiceImplTest {
         }
 
         @Test
-        void logoutConElTokenVivoBorraLaSesionYLosQueApuntanAEl() {
+        void logoutBorraLaSesionEnteraDelToken() {
+            // La cadena (sucesores y anteriores, a cualquier distancia) la recorre la consulta recursiva; aquí, que se
+            // pide con el token y el usuario, sin revocar las demás sesiones
             User user = user("ana@test.com");
             RefreshToken live = active(user);
-            lockedRefresh(user, live);
+            RefreshToken stored = rotated(user, live, Instant.now().minusSeconds(60));
+            lockedRefresh(user, stored);
 
             authService.logout("rt");
 
-            // También el anterior (rotado hace poco y apuntando a este): reusarlo es un 401 y no cierra los otros equipos
-            verify(refreshTokenRepository).deleteSession(user.getId(), List.of(live.getId()));
+            verify(refreshTokenRepository).deleteSession(user.getId(), stored.getId());
             verify(refreshTokenRepository, never()).revokeAllByUserId(any());
-        }
-
-        @Test
-        void logoutConUnTokenYaRotadoBorraTambienSuSucesorVivo() {
-            // El navegador recargó antes de guardar el token nuevo y luego se cerró sesión con el viejo: el sucesor
-            // seguía sirviendo una semana después del logout
-            User user = user("ana@test.com");
-            RefreshToken live = active(user);
-            RefreshToken middle = rotated(user, live, Instant.now().minusSeconds(5));
-            RefreshToken stored = rotated(user, middle, Instant.now().minusSeconds(60));
-            lockedRefresh(user, stored);
-            when(refreshTokenRepository.findById(middle.getId())).thenReturn(Optional.of(middle));
-            when(refreshTokenRepository.findById(live.getId())).thenReturn(Optional.of(live));
-
-            authService.logout("rt");
-
-            verify(refreshTokenRepository).deleteSession(user.getId(),
-                    List.of(stored.getId(), middle.getId(), live.getId()));
-        }
-
-        @Test
-        void logoutNoSigueSucesoresDeOtroUsuario() {
-            User user = user("ana@test.com");
-            RefreshToken foreign = active(user("otro@test.com"));
-            RefreshToken stored = rotated(user, foreign, Instant.now().minusSeconds(5));
-            lockedRefresh(user, stored);
-            when(refreshTokenRepository.findById(foreign.getId())).thenReturn(Optional.of(foreign));
-
-            authService.logout("rt");
-
-            verify(refreshTokenRepository).deleteSession(user.getId(), List.of(stored.getId()));
         }
 
         @Test
@@ -469,7 +440,7 @@ class AuthServiceImplTest {
 
             authService.logout("rt");
 
-            verify(refreshTokenRepository, never()).deleteSession(any(), any());
+            verify(refreshTokenRepository, never()).deleteSession(any(), any(UUID.class));
             verifyNoInteractions(userRepository);
         }
 

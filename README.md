@@ -47,12 +47,12 @@ docker compose up -d          # PostgreSQL 16 (5432) y Mailpit (bandeja de corre
 | `RESEND_API_KEY` | API key de Resend (solo con `MAIL_PROVIDER=resend`). **Si está vacía**, los correos no se envían. Con un `FRONTEND_URL` que no es localhost (producción) la API **no arranca** sin ella |
 | `MAIL_LOG_LINKS` | `true`/`false`: escribir en el log los enlaces de los correos que no salen (verificar, restablecer contraseña, invitar). Son **secretos**: quien lea el log puede tomar la cuenta. Vacío (por defecto): solo si `FRONTEND_URL` es localhost, para probar en local sin proveedor de correo |
 | `MAIL_FROM` | Remitente. Con Resend debe ser de un **dominio verificado**; sin él, Resend solo permite `onboarding@resend.dev` y únicamente hacia el correo dueño de la cuenta |
-| `FRONTEND_URL` | Origen permitido por CORS y base de los enlaces de los correos (por defecto `http://localhost:5173`) |
+| `FRONTEND_URL` | Base de los enlaces de los correos (por defecto `http://localhost:5173`); su origen (`esquema://host[:puerto]`, sin la ruta) es el único que CORS deja llamar a la API, así que el frontend puede vivir en una subruta |
 | `FORWARD_HEADERS_STRATEGY` | `none` (por defecto) o `native` detrás de un proxy (Dokploy/Traefik): ver [Docker / despliegue](#docker--despliegue) |
 | `SPRINGDOC_ENABLED` | Swagger UI y `/v3/api-docs` (por defecto `true`; el frontend genera sus tipos con `/v3/api-docs`). `false` los apaga |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | Cloudflare R2 (archivos e imágenes). Endpoint `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com`, región `auto`; `R2_ENDPOINT` lo reemplaza (opcional). Sin credenciales la API arranca, pero subir o ver archivos responde 503. El bucket es privado y su CORS debe permitir `GET`, `PUT` y `HEAD` desde `FRONTEND_URL` con cabeceras `*` (y exponer `ETag`) |
 | `STORAGE_CLEANUP_CRON` | Limpieza de archivos (por defecto cada hora, `0 15 * * * *`): subidas sin confirmar de más de 24 h e imágenes pegadas que ya no están en ningún texto desde hace 7 días |
-| `NOTIFICATION_RETENTION_DAYS`, `MAINTENANCE_CRON` | Limpieza diaria: notificaciones leídas de más de 90 días, tokens vencidos o usados (por defecto a las 3:30, `0 30 3 * * *`, en `app.timezone`) |
+| `NOTIFICATION_RETENTION_DAYS`, `MAINTENANCE_CRON` | Limpieza diaria: notificaciones leídas de más de 90 días, tokens vencidos o usados e invitaciones vencidas (por defecto a las 3:30, `0 30 3 * * *`, en `app.timezone`) |
 
 El archivo `.env` está en `.gitignore`; nunca se suben secretos.
 
@@ -219,7 +219,7 @@ backend responde 400 si se usan.
 | POST / GET | `/workspaces/{slug}/invitations` | Project manager: invitar (`{ email }`, entra como `MEMBER`; 20 invitaciones por hora por persona y 3 por hora a un mismo correo, si no 429) / pendientes |
 | DELETE | `/workspaces/{slug}/invitations/{invitationId}` | Project manager: cancelar |
 | GET | `/invitations/{token}` | Ver invitación (**público**, sin sesión) |
-| POST | `/invitations/{token}/accept` | Aceptar (con sesión del email invitado) |
+| POST | `/invitations/{token}/accept` | Aceptar (con sesión del email invitado). Volver a aceptarla quien ya entró con ella (doble clic, el enlace abierto otra vez) responde el workspace de nuevo mientras no venza |
 
 ### Proyectos, estados y etiquetas
 
@@ -292,6 +292,11 @@ Base: `/workspaces/{slug}/projects/{projectId}/issues`.
   "templateId": "uuid"
 }
 ```
+
+Las fechas de planificación (`startDate`/`dueDate` de las tareas, las de ciclos y módulos y el `date`
+de la daily) van del año 1900 al 2999 (si no, 400 del campo). Un título, comentario, elemento de
+checklist o nota de la retro hecho solo de espacios, también duros (U+00A0) o de ancho cero (U+200B),
+es un 400 del campo.
 
 `checklist` (opcional, máx. 50) crea los criterios y pasos en la misma transacción, en el orden
 recibido; es lo que se envía al crear una tarea desde una plantilla. `templateId` (opcional) es la
@@ -620,7 +625,7 @@ completada ni cancelada. Las semanas empiezan el **lunes**, en la zona horaria `
 - `throughput`: exactamente `weeks` elementos, del más antiguo a la semana actual.
 - `burndown`: el ciclo en curso (hoy entre sus fechas; si se solapan, el que empezó más tarde) o
   `null`. `total` = tareas del ciclo sin las canceladas; un punto por día desde el inicio hasta hoy
-  con las que seguían sin completar al final de ese día.
+  (como mucho los últimos 366 días) con las que seguían sin completar al final de ese día.
 - `openByState`: solo estados abiertos, en el orden del tablero, con ceros.
 - `workload`: tareas abiertas por asignado (una con dos asignados cuenta para ambos); `user: null` =
   sin asignar. De más a menos.

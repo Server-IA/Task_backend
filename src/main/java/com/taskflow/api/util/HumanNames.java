@@ -19,7 +19,7 @@ public final class HumanNames {
      * y U+0085) más los invisibles que no lo son para Unicode: espacio de ancho cero (U+200B), unión de palabras
      * (U+2060) y BOM (U+FEFF). Los de unión (U+200C, U+200D) no: arman emojis compuestos.
      */
-    private static final Pattern INNER_SPACES = Pattern.compile("[\\s\\u200B\\u2060\\uFEFF]+",
+    private static final Pattern INNER_SPACES = Pattern.compile("[" + VisibleText.SPACES + "]+",
             Pattern.UNICODE_CHARACTER_CLASS);
 
     private HumanNames() {

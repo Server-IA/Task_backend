@@ -84,9 +84,11 @@ public class NotificationServiceImpl implements NotificationService {
         Sort.Order byDate = pageable.getSort().getOrderFor("createdAt");
         boolean newestFirst = byDate != null && byDate.isDescending();
         if (byDate != null) {
-            // A igual fecha, por id en el mismo sentido: el orden es estable y coincide con el del cursor
+            // A igual fecha, por id en el mismo sentido: el orden es estable y coincide con el del cursor. Se arma de
+            // nuevo (sin ignoreCase): con ?sort=createdAt,desc,ignorecase la consulta hacía lower(createdAt), un 500
             pageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
-                    Sort.by(byDate, new Sort.Order(byDate.getDirection(), "id")));
+                    Sort.by(new Sort.Order(byDate.getDirection(), "createdAt"),
+                            new Sort.Order(byDate.getDirection(), "id")));
         }
         Page<Notification> page = notificationRepository.findMine(userId, filter, unreadOnly,
                 PageLimits.reachable(pageable));

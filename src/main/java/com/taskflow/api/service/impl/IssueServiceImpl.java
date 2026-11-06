@@ -50,6 +50,7 @@ import com.taskflow.api.util.DescriptionTasks;
 import com.taskflow.api.util.IssueListSort;
 import com.taskflow.api.util.MentionParser;
 import com.taskflow.api.util.SortOrderCalculator;
+import com.taskflow.api.util.VisibleText;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -128,7 +129,7 @@ public class IssueServiceImpl implements IssueService {
         Issue issue = new Issue();
         issue.setProject(project);
         issue.setType(type);
-        issue.setTitle(request.title().trim());
+        issue.setTitle(VisibleText.strip(request.title()));
         issue.setDescription(blankToNull(request.description()));
         issue.setState(state);
         updateCompletedAt(issue, null, now);
@@ -219,10 +220,10 @@ public class IssueServiceImpl implements IssueService {
         }
 
         if (request.title() != null) {
-            if (request.title().isBlank()) {
+            if (VisibleText.isBlank(request.title())) {
                 throw new BadRequestException("El título no puede estar vacío");
             }
-            String title = request.title().trim();
+            String title = VisibleText.strip(request.title());
             changes.track(ActivityField.TITLE, issue.getTitle(), title);
             issue.setTitle(title);
         }
@@ -458,7 +459,7 @@ public class IssueServiceImpl implements IssueService {
             Issue child = new Issue();
             child.setProject(project);
             child.setType(type);
-            child.setTitle(item.title().trim());
+            child.setTitle(VisibleText.strip(item.title()));
             child.setState(state);
             updateCompletedAt(child, null, now);
             updateStartedAt(child, now);
@@ -849,8 +850,9 @@ public class IssueServiceImpl implements IssueService {
                 .orElseThrow(() -> new BadRequestException(message));
     }
 
+    /** El estado destino de una tarea, bloqueado en modo compartido (ver {@link StateRepository#findForShare}). */
     private State findState(Project project, UUID stateId) {
-        return stateRepository.findByIdAndProjectId(stateId, project.getId())
+        return stateRepository.findForShare(stateId, project.getId())
                 .orElseThrow(() -> new BadRequestException("El estado no pertenece al proyecto"));
     }
 
@@ -897,6 +899,6 @@ public class IssueServiceImpl implements IssueService {
     }
 
     private static String blankToNull(String value) {
-        return value == null || value.isBlank() ? null : value.trim();
+        return VisibleText.isBlank(value) ? null : value.trim();
     }
 }

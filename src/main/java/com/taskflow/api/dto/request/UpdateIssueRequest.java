@@ -27,7 +27,8 @@ import java.util.UUID;
  * </ul>
  */
 public record UpdateIssueRequest(
-        @Size(min = 1, max = 255, message = "El título debe tener entre 1 y 255 caracteres")
+        @Size(max = 255, message = "El título no puede superar 255 caracteres")
+        @Visible(message = "El título no puede estar vacío")
         String title,
 
         @Size(max = 50000, message = "La descripción es demasiado larga")
@@ -39,8 +40,10 @@ public record UpdateIssueRequest(
 
         UUID parentId,
 
+        @PlanningDate
         LocalDate startDate,
 
+        @PlanningDate
         LocalDate dueDate,
 
         @Size(max = 20, message = "Máximo 20 asignados")

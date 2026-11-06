@@ -250,6 +250,30 @@ class ProjectStatsCalculatorTest {
                     new BurndownPoint(LocalDate.of(2026, 10, 27), 1));
         }
 
+        /**
+         * Bug hunt 3: un ciclo «en curso» de fechas absurdas (de 0001 a 9999, guardado antes de validar las fechas) daba
+         * un punto por día desde el año 1: ~740 000 puntos y ~30 MB en las estadísticas. Ahora, el último año.
+         */
+        @Test
+        void unCicloDeMilesDeAniosSoloDibujaElUltimoAnio() {
+            Cycle absurd = cycle(LocalDate.of(1, 1, 1), LocalDate.of(9999, 12, 31));
+            IssueStatsRow doneLongAgo = completedAt(at("2020-03-01T10:00"));
+            IssueStatsRow doneYesterday = completedAt(at("2026-10-26T10:00"));
+            IssueStatsRow stillOpen = open(inProgress);
+            List<IssueStatsRow> issues = List.of(doneLongAgo, doneYesterday, stillOpen);
+
+            Burndown burndown = new ProjectStatsCalculator(NOW, BOGOTA).calculate("WEB", 8, issues, List.of(),
+                    Map.of(), absurd, Set.of(doneLongAgo.id(), doneYesterday.id(), stillOpen.id())).burndown();
+
+            assertThat(burndown.points()).hasSize(ProjectStatsCalculator.MAX_BURNDOWN_DAYS);
+            assertThat(burndown.points().getFirst())
+                    .isEqualTo(new BurndownPoint(TODAY.minusDays(ProjectStatsCalculator.MAX_BURNDOWN_DAYS - 1L), 2));
+            assertThat(burndown.points().get(burndown.points().size() - 2))
+                    .isEqualTo(new BurndownPoint(TODAY.minusDays(1), 1));
+            assertThat(burndown.points().getLast()).isEqualTo(new BurndownPoint(TODAY, 1));
+            assertThat(burndown.startDate()).isEqualTo(absurd.getStartDate());
+        }
+
         @Test
         void sinCicloEnCursoEsNulo() {
             assertThat(calculate(List.of(open(todo)), 8).burndown()).isNull();

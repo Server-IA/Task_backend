@@ -53,10 +53,29 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
     int deleteAllByUserId(@Param("userId") UUID userId);
 
     /**
-     * Logout: borra los tokens de la sesión ({@code ids}: el token y sus sucesores) y los que apuntan a alguno de ellos
-     * como sucesor (los rotados hace poco: reusarlos ya no tiene a quién reemplazar y es un 401 sin más).
+     * Logout: borra la sesión entera del token {@code tokenId}: sus sucesores (los tokens que lo reemplazaron al rotar,
+     * hasta el vivo) y, desde todos ellos, hacia atrás, los que fueron reemplazados por alguno (los rotados antes, a
+     * cualquier distancia). Solo tokens de {@code userId}. Antes se borraban los sucesores y un solo paso hacia atrás: un
+     * token de dos rotaciones atrás (otra pestaña que se quedó con él) quedaba apuntando a un sucesor borrado, y reusarlo
+     * dentro del margen contaba como robo y cerraba también las sesiones de los otros equipos.
+     * <p>
+     * {@code UNION} (no {@code UNION ALL}) descarta las filas repetidas: el recorrido termina aunque los datos tuvieran
+     * un ciclo.
      */
     @Modifying
-    @Query("delete from RefreshToken t where t.user.id = :userId and (t.id in :ids or t.replacedBy in :ids)")
-    int deleteSession(@Param("userId") UUID userId, @Param("ids") Collection<UUID> ids);
+    @Query(value = """
+            WITH RECURSIVE forward (id, replaced_by) AS (
+                SELECT id, replaced_by FROM refresh_tokens WHERE id = :tokenId AND user_id = :userId
+                UNION
+                SELECT t.id, t.replaced_by FROM refresh_tokens t JOIN forward f ON t.id = f.replaced_by
+                WHERE t.user_id = :userId
+            ), session (id) AS (
+                SELECT id FROM forward
+                UNION
+                SELECT t.id FROM refresh_tokens t JOIN session s ON t.replaced_by = s.id
+                WHERE t.user_id = :userId
+            )
+            DELETE FROM refresh_tokens WHERE id IN (SELECT id FROM session)
+            """, nativeQuery = true)
+    int deleteSession(@Param("userId") UUID userId, @Param("tokenId") UUID tokenId);
 }

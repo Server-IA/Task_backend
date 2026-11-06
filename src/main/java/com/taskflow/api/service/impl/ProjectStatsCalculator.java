@@ -43,6 +43,8 @@ final class ProjectStatsCalculator {
     static final int MAX_STALE = 5;
     /** Una tarea abierta sin cambios durante más de estos días se considera estancada. */
     static final int STALE_AFTER_DAYS = 14;
+    /** Puntos (días) como máximo en el burndown: el último año del ciclo. */
+    static final int MAX_BURNDOWN_DAYS = 366;
 
     private static final double MILLIS_PER_DAY = Duration.ofDays(1).toMillis();
 
@@ -137,20 +139,33 @@ final class ProjectStatsCalculator {
 
     /**
      * Un punto por día desde el inicio del ciclo hasta hoy (o su fin): las tareas del ciclo (sin las
-     * canceladas) que al final de ese día seguían sin completar.
+     * canceladas) que al final de ese día seguían sin completar. Como mucho los últimos {@value #MAX_BURNDOWN_DAYS}
+     * días.
      */
     Burndown burndown(Cycle cycle, List<IssueStatsRow> cycleIssues) {
         List<IssueStatsRow> counted = cycleIssues.stream()
                 .filter(issue -> issue.group() != StateGroup.CANCELLED)
                 .toList();
         LocalDate last = cycle.getEndDate().isBefore(today) ? cycle.getEndDate() : today;
+        // Como mucho los últimos MAX_BURNDOWN_DAYS días: un ciclo de fechas absurdas (de 0001 a 9999, de antes de
+        // validar las fechas) daba un punto por día desde el año 1, ~30 MB de respuesta
+        LocalDate first = cycle.getStartDate();
+        if (first.isBefore(last.minusDays(MAX_BURNDOWN_DAYS - 1L))) {
+            first = last.minusDays(MAX_BURNDOWN_DAYS - 1L);
+        }
+        // Una pasada por día con las fechas de completado ordenadas (antes, una pasada por las tareas en cada día)
+        List<LocalDate> completedDays = counted.stream()
+                .filter(issue -> issue.completedAt() != null)
+                .map(issue -> dateOf(issue.completedAt()))
+                .sorted()
+                .toList();
         List<BurndownPoint> points = new ArrayList<>();
-        for (LocalDate day = cycle.getStartDate(); !day.isAfter(last); day = day.plusDays(1)) {
-            LocalDate endOfDay = day;
-            long remaining = counted.stream()
-                    .filter(issue -> issue.completedAt() == null || dateOf(issue.completedAt()).isAfter(endOfDay))
-                    .count();
-            points.add(new BurndownPoint(day, remaining));
+        int completedUpTo = 0;
+        for (LocalDate day = first; !day.isAfter(last); day = day.plusDays(1)) {
+            while (completedUpTo < completedDays.size() && !completedDays.get(completedUpTo).isAfter(day)) {
+                completedUpTo++;
+            }
+            points.add(new BurndownPoint(day, counted.size() - completedUpTo));
         }
         return new Burndown(cycle.getId(), cycle.getName(), cycle.getStartDate(), cycle.getEndDate(),
                 counted.size(), points);

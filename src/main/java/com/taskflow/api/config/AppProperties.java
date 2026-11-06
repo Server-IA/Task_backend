@@ -83,6 +83,27 @@ public record AppProperties(
         }
     }
 
+    /**
+     * El origen de {@code FRONTEND_URL} ({@code esquema://host[:puerto]}), el único que CORS deja llamar a la API. Un
+     * origen nunca lleva ruta: con el frontend en una subruta ({@code https://example.com/app}) se comparaba
+     * {@code https://example.com/app} con el {@code Origin: https://example.com} del navegador y se rechazaban todas las
+     * peticiones. Los enlaces de los correos sí usan la URL completa.
+     */
+    public String frontendOrigin() {
+        if (frontendUrl == null || frontendUrl.isBlank()) {
+            return frontendUrl;
+        }
+        try {
+            URI uri = URI.create(frontendUrl);
+            if (uri.getScheme() == null || uri.getRawAuthority() == null) {
+                return frontendUrl;
+            }
+            return uri.getScheme().toLowerCase(Locale.ROOT) + "://" + uri.getRawAuthority().toLowerCase(Locale.ROOT);
+        } catch (IllegalArgumentException ex) {
+            return frontendUrl;
+        }
+    }
+
     /** {@code FRONTEND_URL} apunta a esta máquina (desarrollo local). */
     public boolean localFrontend() {
         if (frontendUrl == null || frontendUrl.isBlank()) {

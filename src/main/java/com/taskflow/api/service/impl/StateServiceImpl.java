@@ -158,7 +158,9 @@ public class StateServiceImpl implements StateService {
     @Transactional
     public void delete(String slug, UUID projectId, UUID stateId) {
         Project project = lookup.project(slug, projectId);
-        State state = findState(project, stateId);
+        // Bloqueado: si alguien está poniendo una tarea en él, se espera a que termine y entonces se ve la tarea
+        State state = stateRepository.findForUpdate(stateId, project.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Estado no encontrado"));
         if (stateRepository.countByProjectId(project.getId()) <= 1) {
             throw new ConflictException("El proyecto debe tener al menos un estado");
         }

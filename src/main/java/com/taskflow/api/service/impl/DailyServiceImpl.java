@@ -2,6 +2,7 @@ package com.taskflow.api.service.impl;
 
 import com.taskflow.api.config.AppProperties;
 import com.taskflow.api.dto.request.DailyNoteRequest;
+import com.taskflow.api.dto.request.PlanningDate;
 import com.taskflow.api.dto.response.DailyNoteResponse;
 import com.taskflow.api.dto.response.DailyResponse;
 import com.taskflow.api.dto.response.DailyResponse.DailyBlocker;
@@ -20,6 +21,7 @@ import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.enums.ActivityField;
 import com.taskflow.api.entity.enums.StateGroup;
+import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.mapper.CollaborationMapper;
 import com.taskflow.api.mapper.IssueMapper;
 import com.taskflow.api.mapper.UserMapper;
@@ -31,6 +33,7 @@ import com.taskflow.api.repository.IssueRepository;
 import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.service.DailyService;
+import com.taskflow.api.util.VisibleText;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -101,7 +104,7 @@ public class DailyServiceImpl implements DailyService {
     public DailyResponse getDaily(String slug, UUID projectId, UUID userId, LocalDate date) {
         Project project = lookup.project(slug, projectId);
         ZoneId zone = ZoneId.of(properties.timezone());
-        LocalDate day = date != null ? date : LocalDate.now(zone);
+        LocalDate day = date != null ? checkedDate(date) : LocalDate.now(zone);
         LocalDate previous = previousDate(project.getId(), day, zone);
 
         // Tareas abiertas con asignados, agrupadas por persona (una con dos asignados cuenta para ambos).
@@ -178,8 +181,8 @@ public class DailyServiceImpl implements DailyService {
         // Dos personas que guardan la primera nota del día a la vez: la segunda espera y edita la que creó la primera
         // (antes, las dos la creaban y una recibía 409 por la restricción uk_daily_notes_day)
         lookup.lockProject(project);
-        LocalDate day = date != null ? date : LocalDate.now(ZoneId.of(properties.timezone()));
-        String text = request.text() == null ? "" : request.text().strip();
+        LocalDate day = date != null ? checkedDate(date) : LocalDate.now(ZoneId.of(properties.timezone()));
+        String text = request.text() == null ? "" : VisibleText.strip(request.text());
         Optional<DailyNote> existing = noteRepository.findByProjectIdAndDate(project.getId(), day);
         if (text.isEmpty()) {
             existing.ifPresent(noteRepository::delete);
@@ -207,6 +210,18 @@ public class DailyServiceImpl implements DailyService {
         }
         LocalDate lastDay = LocalDate.ofInstant(last, zone);
         return lastDay.isBefore(workingDay) ? lastDay : workingDay;
+    }
+
+    /**
+     * El día pedido ({@code ?date=}), entre los años 1900 y 2999 como las demás fechas: uno extremo
+     * ({@code -999999999-01-01}) respondía 500 al buscar el día anterior, y otros fuera del rango de PostgreSQL, «el texto
+     * tiene caracteres no permitidos».
+     */
+    static LocalDate checkedDate(LocalDate date) {
+        if (!PlanningDate.Validator.inRange(date)) {
+            throw BadRequestException.forField("date", PlanningDate.MESSAGE);
+        }
+        return date;
     }
 
     /** Día hábil anterior: el día antes o, si es lunes, sábado o domingo, el viernes anterior. */

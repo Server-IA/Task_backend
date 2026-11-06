@@ -25,6 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -185,8 +186,10 @@ public class SavedViewServiceImpl implements SavedViewService {
     }
 
     private List<SavedViewResponse> visible(Project project, UUID userId) {
-        return viewRepository.findVisible(project.getId(), userId).stream()
-                .map(view -> toResponse(view, userId))
+        List<SavedView> views = viewRepository.findVisible(project.getId(), userId);
+        FilterTargets targets = targetsFor(project, views);
+        return views.stream()
+                .map(view -> toResponse(view, userId, targets))
                 .toList();
     }
 
@@ -253,14 +256,75 @@ public class SavedViewServiceImpl implements SavedViewService {
 
     /** {@code issueCount}: una consulta de conteo por vista, con los mismos filtros que el listado de tareas. */
     private SavedViewResponse toResponse(SavedView view, UUID userId) {
-        return toResponse(view, userId, true);
+        return toResponse(view, userId, targetsFor(view.getProject(), List.of(view)));
+    }
+
+    private SavedViewResponse toResponse(SavedView view, UUID userId, FilterTargets targets) {
+        long issueCount = issueRepository.count(IssueSpecifications.matching(view.getProject().getId(),
+                issueFilter(withoutUnknown(view.getFilters(), targets))));
+        return projectMapper.toSavedViewResponse(view, view.getOwner().getId().equals(userId), issueCount);
     }
 
     private SavedViewResponse toResponse(SavedView view, UUID userId, boolean withCount) {
-        Long issueCount = withCount
-                ? issueRepository.count(
-                        IssueSpecifications.matching(view.getProject().getId(), issueFilter(view.getFilters())))
-                : null;
-        return projectMapper.toSavedViewResponse(view, view.getOwner().getId().equals(userId), issueCount);
+        return withCount ? toResponse(view, userId)
+                : projectMapper.toSavedViewResponse(view, view.getOwner().getId().equals(userId), null);
+    }
+
+    /**
+     * Lo que existe en el proyecto para los filtros de ids de esas vistas; {@code null} (sin consultar) si ninguna
+     * filtra por ids.
+     */
+    private FilterTargets targetsFor(Project project, List<SavedView> views) {
+        boolean anyIds = views.stream().map(SavedView::getFilters).anyMatch(FilterTargets::referencesIds);
+        return anyIds ? FilterTargets.of(viewRepository.findFilterTargets(project.getId())) : null;
+    }
+
+    /**
+     * Los filtros sin los ids que ya no existen en el proyecto (una etiqueta, un estado, un ciclo o un módulo borrados,
+     * alguien que dejó el proyecto), igual que hace el frontend al abrir la vista. Antes el conteo los usaba: una vista
+     * con una etiqueta borrada mostraba 0 tareas en la barra y, al abrirla, todas las del filtro que quedaba.
+     * {@code targets} {@code null}: no hay ids que mirar.
+     */
+    static SavedViewFilters withoutUnknown(SavedViewFilters filters, FilterTargets targets) {
+        if (filters == null || targets == null) {
+            return filters;
+        }
+        return new SavedViewFilters(targets.known("state", filters.state()), filters.priority(),
+                targets.known("assignee", filters.assignee()), targets.known("label", filters.label()),
+                filters.search(), filters.view(), filters.sort(), targets.knownOne("cycle", filters.cycle()),
+                targets.knownOne("module", filters.module()), filters.blocked(), filters.groupBy(), filters.type());
+    }
+
+    /** Ids que existen en el proyecto, por tipo de filtro ({@link SavedViewRepository#findFilterTargets}). */
+    record FilterTargets(Map<String, Set<UUID>> byKind) {
+
+        static FilterTargets of(List<Object[]> rows) {
+            Map<String, Set<UUID>> byKind = new HashMap<>();
+            for (Object[] row : rows) {
+                byKind.computeIfAbsent((String) row[0], kind -> new HashSet<>()).add((UUID) row[1]);
+            }
+            return new FilterTargets(byKind);
+        }
+
+        static boolean referencesIds(SavedViewFilters filters) {
+            return filters != null && (notEmpty(filters.state()) || notEmpty(filters.assignee())
+                    || notEmpty(filters.label()) || filters.cycle() != null || filters.module() != null);
+        }
+
+        List<UUID> known(String kind, List<UUID> ids) {
+            if (ids == null) {
+                return null;
+            }
+            Set<UUID> existing = byKind.getOrDefault(kind, Set.of());
+            return ids.stream().filter(existing::contains).toList();
+        }
+
+        UUID knownOne(String kind, UUID id) {
+            return id != null && byKind.getOrDefault(kind, Set.of()).contains(id) ? id : null;
+        }
+
+        private static boolean notEmpty(List<UUID> ids) {
+            return ids != null && !ids.isEmpty();
+        }
     }
 }

@@ -142,7 +142,7 @@ class IssueServiceStoryTest {
                 .thenReturn(Optional.of(WorkspaceRole.MEMBER));
         lenient().when(issueRepository.saveAndFlush(any(Issue.class))).thenAnswer(invocation -> invocation.getArgument(0));
         for (State state : List.of(backlog, todo, inProgress, done, cancelled)) {
-            lenient().when(stateRepository.findByIdAndProjectId(state.getId(), project.getId()))
+            lenient().when(stateRepository.findForShare(state.getId(), project.getId()))
                     .thenReturn(Optional.of(state));
         }
         lenient().when(stateRepository.findFirstByProjectIdAndStateGroupOrderByPositionAsc(project.getId(),
