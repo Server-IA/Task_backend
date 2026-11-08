@@ -1,11 +1,24 @@
 # TaskFlow — Backend
 
-API REST de **TaskFlow**, un gestor de tareas para equipos inspirado en [Plane](https://plane.so)
-(usado solo como referencia funcional; no se copia código). Proyecto de prácticas universitarias.
+API REST de **TaskFlow**, una aplicación de gestión de proyectos ágiles hecha a la medida de equipos de
+pasantías (al estilo de Plane o Jira, sin copiar código de ninguno). Proyecto de prácticas universitarias.
 
-Los equipos organizan su trabajo en **workspaces → proyectos → issues**, con estados (Kanban),
-prioridades, etiquetas, asignados, sub-issues, ciclos (sprints), módulos, comentarios, historial
-de cambios y notificaciones.
+La consume la SPA de [`Task_frontend`](https://github.com/Server-IA/Task_frontend).
+
+## Funcionalidades
+
+- **Roles**: project manager (`OWNER`) y miembro (`MEMBER`), con permisos por workspace y por proyecto.
+- **Cuentas**: registro con verificación de correo, login con JWT y refresh token rotativo, recuperar y
+  cambiar la contraseña, foto de perfil, aviso de inicio de sesión por correo.
+- **Workspaces y proyectos**: invitaciones por correo, miembros, estados personalizables, etiquetas y plantillas.
+- **Tareas**: tipos Historia, Tarea y Bug, código legible (`WEB-12`), Kanban con orden, subtareas, dependencias,
+  criterios de aceptación, checklist, comentarios con menciones e historial de cambios.
+- **Historias de usuario**: partir en tareas, avance automático, «lista para revisar», cierre y reapertura por el PM.
+- **Planeación**: ciclos con cierre y retrospectiva, módulos, daily standup y vistas guardadas.
+- **Seguimiento**: estadísticas (tiempo de ciclo, throughput, burndown), «Mi trabajo», feed de actividad,
+  búsqueda y notificaciones.
+- **Archivos**: adjuntos, imágenes en descripciones y comentarios y fotos de perfil en Cloudflare R2, con cuota
+  por workspace.
 
 ## Stack
 
@@ -15,9 +28,10 @@ de cambios y notificaciones.
 | Build | Maven (con wrapper `./mvnw`) |
 | Base de datos | PostgreSQL 16 en Docker · Spring Data JPA · Flyway |
 | Seguridad | Spring Security + JWT (jjwt 0.13) · BCrypt · Bucket4j (rate limiting) |
-| Correos | Resend (producción) o SMTP (Mailpit en local) + plantillas Thymeleaf, envío con `@Async` |
-| Otros | Bean Validation · MapStruct · Lombok · springdoc-openapi (Swagger UI) |
-| Pruebas | JUnit 5 + Mockito |
+| Correos | Resend 4.29 (producción) o SMTP (Mailpit en local) + plantillas Thymeleaf, envío con `@Async` |
+| Archivos | Cloudflare R2 con AWS SDK S3 2.56 (URLs firmadas) |
+| Otros | Bean Validation · MapStruct 1.6 · Lombok · springdoc-openapi 3.1 (Swagger UI) |
+| Pruebas | JUnit 5 + Mockito · Spring Boot Test · integración con PostgreSQL |
 
 ## Cómo levantarlo en local
 
@@ -62,28 +76,26 @@ El archivo `.env` está en `.gitignore`; nunca se suben secretos.
 ./mvnw test
 ```
 
-**Pruebas con PostgreSQL.** Las carreras con bloqueos (`ConcurrencyIntegrationTest`, `ReviewRound2IntegrationTest`) y
-las migraciones (`ReviewFixesMigrationTest`, `ReviewRound2MigrationTest`) necesitan un PostgreSQL de verdad: toman
-`DB_URL`, `DB_USER` y `DB_PASSWORD` del entorno o del `.env`, crean una base descartable en ese servidor
-(`taskflow_it_*`, `taskflow_v25_test_*`, `taskflow_v26_test_*`) y la borran al terminar. El usuario necesita permiso
-para crear bases de datos. **Sin `DB_URL` se omiten en silencio** (no fallan), así que en CI hay que definirlas, por
+**Pruebas con PostgreSQL.** Las de `integration/` (carreras con bloqueos, rondas de QA, almacenamiento) y las de
+`migration/` necesitan un PostgreSQL de verdad: toman `DB_URL`, `DB_USER` y `DB_PASSWORD` del entorno o del `.env`,
+crean una base descartable en ese servidor (`taskflow_it_*`, `taskflow_v25_test_*`…) y la borran al terminar. El
+usuario necesita permiso para crear bases de datos. **Sin `DB_URL` se omiten en silencio** (no fallan), así que en CI hay que definirlas, por
 ejemplo con un servicio `postgres:16`:
 
 ```bash
 DB_URL=jdbc:postgresql://localhost:5432/taskflow DB_USER=taskflow DB_PASSWORD=… ./mvnw test
 ```
 
-Pruebas unitarias de `AuthService`, `IssueService` (código del issue, orden del Kanban, `completedAt`,
-quién puede borrar, checklist al crear y aviso de desbloqueo), `WorkspaceSecurity` y la regla
-`@PreAuthorize` de cada endpoint (permisos), `WorkspaceService` (siempre queda un project manager),
-las estadísticas del proyecto (mediana, throughput, burndown), «Mi trabajo», el feed de actividad, la
-búsqueda, `SortOrderCalculator`, el avance de ciclos, las dependencias (duplicados, ciclos y
-desbloqueo), la checklist (orden y conteos), las plantillas (por defecto y validaciones), las
-menciones, las vistas guardadas (visibilidad y permisos), el cierre de ciclos (a dónde va cada tarea,
-409 y ciclo cerrado inmutable), la retrospectiva (votos, permisos, convertir acciones, responsable,
-terminar, aviso al equipo), la daily (día hábil anterior, agregación por persona, ciclo en curso, resumen
-y bloqueos de otros proyectos), las dependencias entre proyectos, `startedAt` y el tiempo de ciclo, el
-filtro por persona de las estadísticas y el orden y los contadores de las vistas guardadas.
+Son más de 800 pruebas, organizadas como el código (`src/test/java/com/taskflow/api`):
+
+| Carpeta | Qué cubre |
+|---|---|
+| `service/` | Reglas de negocio: tareas, historias, ciclos y su cierre, retrospectiva, daily, estadísticas, dependencias, checklist, plantillas, vistas, menciones, notificaciones y archivos |
+| `controller/`, `security/` | La regla `@PreAuthorize` de cada endpoint, el filtro JWT, `CredentialsGuard` y `WorkspaceSecurity` |
+| `ratelimit/`, `email/`, `storage/` | Límites de peticiones, armado y envío de correos, firma y limpieza de archivos en R2 |
+| `migration/` | Migraciones de datos (`V24`, `V25`, `V26`) sobre una base PostgreSQL descartable |
+| `integration/` | Flujos completos contra PostgreSQL: concurrencia, rondas de QA, almacenamiento y errores de Tomcat |
+| `config/`, `dto/`, `entity/`, `exception/`, `util/` | Propiedades, validaciones, formato de errores, orden del Kanban, tokens y slugs |
 
 ## Arquitectura
 
@@ -110,7 +122,9 @@ src/main/java/com/taskflow/api/
 ├── dto/          request/ y response/ (records)
 ├── mapper/       Mappers de MapStruct
 ├── exception/    GlobalExceptionHandler y excepciones propias
-├── email/        EmailService, ResendEmailService, EmailNotifier
+├── email/        EmailService, ResendEmailService, SmtpEmailService, EmailNotifier
+├── storage/      R2ObjectStorage, tipos de archivo permitidos, StorageCleanup (cola de borrado)
+├── maintenance/  Limpieza diaria de tokens, invitaciones y notificaciones
 └── util/         Tokens, slugs, IP/navegador, orden del Kanban
 ```
 
@@ -143,6 +157,7 @@ Todas las respuestas de error tienen la misma forma (`errors` solo aparece en va
 | 409 | Conflicto (slug, identificador o email duplicado, estado con issues…). Algunos traen `code`: `STORY_CLOSED`, `DESCRIPTION_CONFLICT`, `WORKSPACE_LIMIT` |
 | 415 | El cuerpo no es JSON (`Content-Type` distinto de `application/json`) |
 | 429 | Rate limit: leer la cabecera `Retry-After` (segundos) y mostrarlo con Sonner |
+| 503 | Almacenamiento de archivos sin configurar o sin respuesta (R2) |
 
 ### Autenticación
 
@@ -799,7 +814,8 @@ de 90 días se borran.
 
 ## Modelo de datos
 
-Migraciones en `src/main/resources/db/migration` (`V1__users.sql` … `V19__notification_retro_and_comment.sql`).
+PostgreSQL 16 con 32 tablas. Migraciones en `src/main/resources/db/migration` (`V1__users.sql` …
+`V28__refresh_token_reuse_grace.sql`); Hibernate solo valida el esquema (`ddl-auto: validate`).
 `V7` elimina el rol `ADMIN` (los admins e invitaciones con ese rol pasan a `MEMBER`) y `V8` agrega
 `issues.completed_at` (rellenado con la fecha del último cambio de estado hacia el estado actual, o
 `updated_at`). `V9` crea `issue_relations` (un índice único sobre el par de tareas sin importar la
@@ -816,7 +832,9 @@ explicación en el historial toman su último cambio de estado; las demás queda
 y cuándo marcó cada elemento de la checklist (`checked_by_id`, `checked_at`; los ya marcados toman
 `checked_at = updated_at`) e `issues.checklist_updated_at`, `V18` `issue_templates.usage_count` y
 `retro_notes.owner_id`, y `V19` el tipo `RETRO_STARTED` con `notifications.cycle_id` y
-`notifications.comment_id` (rellenado para las notificaciones de comentarios ya enviadas). `V24` agrega
+`notifications.comment_id` (rellenado para las notificaciones de comentarios ya enviadas). `V20` agrega el estado y
+los asignados por defecto de las plantillas, `V21` el color del proyecto, `V22` el esqueleto de las plantillas por
+defecto y `V23` la versión de la descripción (para avisar de ediciones simultáneas). `V24` agrega
 `issues.issue_type` (`STORY`, `TASK`, `BUG`; las que existían quedan como tareas, salvo títulos que empiezan
 con «[Bug]», que pasan a bugs, y descripciones con la cita «> **Como**» de la historia de usuario, que pasan a
 historias), `issues.closed_at`/`closed_by_id` y `issues.review_notified`, el tipo de cada plantilla
@@ -827,7 +845,8 @@ los ciclos (`closed_completed_count`, `closed_total_count`, `closed_cycle_time_d
 su contraseña), rellena la foto del cierre de los ciclos cerrados antes de `V25` con sus tareas de ese momento y agrega
 el índice del cursor de la bandeja. `V27` crea `stored_files` (archivos en R2), la cola `storage_deletions` con el
 trigger que la llena al borrar archivos (también en cascada), `issue_activities.file_id`, `notifications.workspace_id`
-y el tipo `STORAGE_WARNING`.
+y el tipo `STORAGE_WARNING`. `V28` agrega `refresh_tokens.revoked_at` y `replaced_by`, para el margen de
+reutilización de un refresh token recién rotado.
 Las entidades usan **UUID** y `created_at`/`updated_at`. Las tablas intermedias puras
 (`issue_assignees`, `issue_labels`, `cycle_issues`, `module_issues`, `issue_template_labels`,
 `retro_note_votes`) usan clave compuesta.
@@ -846,15 +865,26 @@ Detalles a tener en cuenta:
 
 ## Convenciones
 
-- Ramas: `main`, `develop` y `feature/<nombre>`.
+- Ramas: el trabajo diario va a `develop`; `main` solo recibe pull requests desde `develop`.
 - Commits: [Conventional Commits](https://www.conventionalcommits.org/es/) (`feat(auth): …`).
 - Migraciones: nunca editar una ya ejecutada; siempre crear una nueva `V{n}__descripcion.sql`.
 - DTOs con `record`. Secretos solo en variables de entorno.
 
 ## Docker / despliegue
 
-El `Dockerfile` (multi-stage, Java 21) queda listo para desplegar en Dokploy más adelante. El
-rate limiting guarda los contadores en memoria (una sola instancia; los que llevan sin usarse más que su
+TaskFlow se despliega en **Dokploy** con tres contenedores en una red interna y un solo puerto expuesto (5446):
+
+| Servicio | Imagen | Puerto |
+|---|---|---|
+| `frontend` | nginx con la SPA compilada; reenvía `/api` al backend | 5446 (expuesto) |
+| `backend` | Este repositorio: `Dockerfile` multi-stage (Maven + `eclipse-temurin:21-jre-alpine`) | 8080 (interno) |
+| `db` | `postgres:16-alpine` con volumen persistente | 5432 (interno) |
+
+Al arrancar, Flyway aplica las migraciones pendientes. Como el frontend y la API comparten origen, `FRONTEND_URL`
+es la URL pública de la app. Los archivos no pasan por el servidor: el navegador sube y descarga directo de R2, así
+que el CORS del bucket debe permitir ese origen.
+
+El rate limiting guarda los contadores en memoria (una sola instancia; los que llevan sin usarse más que su
 periodo se descartan).
 
 **Detrás de Dokploy/Traefik**: definir `FORWARD_HEADERS_STRATEGY=native`. Sin eso, la API ve la IP del
@@ -864,6 +894,17 @@ todos) y el aviso de inicio de sesión muestra la IP del proxy. Con `native`, To
 proxy en la red de Docker), así un cliente no puede falsearla. No usar `native` si la API queda expuesta
 directamente a internet sin proxy.
 
-**Producción**, además: `FRONTEND_URL` con el dominio real, `MAIL_PROVIDER=resend` con su
-`RESEND_API_KEY` (sin ella la API no arranca) y `MAIL_LOG_LINKS` vacío o `false` (los enlaces de los
-correos nunca van al log). `SPRINGDOC_ENABLED=false` si no se quiere publicar Swagger.
+**Producción**, además:
+
+| Variable | Valor |
+|---|---|
+| `JWT_SECRET` | Secreto aleatorio largo (`openssl rand -base64 48`) |
+| `FRONTEND_URL` | URL pública de la aplicación |
+| `FORWARD_HEADERS_STRATEGY` | `native` |
+| `MAIL_PROVIDER` / `RESEND_API_KEY` / `MAIL_FROM` | `resend`, la API key (sin ella la API no arranca) y un remitente del dominio verificado en Resend (registros SPF y DKIM) |
+| `MAIL_LOG_LINKS` | Vacío o `false`: los enlaces de los correos nunca van al log |
+| `SPRINGDOC_ENABLED` | `false` para no publicar Swagger |
+| `R2_*` | Credenciales del bucket de producción |
+
+Los secretos se guardan en el panel de entorno de Dokploy, nunca en el repositorio. La base se respalda a diario con
+`pg_dump`.
