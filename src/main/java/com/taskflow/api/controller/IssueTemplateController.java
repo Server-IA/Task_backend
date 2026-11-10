@@ -45,7 +45,7 @@ public class IssueTemplateController {
             description = "El nombre no se repite en el proyecto (409); las etiquetas y el estado deben ser del "
                     + "proyecto y los asignados, miembros del proyecto (400). Queda al final de la lista.")
     @PostMapping
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'PROJECT_TEMPLATES')")
     @ResponseStatus(HttpStatus.CREATED)
     public IssueTemplateResponse create(@PathVariable String slug, @PathVariable UUID projectId,
                                         @Valid @RequestBody IssueTemplateRequest request) {
@@ -57,7 +57,7 @@ public class IssueTemplateController {
                     + "prioridad; stateId cambia el estado por defecto y clearState lo quita; labelIds, assigneeIds y "
                     + "checklist reemplazan la lista; position = nuevo índice (desde 0).")
     @PatchMapping("/{templateId}")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'PROJECT_TEMPLATES')")
     public IssueTemplateResponse update(@PathVariable String slug, @PathVariable UUID projectId,
                                         @PathVariable UUID templateId,
                                         @Valid @RequestBody UpdateIssueTemplateRequest request) {
@@ -66,7 +66,7 @@ public class IssueTemplateController {
 
     @Operation(summary = "Eliminar plantilla (project manager)")
     @DeleteMapping("/{templateId}")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'PROJECT_TEMPLATES')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID templateId) {
         templateService.delete(slug, projectId, templateId);

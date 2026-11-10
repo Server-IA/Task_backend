@@ -67,6 +67,7 @@ public class DailyController {
     @ApiResponse(responseCode = "200", description = "Nota guardada")
     @ApiResponse(responseCode = "204", description = "Nota borrada (texto vacío)")
     @PutMapping("/note")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'DAILY_NOTE')")
     public ResponseEntity<DailyNoteResponse> saveNote(
             @PathVariable String slug, @PathVariable UUID projectId, @AuthenticationPrincipal UserPrincipal me,
             @Parameter(description = "Día de la reunión (YYYY-MM-DD); por defecto, hoy en America/Bogota")
@@ -88,12 +89,12 @@ public class DailyController {
     }
 
     @Operation(summary = "Guardar los ajustes de la daily",
-            description = "Solo el project manager. Reemplaza todo lo guardado. secondsPerPerson y cada tiempo propio, "
+            description = "Pide el permiso de configurar la daily. Reemplaza todo lo guardado. secondsPerPerson y cada tiempo propio, "
                     + "entre 15 y 3600 segundos; un tiempo propio igual al general no se guarda; las personas deben "
                     + "ser del workspace. Debe quedar visible al menos uno de los bloques Ayer, Hoy o Bloqueos. agenda: "
                     + "hasta 12 puntos de hasta 120 caracteres.")
     @PutMapping("/settings")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'DAILY_SETTINGS')")
     public DailySettingsResponse saveSettings(
             @PathVariable String slug, @PathVariable UUID projectId, @AuthenticationPrincipal UserPrincipal me,
             @Valid @RequestBody DailySettingsRequest request) {

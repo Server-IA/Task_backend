@@ -46,7 +46,7 @@ public class CycleController {
 
     @Operation(summary = "Crear ciclo (project manager)")
     @PostMapping
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'CYCLE_CREATE')")
     @ResponseStatus(HttpStatus.CREATED)
     public CycleResponse create(@PathVariable String slug, @PathVariable UUID projectId,
                               @Valid @RequestBody CycleRequest request) {
@@ -64,7 +64,7 @@ public class CycleController {
                     + "responde 409. clearDates quita las dos fechas; clearStartDate y clearEndDate, solo una. Enviar "
                     + "una fecha y pedir quitarla a la vez, o un fin anterior al inicio, responde 400.")
     @PatchMapping("/{cycleId}")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'CYCLE_EDIT')")
     public CycleResponse update(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID cycleId,
                               @Valid @RequestBody UpdateCycleRequest request) {
         return cycleService.update(slug, projectId, cycleId, request);
@@ -72,7 +72,7 @@ public class CycleController {
 
     @Operation(summary = "Eliminar ciclo (project manager)", description = "Las tareas no se borran, solo se desvinculan.")
     @DeleteMapping("/{cycleId}")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'CYCLE_DELETE')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID cycleId) {
         cycleService.delete(slug, projectId, cycleId);
@@ -81,6 +81,7 @@ public class CycleController {
     @Operation(summary = "Agregar issues al ciclo (si estaban en otro ciclo, se mueven a este)",
             description = "Un ciclo cerrado no recibe tareas (409).")
     @PostMapping("/{cycleId}/issues")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'CYCLE_ASSIGN')")
     public CycleResponse addIssues(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID cycleId,
                                  @AuthenticationPrincipal UserPrincipal me,
                                  @Valid @RequestBody IssueIdsRequest request) {
@@ -89,6 +90,7 @@ public class CycleController {
 
     @Operation(summary = "Quitar un issue del ciclo")
     @DeleteMapping("/{cycleId}/issues/{issueId}")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'CYCLE_ASSIGN')")
     public CycleResponse removeIssue(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID cycleId,
                                    @PathVariable UUID issueId, @AuthenticationPrincipal UserPrincipal me) {
         return cycleService.removeIssue(slug, projectId, cycleId, issueId, me.getId());
@@ -100,7 +102,7 @@ public class CycleController {
                     + "las completadas que pasaron por un estado STARTED (null si no hay); nextCycle = siguiente ciclo "
                     + "sin cerrar por fecha de inicio (destino por defecto), o null.")
     @GetMapping("/{cycleId}/close-preview")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'CYCLE_CLOSE')")
     public CloseCyclePreviewResponse closePreview(@PathVariable String slug, @PathVariable UUID projectId,
                                                   @PathVariable UUID cycleId) {
         return cycleService.closePreview(slug, projectId, cycleId);
@@ -114,7 +116,7 @@ public class CycleController {
                     + "(notificación RETRO_STARTED, menos a mí). Un ciclo ya cerrado, o que aún no empezó, responde "
                     + "409.")
     @PostMapping("/{cycleId}/close")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'CYCLE_CLOSE')")
     public CloseCycleResponse close(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID cycleId,
                                     @AuthenticationPrincipal UserPrincipal me,
                                     @Valid @RequestBody CloseCycleRequest request) {

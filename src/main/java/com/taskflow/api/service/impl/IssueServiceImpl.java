@@ -24,7 +24,6 @@ import com.taskflow.api.entity.enums.ChecklistItemKind;
 import com.taskflow.api.entity.enums.IssuePriority;
 import com.taskflow.api.entity.enums.IssueType;
 import com.taskflow.api.entity.enums.StateGroup;
-import com.taskflow.api.entity.enums.WorkspaceRole;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.DescriptionConflictException;
@@ -39,7 +38,6 @@ import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.ProjectRepository;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.repository.UserRepository;
-import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.service.FileService;
 import com.taskflow.api.service.IssueChecklistService;
@@ -56,6 +54,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.taskflow.api.entity.enums.Permission;
+import com.taskflow.api.security.AccessControl;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -78,7 +78,8 @@ public class IssueServiceImpl implements IssueService {
     /** Límite al recorrer la cadena de padres (protege de datos corruptos). */
     private static final int MAX_PARENT_DEPTH = 100;
 
-    static final String DELETE_FORBIDDEN_MESSAGE = "Solo el project manager o quien creó la tarea puede eliminarla";
+    static final String DELETE_FORBIDDEN_MESSAGE = "Tu rol no permite eliminar esta tarea";
+    static final String CREATE_FORBIDDEN_MESSAGE = "Tu rol no permite crear tareas";
 
     private final IssueRepository issueRepository;
     private final IssueTemplateRepository templateRepository;
@@ -87,7 +88,7 @@ public class IssueServiceImpl implements IssueService {
     private final StateRepository stateRepository;
     private final LabelRepository labelRepository;
     private final UserRepository userRepository;
-    private final WorkspaceMemberRepository workspaceMemberRepository;
+    private final AccessControl accessControl;
     private final ActivityService activityService;
     private final NotificationService notificationService;
     private final IssueRelationService relationService;
@@ -111,8 +112,12 @@ public class IssueServiceImpl implements IssueService {
     public IssueResponse create(String slug, UUID projectId, UUID userId, CreateIssueRequest request) {
         Project project = lookup.project(slug, projectId);
         IssueType type = request.type() != null ? request.type() : IssueType.TASK;
-        if (type == IssueType.STORY && !isManager(slug, userId)) {
+        // Una historia pide el permiso de gestionar historias; una tarea o un bug, el de crear tareas
+        if (type == IssueType.STORY && !can(slug, userId, Permission.STORY_MANAGE)) {
             throw new ForbiddenException(StoryRules.CREATE_FORBIDDEN);
+        }
+        if (type != IssueType.STORY && !can(slug, userId, Permission.ISSUE_CREATE)) {
+            throw new ForbiddenException(CREATE_FORBIDDEN_MESSAGE);
         }
         State state = request.stateId() != null
                 ? findState(project, request.stateId())
@@ -395,14 +400,17 @@ public class IssueServiceImpl implements IssueService {
         Project project = lookup.project(slug, projectId);
         Issue issue = findIssue(project, issueId);
         if (issue.isStory()) {
-            // Una historia (con su historial y sus tareas) solo la elimina el project manager, aunque la haya creado
-            // otra persona como tarea
-            if (!isManager(slug, userId)) {
+            // Una historia (con su historial y sus tareas) solo la elimina quien gestiona historias, aunque la haya
+            // creado otra persona como tarea
+            if (!can(slug, userId, Permission.STORY_MANAGE)) {
                 throw new ForbiddenException(StoryRules.DELETE_FORBIDDEN);
             }
         } else {
+            // Las propias, con «eliminar sus propias tareas»; las de otros, con «eliminar cualquier tarea»
             boolean isCreator = issue.getCreatedBy() != null && issue.getCreatedBy().getId().equals(userId);
-            if (!isCreator && !isManager(slug, userId)) {
+            boolean allowed = can(slug, userId, Permission.ISSUE_DELETE_ANY)
+                    || isCreator && can(slug, userId, Permission.ISSUE_DELETE_OWN);
+            if (!allowed) {
                 throw new ForbiddenException(DELETE_FORBIDDEN_MESSAGE);
             }
         }
@@ -580,7 +588,7 @@ public class IssueServiceImpl implements IssueService {
             return;
         }
         String message = StoryRules.managerOnlyMessage(issue.getState().getStateGroup(), target.getStateGroup());
-        if (message != null && !isManager(slug, userId)) {
+        if (message != null && !can(slug, userId, Permission.STORY_CLOSE)) {
             throw new ForbiddenException(message);
         }
     }
@@ -630,7 +638,7 @@ public class IssueServiceImpl implements IssueService {
         if (!reopen) {
             throw conflict.apply(story);
         }
-        if (!isManager(slug, userId)) {
+        if (!can(slug, userId, Permission.STORY_CLOSE)) {
             throw new ForbiddenException(StoryRules.REOPEN_FORBIDDEN);
         }
         reopen(story, actor);
@@ -655,7 +663,7 @@ public class IssueServiceImpl implements IssueService {
     private void changeType(String slug, UUID userId, Project project, Issue issue, IssueType type, User actor,
                             IssueChanges changes, boolean mayFillDescription) {
         IssueType previous = issue.getType();
-        if ((previous == IssueType.STORY || type == IssueType.STORY) && !isManager(slug, userId)) {
+        if ((previous == IssueType.STORY || type == IssueType.STORY) && !can(slug, userId, Permission.STORY_MANAGE)) {
             throw new ForbiddenException(StoryRules.TYPE_FORBIDDEN);
         }
         if (previous == IssueType.STORY && issueRepository.existsByParentId(issue.getId())) {
@@ -741,10 +749,8 @@ public class IssueServiceImpl implements IssueService {
         return (int) items.stream().filter(item -> item.getKind() == kind).count();
     }
 
-    private boolean isManager(String slug, UUID userId) {
-        return workspaceMemberRepository.findRole(slug, userId)
-                .map(WorkspaceRole::isManager)
-                .orElse(false);
+    private boolean can(String slug, UUID userId, Permission permission) {
+        return accessControl.can(slug, userId, permission);
     }
 
     /** Incrementa el contador del proyecto en la misma transacción y devuelve el nuevo valor. */

@@ -24,7 +24,7 @@ public class StorageController {
             description = "Espacio usado de los 2 GB (adjuntos e imágenes de las tareas; las fotos de perfil no "
                     + "cuentan), por tipo, por proyecto y los archivos más pesados.")
     @GetMapping
-    @PreAuthorize("@workspaceSecurity.isManager(#slug)")
+    @PreAuthorize("@workspaceSecurity.can(#slug, 'STORAGE_VIEW')")
     public StorageReportResponse getReport(@PathVariable String slug) {
         return fileService.getReport(slug);
     }

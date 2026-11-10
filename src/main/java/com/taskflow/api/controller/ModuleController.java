@@ -43,7 +43,7 @@ public class ModuleController {
 
     @Operation(summary = "Crear módulo (project manager)")
     @PostMapping
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'MODULE_CREATE')")
     @ResponseStatus(HttpStatus.CREATED)
     public ModuleResponse create(@PathVariable String slug, @PathVariable UUID projectId,
                               @Valid @RequestBody ModuleRequest request) {
@@ -61,7 +61,7 @@ public class ModuleController {
                     + "una. Enviar una fecha y pedir quitarla a la vez, o una fecha objetivo anterior al inicio, "
                     + "responde 400.")
     @PatchMapping("/{moduleId}")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'MODULE_EDIT')")
     public ModuleResponse update(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID moduleId,
                               @Valid @RequestBody UpdateModuleRequest request) {
         return moduleService.update(slug, projectId, moduleId, request);
@@ -69,7 +69,7 @@ public class ModuleController {
 
     @Operation(summary = "Eliminar módulo (project manager)", description = "Las tareas no se borran, solo se desvinculan.")
     @DeleteMapping("/{moduleId}")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'MODULE_DELETE')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID moduleId) {
         moduleService.delete(slug, projectId, moduleId);
@@ -77,6 +77,7 @@ public class ModuleController {
 
     @Operation(summary = "Agregar issues al módulo")
     @PostMapping("/{moduleId}/issues")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'MODULE_ASSIGN')")
     public ModuleResponse addIssues(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID moduleId,
                                  @AuthenticationPrincipal UserPrincipal me,
                                  @Valid @RequestBody IssueIdsRequest request) {
@@ -85,6 +86,7 @@ public class ModuleController {
 
     @Operation(summary = "Quitar un issue del módulo")
     @DeleteMapping("/{moduleId}/issues/{issueId}")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'MODULE_ASSIGN')")
     public ModuleResponse removeIssue(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID moduleId,
                                    @PathVariable UUID issueId, @AuthenticationPrincipal UserPrincipal me) {
         return moduleService.removeIssue(slug, projectId, moduleId, issueId, me.getId());

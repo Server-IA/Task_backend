@@ -51,6 +51,7 @@ public class IssueRelationController {
                     + "historial de ambas.")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'ISSUE_RELATIONS')")
     public IssueRelationResponse create(@PathVariable String slug, @PathVariable UUID projectId,
                                         @PathVariable UUID issueId, @AuthenticationPrincipal UserPrincipal me,
                                         @Valid @RequestBody CreateIssueRelationRequest request) {
@@ -62,6 +63,7 @@ public class IssueRelationController {
                     + "de ambas tareas.")
     @DeleteMapping("/{relationId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'ISSUE_RELATIONS')")
     public void delete(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID issueId,
                        @PathVariable UUID relationId, @AuthenticationPrincipal UserPrincipal me) {
         relationService.delete(slug, projectId, issueId, relationId, me.getId());

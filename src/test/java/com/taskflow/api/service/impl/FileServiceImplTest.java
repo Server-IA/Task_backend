@@ -1,5 +1,6 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.entity.enums.Permission;
 import com.taskflow.api.dto.request.AvatarUploadRequest;
 import com.taskflow.api.dto.request.CreateUploadRequest;
 import com.taskflow.api.dto.request.CreateUploadRequest.UploadPurpose;
@@ -133,6 +134,8 @@ class FileServiceImplTest {
         service = new FileServiceImpl(fileRepository, issueRepository, projectRepository, workspaceMemberRepository,
                 lookup, projectAccess, storage, properties, cleanup, rateLimitService, activityService,
                 notificationService, fileMapper, userMapper, projectMapper, issueMapper);
+        // Salvo que la prueba diga otra cosa, quien actúa tiene todos los permisos
+        org.mockito.Mockito.lenient().when(projectAccess.can(any(), any(), any())).thenReturn(true);
 
         workspace = new Workspace();
         workspace.setId(UUID.randomUUID());
@@ -462,7 +465,7 @@ class FileServiceImplTest {
         void unPmEliminaElDeOtro() {
             StoredFile file = pendingPng(ana);
             file.setStatus(FileStatus.READY);
-            when(projectAccess.isManager(workspace, luis.getId())).thenReturn(true);
+            when(projectAccess.can(workspace, luis.getId(), Permission.FILE_DELETE_ANY)).thenReturn(true);
 
             service.delete(SLUG, project.getId(), file.getId(), luis.getId());
 
@@ -474,7 +477,7 @@ class FileServiceImplTest {
         void otroMiembroNoPuede() {
             StoredFile file = pendingPng(ana);
             file.setStatus(FileStatus.READY);
-            when(projectAccess.isManager(workspace, luis.getId())).thenReturn(false);
+            when(projectAccess.can(workspace, luis.getId(), Permission.FILE_DELETE_ANY)).thenReturn(false);
 
             assertThatThrownBy(() -> service.delete(SLUG, project.getId(), file.getId(), luis.getId()))
                     .isInstanceOf(ForbiddenException.class)

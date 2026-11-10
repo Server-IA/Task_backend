@@ -46,6 +46,7 @@ public class CommentController {
                     + "miembros del proyecto o project managers, y a ellos no les llega además el aviso del comentario.")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'COMMENT_CREATE')")
     public CommentResponse create(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID issueId,
                                   @AuthenticationPrincipal UserPrincipal me,
                                   @Valid @RequestBody CommentRequest request) {
@@ -55,6 +56,7 @@ public class CommentController {
     @Operation(summary = "Editar comentario (solo el autor)",
             description = "Solo se avisa a quienes se mencionan por primera vez en el comentario.")
     @PatchMapping("/{commentId}")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'COMMENT_CREATE')")
     public CommentResponse update(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID issueId,
                                   @PathVariable UUID commentId, @AuthenticationPrincipal UserPrincipal me,
                                   @Valid @RequestBody CommentRequest request) {

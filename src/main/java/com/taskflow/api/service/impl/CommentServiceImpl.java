@@ -7,14 +7,12 @@ import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.Project;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.enums.ActivityField;
-import com.taskflow.api.entity.enums.WorkspaceRole;
 import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.CollaborationMapper;
 import com.taskflow.api.repository.CommentRepository;
 import com.taskflow.api.repository.IssueRepository;
 import com.taskflow.api.repository.UserRepository;
-import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.service.CommentService;
 import com.taskflow.api.service.FileService;
@@ -24,6 +22,8 @@ import com.taskflow.api.util.TextCut;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.taskflow.api.entity.enums.Permission;
+import com.taskflow.api.security.AccessControl;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -37,10 +37,13 @@ public class CommentServiceImpl implements CommentService {
     /** Extracto del comentario que se guarda en el historial (lo muestra el feed de actividad). */
     static final int ACTIVITY_EXCERPT_LENGTH = 240;
 
+    static final String DELETE_FORBIDDEN = "Solo el autor, o quien puede eliminar comentarios de otros, borra el comentario";
+    static final String IMAGES_FORBIDDEN = "Tu rol no permite subir imágenes en los comentarios";
+
     private final CommentRepository commentRepository;
     private final IssueRepository issueRepository;
     private final UserRepository userRepository;
-    private final WorkspaceMemberRepository workspaceMemberRepository;
+    private final AccessControl accessControl;
     private final ActivityService activityService;
     private final NotificationService notificationService;
     private final ResourceLookup lookup;
@@ -62,6 +65,8 @@ public class CommentServiceImpl implements CommentService {
         Project project = lookup.project(slug, projectId);
         Issue issue = findIssue(project, issueId);
         User author = lookup.user(userId);
+
+        ensureMayAddImages(slug, userId, MentionParser.imageIds(request.body()));
 
         Comment comment = new Comment();
         comment.setIssue(issue);
@@ -85,6 +90,10 @@ public class CommentServiceImpl implements CommentService {
         if (!comment.getAuthor().getId().equals(userId)) {
             throw new ForbiddenException("Solo el autor puede editar el comentario");
         }
+        // Las imágenes que ya tenía se quedan aunque después le hayan quitado el permiso; las nuevas lo exigen
+        Set<String> newImages = new LinkedHashSet<>(MentionParser.imageIds(request.body()));
+        newImages.removeAll(MentionParser.imageIds(comment.getBody()));
+        ensureMayAddImages(slug, userId, newImages);
         // Solo se avisa a quienes se mencionan por primera vez en este comentario.
         Set<UUID> newMentions = new LinkedHashSet<>(MentionParser.userIds(request.body()));
         newMentions.removeAll(MentionParser.userIds(comment.getBody()));
@@ -101,11 +110,8 @@ public class CommentServiceImpl implements CommentService {
     public void delete(String slug, UUID projectId, UUID issueId, UUID commentId, UUID userId) {
         Comment comment = findComment(findIssue(lookup.project(slug, projectId), issueId), commentId);
         boolean isAuthor = comment.getAuthor().getId().equals(userId);
-        boolean isManager = workspaceMemberRepository.findRole(slug, userId)
-                .map(WorkspaceRole::isManager)
-                .orElse(false);
-        if (!isAuthor && !isManager) {
-            throw new ForbiddenException("Solo el autor o el project manager pueden borrar el comentario");
+        if (!isAuthor && !accessControl.can(slug, userId, Permission.COMMENT_DELETE_ANY)) {
+            throw new ForbiddenException(DELETE_FORBIDDEN);
         }
         String body = comment.getBody();
         commentRepository.delete(comment);
@@ -139,5 +145,12 @@ public class CommentServiceImpl implements CommentService {
 
     private static String excerpt(String body) {
         return body.length() <= ACTIVITY_EXCERPT_LENGTH ? body : TextCut.prefix(body, ACTIVITY_EXCERPT_LENGTH) + "…";
+    }
+
+    /** Un comentario con imágenes nuevas exige el permiso de subir imágenes en comentarios. */
+    private void ensureMayAddImages(String slug, UUID userId, Set<String> imageIds) {
+        if (!imageIds.isEmpty() && !accessControl.can(slug, userId, Permission.COMMENT_IMAGES)) {
+            throw new ForbiddenException(IMAGES_FORBIDDEN);
+        }
     }
 }

@@ -52,7 +52,7 @@ public class StoryController {
                     + "en una historia cerrada: reopen=true la reabre; si no, 409 con code STORY_CLOSED.")
     @PostMapping("/issues/{issueId}/split")
     @ResponseStatus(HttpStatus.CREATED)
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'STORY_MANAGE')")
     public List<IssueResponse> split(@PathVariable String slug, @PathVariable UUID projectId,
                                      @PathVariable UUID issueId, @AuthenticationPrincipal UserPrincipal me,
                                      @Valid @RequestBody SplitStoryRequest request) {
@@ -64,7 +64,7 @@ public class StoryController {
                     + "closedAt). 400 si no es una historia; 409 si ya está cerrada. Los criterios sin marcar los "
                     + "confirma el cliente antes.")
     @PostMapping("/issues/{issueId}/close")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'STORY_CLOSE')")
     public IssueResponse close(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID issueId,
                                @AuthenticationPrincipal UserPrincipal me) {
         return issueService.closeStory(slug, projectId, issueId, me.getId());
@@ -74,7 +74,7 @@ public class StoryController {
             description = "La vuelve al primer estado en curso del proyecto; queda en su historial. 409 si no está "
                     + "cerrada.")
     @PostMapping("/issues/{issueId}/reopen")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'STORY_CLOSE')")
     public IssueResponse reopen(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID issueId,
                                 @AuthenticationPrincipal UserPrincipal me) {
         return issueService.reopenStory(slug, projectId, issueId, me.getId());

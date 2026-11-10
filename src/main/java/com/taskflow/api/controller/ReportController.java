@@ -40,6 +40,7 @@ public class ReportController {
                     + "totales y los repartos que llevará el PDF. Un reporte trae como mucho maxIssues tareas "
                     + "(truncated = hay más).")
     @GetMapping("/issues")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'REPORT_GENERATE')")
     public IssuesReportPreview previewIssues(
             @PathVariable String slug, @PathVariable UUID projectId, @AuthenticationPrincipal UserPrincipal me,
             @ParameterObject IssueFilter filter, @ParameterObject ReportOptions options) {
@@ -51,6 +52,7 @@ public class ReportController {
                     + "el listado (issues=false lo quita) agrupado por groupBy y ordenado por sort. 400 si se quitan las "
                     + "dos secciones o un rango de fechas está al revés.")
     @GetMapping(value = "/issues/pdf", produces = MediaType.APPLICATION_PDF_VALUE)
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'REPORT_GENERATE')")
     public ResponseEntity<byte[]> issuesPdf(
             @PathVariable String slug, @PathVariable UUID projectId, @AuthenticationPrincipal UserPrincipal me,
             @ParameterObject IssueFilter filter, @ParameterObject ReportOptions options) {

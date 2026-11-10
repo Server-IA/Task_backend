@@ -86,6 +86,7 @@ public class IssueController {
     @ApiResponse(responseCode = "409", description = "La descripción cambió después de baseDescriptionVersion",
             content = @Content(schema = @Schema(implementation = DescriptionConflictResponse.class)))
     @PatchMapping("/{issueId}")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'ISSUE_EDIT')")
     public IssueResponse update(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID issueId,
                                 @AuthenticationPrincipal UserPrincipal me,
                                 @Valid @RequestBody UpdateIssueRequest request) {
@@ -95,6 +96,7 @@ public class IssueController {
     @Operation(summary = "Mover en el Kanban (estado + orden)",
             description = "afterIssueId = tarjeta que queda arriba; beforeIssueId = tarjeta que queda abajo.")
     @PatchMapping("/{issueId}/move")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'ISSUE_EDIT')")
     public IssueResponse move(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID issueId,
                               @AuthenticationPrincipal UserPrincipal me,
                               @Valid @RequestBody MoveIssueRequest request) {

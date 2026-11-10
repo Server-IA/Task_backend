@@ -52,7 +52,7 @@ public class RetroController {
                     + "proyecto (notificación RETRO_STARTED, menos a quien la abre). Si ya estaba abierta, no cambia "
                     + "nada ni vuelve a avisar.")
     @PostMapping("/start")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'RETRO_MANAGE')")
     public RetroResponse start(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID cycleId,
                                @AuthenticationPrincipal UserPrincipal me) {
         return retroService.start(slug, projectId, cycleId, me.getId());
@@ -64,6 +64,7 @@ public class RetroController {
                     + "con la retrospectiva abierta y sin terminar (409).")
     @PostMapping("/notes")
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'RETRO_PARTICIPATE')")
     public RetroNoteResponse createNote(@PathVariable String slug, @PathVariable UUID projectId,
                                         @PathVariable UUID cycleId, @AuthenticationPrincipal UserPrincipal me,
                                         @Valid @RequestBody RetroNoteRequest request) {
@@ -95,6 +96,7 @@ public class RetroController {
             description = "Un voto por nota y 5 por retrospectiva: 409 si ya votaste por ella o no te quedan votos, "
                     + "o si la retrospectiva no está abierta.")
     @PostMapping("/notes/{noteId}/vote")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'RETRO_PARTICIPATE')")
     public RetroVoteResponse vote(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID cycleId,
                                   @PathVariable UUID noteId, @AuthenticationPrincipal UserPrincipal me) {
         return retroService.vote(slug, projectId, cycleId, noteId, me.getId());
@@ -103,6 +105,7 @@ public class RetroController {
     @Operation(summary = "Quitar mi voto",
             description = "Si no habías votado, no cambia nada. 409 si la retrospectiva no está abierta.")
     @DeleteMapping("/notes/{noteId}/vote")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'RETRO_PARTICIPATE')")
     public RetroVoteResponse unvote(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID cycleId,
                                     @PathVariable UUID noteId, @AuthenticationPrincipal UserPrincipal me) {
         return retroService.unvote(slug, projectId, cycleId, noteId, me.getId());
@@ -114,7 +117,7 @@ public class RetroController {
                     + "apunta a la retrospectiva, asignada al responsable de la acción (si sigue siendo miembro del "
                     + "proyecto). 409 si ya se convirtió.")
     @PostMapping("/notes/{noteId}/convert")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'RETRO_MANAGE')")
     @ResponseStatus(HttpStatus.CREATED)
     public IssueResponse convert(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID cycleId,
                                  @PathVariable UUID noteId, @AuthenticationPrincipal UserPrincipal me) {
@@ -124,7 +127,7 @@ public class RetroController {
     @Operation(summary = "Terminar retrospectiva (project manager)",
             description = "Desde entonces las notas y los votos son de solo lectura. 409 si no ha empezado.")
     @PostMapping("/finish")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'RETRO_MANAGE')")
     public RetroResponse finish(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID cycleId,
                                 @AuthenticationPrincipal UserPrincipal me) {
         return retroService.finish(slug, projectId, cycleId, me.getId());

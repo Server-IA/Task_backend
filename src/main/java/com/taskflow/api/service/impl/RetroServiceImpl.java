@@ -35,6 +35,7 @@ import com.taskflow.api.util.VisibleText;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.taskflow.api.entity.enums.Permission;
 
 import java.time.Instant;
 import java.util.Collection;
@@ -343,8 +344,9 @@ public class RetroServiceImpl implements RetroService {
     }
 
     private void ensureAuthorOrManager(Project project, RetroNote note, UUID userId, String action) {
-        if (!note.getAuthor().getId().equals(userId) && !projectAccess.isManager(project.getWorkspace(), userId)) {
-            throw new ForbiddenException("Solo el autor de la nota o el project manager pueden " + action);
+        if (!note.getAuthor().getId().equals(userId)
+                && !projectAccess.can(project.getWorkspace(), userId, Permission.RETRO_MANAGE)) {
+            throw new ForbiddenException("Solo el autor de la nota o quien dirige la retrospectiva pueden " + action);
         }
     }
 

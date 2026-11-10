@@ -1,5 +1,7 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.repository.CustomRoleRepository;
+import com.taskflow.api.security.AccessControl;
 import com.taskflow.api.config.AppProperties;
 import com.taskflow.api.dto.request.InviteMemberRequest;
 import com.taskflow.api.email.EmailNotifier;
@@ -44,6 +46,10 @@ class InvitationServiceImplTest {
     private WorkspaceMapper workspaceMapper;
     @Mock
     private EmailNotifier emailNotifier;
+    @Mock
+    private CustomRoleRepository customRoleRepository;
+    @Mock
+    private AccessControl accessControl;
 
     private InvitationServiceImpl invitationService;
     private final User pm = new User();
@@ -53,7 +59,8 @@ class InvitationServiceImplTest {
         AppProperties properties = new AppProperties(null, null, "http://localhost:5173", "America/Bogota",
                 new AppProperties.Tokens(24, 60, 7, 30));
         invitationService = new InvitationServiceImpl(invitationRepository, memberRepository,
-                lookup, workspaceMapper, emailNotifier, properties, new RateLimitService());
+                lookup, workspaceMapper, emailNotifier, properties, new RateLimitService(), customRoleRepository,
+                accessControl);
         Workspace workspace = new Workspace();
         workspace.setId(UUID.randomUUID());
         workspace.setName("Mi equipo");

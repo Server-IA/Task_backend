@@ -1,5 +1,6 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.entity.enums.Permission;
 import com.taskflow.api.dto.request.CreateSavedViewRequest;
 import com.taskflow.api.dto.request.IssueFilter;
 import com.taskflow.api.dto.request.ReorderSavedViewsRequest;
@@ -97,7 +98,7 @@ class SavedViewServiceImplTest {
         User user = new User();
         user.setId(UUID.randomUUID());
         lenient().when(lookup.user(user.getId())).thenReturn(user);
-        lenient().when(projectAccess.isManager(workspace, user.getId())).thenReturn(manager);
+        lenient().when(projectAccess.can(workspace, user.getId(), Permission.VIEW_SHARED)).thenReturn(manager);
         return user;
     }
 
@@ -320,7 +321,7 @@ class SavedViewServiceImplTest {
             assertThatThrownBy(() -> viewService.create(SLUG, project.getId(), member.getId(),
                     new CreateSavedViewRequest("Sprint", true, null)))
                     .isInstanceOf(ForbiddenException.class)
-                    .hasMessage("Solo el project manager puede crear vistas compartidas");
+                    .hasMessage("Tu rol no permite crear vistas compartidas");
             verify(viewRepository, never()).save(any());
         }
 
@@ -423,7 +424,7 @@ class SavedViewServiceImplTest {
             assertThatThrownBy(() -> viewService.update(SLUG, project.getId(), shared.getId(), member.getId(),
                     rename("Otra")))
                     .isInstanceOf(ForbiddenException.class)
-                    .hasMessage("Solo el project manager puede editar las vistas compartidas");
+                    .hasMessage("Tu rol no permite editar las vistas compartidas");
         }
 
         @Test
@@ -447,7 +448,7 @@ class SavedViewServiceImplTest {
             assertThatThrownBy(() -> viewService.update(SLUG, project.getId(), mine.getId(), member.getId(),
                     new UpdateSavedViewRequest(null, null, true, null)))
                     .isInstanceOf(ForbiddenException.class)
-                    .hasMessage("Solo el project manager puede compartir vistas");
+                    .hasMessage("Tu rol no permite compartir vistas");
             assertThat(mine.isShared()).isFalse();
         }
 
@@ -571,7 +572,7 @@ class SavedViewServiceImplTest {
 
             assertThatThrownBy(() -> viewService.delete(SLUG, project.getId(), shared.getId(), member.getId()))
                     .isInstanceOf(ForbiddenException.class)
-                    .hasMessage("Solo el project manager puede eliminar las vistas compartidas");
+                    .hasMessage("Tu rol no permite eliminar las vistas compartidas");
             verify(viewRepository, never()).delete(any());
         }
 

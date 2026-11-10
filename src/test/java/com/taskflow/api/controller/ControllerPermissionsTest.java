@@ -1,5 +1,6 @@
 package com.taskflow.api.controller;
 
+import com.taskflow.api.entity.enums.Permission;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -48,7 +49,16 @@ class ControllerPermissionsTest {
     private static final String MEMBER = "@workspaceSecurity.isMember(#slug)";
     private static final String MANAGER = "@workspaceSecurity.isManager(#slug)";
     private static final String ACCESS = "@workspaceSecurity.canAccessProject(#slug, #projectId)";
-    private static final String MANAGE = "@workspaceSecurity.canManageProject(#slug, #projectId)";
+
+    /** Un permiso del workspace (invitar, gestionar roles, crear proyectos…). */
+    private static String can(Permission permission) {
+        return "@workspaceSecurity.can(#slug, '" + permission.name() + "')";
+    }
+
+    /** Un permiso dentro de un proyecto que además se puede ver. */
+    private static String inProject(Permission permission) {
+        return "@workspaceSecurity.canInProject(#slug, #projectId, '" + permission.name() + "')";
+    }
 
     /** Endpoint («Controlador.método») → su regla. */
     private static final Map<String, String> RULES = new LinkedHashMap<>();
@@ -58,6 +68,8 @@ class ControllerPermissionsTest {
      * con el usuario de la sesión.
      */
     private static final Set<String> AUTHENTICATED_ONLY = Set.of(
+            // Catálogo de permisos (es el mismo para todos los workspaces)
+            "RoleController.catalog",
             // Mis workspaces y crear uno (quien lo crea pasa a ser su project manager)
             "WorkspaceController.getMyWorkspaces",
             "WorkspaceController.create",
@@ -104,128 +116,131 @@ class ControllerPermissionsTest {
     }
 
     static {
-        // Workspace e invitaciones
+        // Workspace: editarlo, cambiar roles e invitar van por permiso; eliminarlo, solo el project manager. Salir del
+        // workspace es de cualquiera (quitar a otra persona lo valida el servicio)
         rule(WorkspaceController.class, "get", MEMBER);
-        rule(WorkspaceController.class, "update", MANAGER);
+        rule(WorkspaceController.class, "update", can(Permission.WORKSPACE_EDIT));
         rule(WorkspaceController.class, "delete", MANAGER);
-        rule(WorkspaceController.class, "updateMemberRole", MANAGER);
+        rule(WorkspaceController.class, "getMembers", MEMBER);
+        rule(WorkspaceController.class, "updateMemberRole", can(Permission.MEMBER_ROLE));
         rule(WorkspaceController.class, "removeMember", MEMBER);
-        rule(InvitationController.class, "invite", MANAGER);
-        rule(InvitationController.class, "getPending", MANAGER);
-        rule(InvitationController.class, "revoke", MANAGER);
+        rule(InvitationController.class, "invite", can(Permission.MEMBER_INVITE));
+        rule(InvitationController.class, "getPending", can(Permission.MEMBER_INVITE));
+        rule(InvitationController.class, "revoke", can(Permission.MEMBER_INVITE));
+        // Roles: los ve cualquier miembro (para saber qué puede hacer cada uno); crearlos y editarlos, por permiso
+        rule(RoleController.class, "getRoles", MEMBER);
+        rule(RoleController.class, "create", can(Permission.ROLE_MANAGE));
+        rule(RoleController.class, "update", can(Permission.ROLE_MANAGE));
+        rule(RoleController.class, "updateMemberPermissions", can(Permission.ROLE_MANAGE));
+        rule(RoleController.class, "delete", can(Permission.ROLE_MANAGE));
         // Proyectos
         rule(ProjectController.class, "getProjects", MEMBER);
-        rule(ProjectController.class, "create", MANAGER);
+        rule(ProjectController.class, "create", can(Permission.PROJECT_CREATE));
         rule(ProjectController.class, "get", ACCESS);
-        rule(ProjectController.class, "update", MANAGE);
-        rule(ProjectController.class, "delete", MANAGE);
+        rule(ProjectController.class, "update", inProject(Permission.PROJECT_EDIT));
+        rule(ProjectController.class, "delete", inProject(Permission.PROJECT_DELETE));
         rule(ProjectController.class, "getMembers", ACCESS);
-        rule(ProjectController.class, "addMember", MANAGE);
-        rule(ProjectController.class, "removeMember", MANAGE);
-        // Estados y etiquetas
+        rule(ProjectController.class, "addMember", inProject(Permission.PROJECT_MEMBERS));
+        rule(ProjectController.class, "removeMember", inProject(Permission.PROJECT_MEMBERS));
+        // Estados, etiquetas y plantillas: los ve todo el proyecto
         rule(StateController.class, "getStates", ACCESS);
-        rule(StateController.class, "create", MANAGE);
-        rule(StateController.class, "update", MANAGE);
-        rule(StateController.class, "delete", MANAGE);
-        // Reordenar las columnas del tablero: project manager
-        rule(StateController.class, "reorder", MANAGE);
+        rule(StateController.class, "create", inProject(Permission.PROJECT_STATES));
+        rule(StateController.class, "update", inProject(Permission.PROJECT_STATES));
+        rule(StateController.class, "reorder", inProject(Permission.PROJECT_STATES));
+        rule(StateController.class, "delete", inProject(Permission.PROJECT_STATES));
         rule(LabelController.class, "getLabels", ACCESS);
-        rule(LabelController.class, "create", MANAGE);
-        rule(LabelController.class, "update", MANAGE);
-        rule(LabelController.class, "delete", MANAGE);
-        // Ciclos y módulos: verlos y mover tareas dentro o fuera, cualquier miembro del proyecto
+        rule(LabelController.class, "create", inProject(Permission.PROJECT_LABELS));
+        rule(LabelController.class, "update", inProject(Permission.PROJECT_LABELS));
+        rule(LabelController.class, "delete", inProject(Permission.PROJECT_LABELS));
+        rule(IssueTemplateController.class, "getTemplates", ACCESS);
+        rule(IssueTemplateController.class, "create", inProject(Permission.PROJECT_TEMPLATES));
+        rule(IssueTemplateController.class, "update", inProject(Permission.PROJECT_TEMPLATES));
+        rule(IssueTemplateController.class, "delete", inProject(Permission.PROJECT_TEMPLATES));
+        // Ciclos y módulos: verlos, cualquiera del proyecto
         rule(CycleController.class, "getCycles", ACCESS);
         rule(CycleController.class, "get", ACCESS);
-        rule(CycleController.class, "create", MANAGE);
-        rule(CycleController.class, "update", MANAGE);
-        rule(CycleController.class, "delete", MANAGE);
-        rule(CycleController.class, "addIssues", ACCESS);
-        rule(CycleController.class, "removeIssue", ACCESS);
-        // Cerrar un ciclo es del project manager
-        rule(CycleController.class, "closePreview", MANAGE);
-        rule(CycleController.class, "close", MANAGE);
+        rule(CycleController.class, "create", inProject(Permission.CYCLE_CREATE));
+        rule(CycleController.class, "update", inProject(Permission.CYCLE_EDIT));
+        rule(CycleController.class, "delete", inProject(Permission.CYCLE_DELETE));
+        rule(CycleController.class, "addIssues", inProject(Permission.CYCLE_ASSIGN));
+        rule(CycleController.class, "removeIssue", inProject(Permission.CYCLE_ASSIGN));
+        rule(CycleController.class, "closePreview", inProject(Permission.CYCLE_CLOSE));
+        rule(CycleController.class, "close", inProject(Permission.CYCLE_CLOSE));
         rule(ModuleController.class, "getModules", ACCESS);
         rule(ModuleController.class, "get", ACCESS);
-        rule(ModuleController.class, "create", MANAGE);
-        rule(ModuleController.class, "update", MANAGE);
-        rule(ModuleController.class, "delete", MANAGE);
-        rule(ModuleController.class, "addIssues", ACCESS);
-        rule(ModuleController.class, "removeIssue", ACCESS);
-        // Tareas y comentarios (borrar una tarea se valida además en el servicio)
-        rule(IssueController.class, "create", ACCESS);
-        rule(IssueController.class, "update", ACCESS);
-        rule(IssueController.class, "move", ACCESS);
-        rule(IssueController.class, "delete", ACCESS);
-        rule(CommentController.class, "create", ACCESS);
-        rule(CommentController.class, "update", ACCESS);
-        rule(CommentController.class, "delete", ACCESS);
-        // Dependencias y checklist: cualquier miembro del proyecto
-        rule(IssueRelationController.class, "getRelations", ACCESS);
-        rule(IssueRelationController.class, "create", ACCESS);
-        rule(IssueRelationController.class, "delete", ACCESS);
-        rule(IssueChecklistController.class, "getItems", ACCESS);
-        rule(IssueChecklistController.class, "create", ACCESS);
-        rule(IssueChecklistController.class, "update", ACCESS);
-        rule(IssueChecklistController.class, "delete", ACCESS);
-        // Plantillas: las ve todo el proyecto, las configura el project manager
-        rule(IssueTemplateController.class, "getTemplates", ACCESS);
-        rule(IssueTemplateController.class, "create", MANAGE);
-        rule(IssueTemplateController.class, "update", MANAGE);
-        rule(IssueTemplateController.class, "delete", MANAGE);
-        // Vistas guardadas: el servicio decide quién gestiona cada una (dueño o PM si es compartida)
-        rule(SavedViewController.class, "getViews", ACCESS);
-        rule(SavedViewController.class, "create", ACCESS);
-        rule(SavedViewController.class, "update", ACCESS);
-        rule(SavedViewController.class, "delete", ACCESS);
-        // Ordenar: el servicio exige project manager para las compartidas; las personales, las del usuario
-        rule(SavedViewController.class, "reorder", ACCESS);
-        // Retrospectiva: notas y votos de cualquier miembro del proyecto (editar o borrar una nota ajena se
-        // valida en el servicio); abrirla, terminarla y convertir acciones en tareas, del project manager
-        rule(RetroController.class, "getRetro", ACCESS);
-        rule(RetroController.class, "start", MANAGE);
-        rule(RetroController.class, "createNote", ACCESS);
-        rule(RetroController.class, "updateNote", ACCESS);
-        rule(RetroController.class, "deleteNote", ACCESS);
-        rule(RetroController.class, "vote", ACCESS);
-        rule(RetroController.class, "unvote", ACCESS);
-        rule(RetroController.class, "convert", MANAGE);
-        rule(RetroController.class, "finish", MANAGE);
-        // Daily: la ve y escribe su nota cualquier miembro del proyecto
-        rule(DailyController.class, "getDaily", ACCESS);
-        rule(DailyController.class, "saveNote", ACCESS);
-        // Sus ajustes (tiempos, bloques y puntos a tratar) los ve cualquiera del proyecto y los cambia el project manager
-        rule(DailyController.class, "getSettings", ACCESS);
-        rule(DailyController.class, "saveSettings", MANAGE);
-        // Reportes en PDF: cualquiera del proyecto
-        rule(ReportController.class, "previewIssues", ACCESS);
-        rule(ReportController.class, "issuesPdf", ACCESS);
-        // Endpoints nuevos
-        rule(ProjectStatsController.class, "getStats", ACCESS);
-        rule(MyWorkController.class, "getMyWork", MEMBER);
-        rule(WorkspaceActivityController.class, "getFeed", MEMBER);
-        rule(WorkspaceActivityController.class, "getSummary", MEMBER);
-        rule(SearchController.class, "search", MEMBER);
-        // Historias: las ve cualquier miembro del proyecto; partirlas, cerrarlas y reabrirlas es del project
-        // manager (cerrar o reabrir por otros caminos, como el tablero, se valida en el servicio)
-        rule(StoryController.class, "getStories", ACCESS);
-        rule(StoryController.class, "split", MANAGE);
-        rule(StoryController.class, "close", MANAGE);
-        rule(StoryController.class, "reopen", MANAGE);
-        // Lecturas de tareas, comentarios y miembros (la regla de la clase)
+        rule(ModuleController.class, "create", inProject(Permission.MODULE_CREATE));
+        rule(ModuleController.class, "update", inProject(Permission.MODULE_EDIT));
+        rule(ModuleController.class, "delete", inProject(Permission.MODULE_DELETE));
+        rule(ModuleController.class, "addIssues", inProject(Permission.MODULE_ASSIGN));
+        rule(ModuleController.class, "removeIssue", inProject(Permission.MODULE_ASSIGN));
+        // Tareas: crear y eliminar los valida el servicio (una historia pide otro permiso que una tarea; borrar la propia,
+        // otro que borrar la de alguien más)
         rule(IssueController.class, "getIssues", ACCESS);
         rule(IssueController.class, "get", ACCESS);
         rule(IssueController.class, "getSubIssues", ACCESS);
         rule(IssueController.class, "getActivity", ACCESS);
+        rule(IssueController.class, "create", ACCESS);
+        rule(IssueController.class, "update", inProject(Permission.ISSUE_EDIT));
+        rule(IssueController.class, "move", inProject(Permission.ISSUE_EDIT));
+        rule(IssueController.class, "delete", ACCESS);
+        // Comentarios: borrar lo valida el servicio (el autor, o quien puede borrar los de otros)
         rule(CommentController.class, "getComments", ACCESS);
+        rule(CommentController.class, "create", inProject(Permission.COMMENT_CREATE));
+        rule(CommentController.class, "update", inProject(Permission.COMMENT_CREATE));
+        rule(CommentController.class, "delete", ACCESS);
+        // Dependencias y checklist
+        rule(IssueRelationController.class, "getRelations", ACCESS);
+        rule(IssueRelationController.class, "create", inProject(Permission.ISSUE_RELATIONS));
+        rule(IssueRelationController.class, "delete", inProject(Permission.ISSUE_RELATIONS));
+        rule(IssueChecklistController.class, "getItems", ACCESS);
+        rule(IssueChecklistController.class, "create", inProject(Permission.ISSUE_CHECKLIST));
+        rule(IssueChecklistController.class, "update", inProject(Permission.ISSUE_CHECKLIST));
+        rule(IssueChecklistController.class, "delete", inProject(Permission.ISSUE_CHECKLIST));
+        // Vistas guardadas: el servicio decide quién gestiona cada una (su dueño, o el permiso de vistas compartidas)
+        rule(SavedViewController.class, "getViews", ACCESS);
+        rule(SavedViewController.class, "create", ACCESS);
+        rule(SavedViewController.class, "update", ACCESS);
+        rule(SavedViewController.class, "reorder", ACCESS);
+        rule(SavedViewController.class, "delete", ACCESS);
+        // Retrospectiva: dirigirla y participar van por permiso; editar o borrar una nota lo valida el servicio (su autor,
+        // o quien dirige la retro)
+        rule(RetroController.class, "getRetro", ACCESS);
+        rule(RetroController.class, "start", inProject(Permission.RETRO_MANAGE));
+        rule(RetroController.class, "createNote", inProject(Permission.RETRO_PARTICIPATE));
+        rule(RetroController.class, "updateNote", ACCESS);
+        rule(RetroController.class, "deleteNote", ACCESS);
+        rule(RetroController.class, "vote", inProject(Permission.RETRO_PARTICIPATE));
+        rule(RetroController.class, "unvote", inProject(Permission.RETRO_PARTICIPATE));
+        rule(RetroController.class, "convert", inProject(Permission.RETRO_MANAGE));
+        rule(RetroController.class, "finish", inProject(Permission.RETRO_MANAGE));
+        // Daily: la ve cualquiera del proyecto
+        rule(DailyController.class, "getDaily", ACCESS);
+        rule(DailyController.class, "saveNote", inProject(Permission.DAILY_NOTE));
+        rule(DailyController.class, "getSettings", ACCESS);
+        rule(DailyController.class, "saveSettings", inProject(Permission.DAILY_SETTINGS));
+        // Estadísticas, reportes y actividad
+        rule(ProjectStatsController.class, "getStats", inProject(Permission.STATS_VIEW));
+        rule(ReportController.class, "previewIssues", inProject(Permission.REPORT_GENERATE));
+        rule(ReportController.class, "issuesPdf", inProject(Permission.REPORT_GENERATE));
+        rule(WorkspaceActivityController.class, "getFeed", can(Permission.ACTIVITY_VIEW));
+        rule(WorkspaceActivityController.class, "getSummary", can(Permission.ACTIVITY_VIEW));
+        // Mi trabajo y la búsqueda: cualquier miembro (solo traen lo de los proyectos que ve)
+        rule(MyWorkController.class, "getMyWork", MEMBER);
+        rule(SearchController.class, "search", MEMBER);
         rule(SearchController.class, "byCodes", MEMBER);
-        rule(WorkspaceController.class, "getMembers", MEMBER);
-        // Archivos: subir y ver, cualquier miembro del proyecto (borrar uno ajeno lo valida el servicio: quien lo
-        // subió o un project manager); el almacenamiento del workspace, el project manager (el uso, cualquiera)
+        // Historias: las ve cualquiera del proyecto (cerrar o reabrir por otros caminos, como el tablero, se valida en el
+        // servicio)
+        rule(StoryController.class, "getStories", ACCESS);
+        rule(StoryController.class, "split", inProject(Permission.STORY_MANAGE));
+        rule(StoryController.class, "close", inProject(Permission.STORY_CLOSE));
+        rule(StoryController.class, "reopen", inProject(Permission.STORY_CLOSE));
+        // Archivos: el servicio valida subir (adjuntos o imágenes) y borrar (quien lo subió, o quien puede borrar los de
+        // otros). El detalle del almacenamiento va por permiso; el uso lo ve cualquiera
         rule(ProjectFileController.class, "createUpload", ACCESS);
         rule(ProjectFileController.class, "confirmUpload", ACCESS);
         rule(ProjectFileController.class, "deleteFile", ACCESS);
         rule(ProjectFileController.class, "getAttachments", ACCESS);
-        rule(StorageController.class, "getReport", MANAGER);
+        rule(StorageController.class, "getReport", can(Permission.STORAGE_VIEW));
         rule(StorageController.class, "getUsage", MEMBER);
     }
 

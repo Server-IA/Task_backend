@@ -21,7 +21,7 @@ public final class MentionParser {
 
     /** Imagen subida dentro del texto: {@code ![nombre](/files/<id>)}. */
     private static final Pattern IMAGE = Pattern.compile(
-            "!\\[([^\\]\\r\\n]{0,255})]\\(/files/[0-9a-fA-F-]{36}\\)");
+            "!\\[([^\\]\\r\\n]{0,255})]\\(/files/([0-9a-fA-F-]{36})\\)");
 
     private MentionParser() {
     }
@@ -42,6 +42,19 @@ public final class MentionParser {
                 .replaceAll("\\s+", " ")
                 .strip();
         return text.length() <= maxLength ? text : TextCut.prefix(text, maxLength).stripTrailing() + "…";
+    }
+
+    /** Ids (en minúsculas) de las imágenes subidas que aparecen en el texto; vacío si no hay o es {@code null}. */
+    public static Set<String> imageIds(String body) {
+        if (body == null || body.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Set<String> ids = new LinkedHashSet<>();
+        Matcher matcher = IMAGE.matcher(body);
+        while (matcher.find()) {
+            ids.add(matcher.group(2).toLowerCase(java.util.Locale.ROOT));
+        }
+        return ids;
     }
 
     /** Ids mencionados, sin repetir y en orden de aparición (como máximo {@link #MAX_MENTIONS}). */

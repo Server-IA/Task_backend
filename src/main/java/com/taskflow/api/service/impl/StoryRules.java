@@ -14,14 +14,14 @@ import java.util.Collection;
  */
 final class StoryRules {
 
-    static final String CLOSE_FORBIDDEN = "Solo el project manager cierra la historia";
-    static final String REOPEN_FORBIDDEN = "Solo el project manager reabre la historia";
-    static final String CREATE_FORBIDDEN = "Solo el project manager crea historias";
-    static final String TYPE_FORBIDDEN = "Solo el project manager convierte una tarea en historia o una historia en tarea";
+    static final String CLOSE_FORBIDDEN = "Tu rol no permite cerrar historias";
+    static final String REOPEN_FORBIDDEN = "Tu rol no permite reabrir historias";
+    static final String CREATE_FORBIDDEN = "Tu rol no permite crear historias";
+    static final String TYPE_FORBIDDEN = "Tu rol no permite convertir una tarea en historia ni una historia en tarea";
     static final String TYPE_WITH_CHILDREN = "Una historia con tareas no puede cambiar de tipo hasta mover sus tareas";
     static final String STORY_AS_CHILD = "Una historia no puede ser hija de otra tarea";
     static final String SPLIT_TYPE = "Al partir una historia solo se crean tareas o bugs";
-    static final String DELETE_FORBIDDEN = "Solo el project manager elimina historias";
+    static final String DELETE_FORBIDDEN = "Tu rol no permite eliminar historias";
 
     private StoryRules() {
     }
