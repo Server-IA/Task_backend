@@ -193,6 +193,9 @@ class ControllerPermissionsTest {
         // Daily: la ve y escribe su nota cualquier miembro del proyecto
         rule(DailyController.class, "getDaily", ACCESS);
         rule(DailyController.class, "saveNote", ACCESS);
+        // Sus ajustes (tiempos, bloques y puntos a tratar) los ve cualquiera del proyecto y los cambia el project manager
+        rule(DailyController.class, "getSettings", ACCESS);
+        rule(DailyController.class, "saveSettings", MANAGE);
         // Endpoints nuevos
         rule(ProjectStatsController.class, "getStats", ACCESS);
         rule(MyWorkController.class, "getMyWork", MEMBER);

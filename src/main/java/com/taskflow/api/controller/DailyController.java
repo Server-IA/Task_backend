@@ -1,10 +1,13 @@
 package com.taskflow.api.controller;
 
 import com.taskflow.api.dto.request.DailyNoteRequest;
+import com.taskflow.api.dto.request.DailySettingsRequest;
 import com.taskflow.api.dto.response.DailyNoteResponse;
 import com.taskflow.api.dto.response.DailyResponse;
+import com.taskflow.api.dto.response.DailySettingsResponse;
 import com.taskflow.api.security.UserPrincipal;
 import com.taskflow.api.service.DailyService;
+import com.taskflow.api.service.DailySettingsService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -34,6 +37,7 @@ import java.util.UUID;
 public class DailyController {
 
     private final DailyService dailyService;
+    private final DailySettingsService settingsService;
 
     @Operation(summary = "Daily del proyecto",
             description = "previousDate = «ayer»: el último día antes de date con actividad en el proyecto "
@@ -71,5 +75,28 @@ public class DailyController {
         return dailyService.saveNote(slug, projectId, me.getId(), date, request)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
+    @Operation(summary = "Ajustes de la daily",
+            description = "secondsPerPerson = tiempo sugerido por persona en «Presentar» (por defecto 120); "
+                    + "personTimes = quienes tienen un tiempo distinto al general; sections = qué bloques se exponen "
+                    + "(resumen, ayer, hoy, bloqueos y nota del día); agenda = puntos fijos a tratar, en orden. Un "
+                    + "proyecto que nunca los cambió devuelve los valores por defecto.")
+    @GetMapping("/settings")
+    public DailySettingsResponse getSettings(@PathVariable String slug, @PathVariable UUID projectId) {
+        return settingsService.get(slug, projectId);
+    }
+
+    @Operation(summary = "Guardar los ajustes de la daily",
+            description = "Solo el project manager. Reemplaza todo lo guardado. secondsPerPerson y cada tiempo propio, "
+                    + "entre 15 y 3600 segundos; un tiempo propio igual al general no se guarda; las personas deben "
+                    + "ser del workspace. Debe quedar visible al menos uno de los bloques Ayer, Hoy o Bloqueos. agenda: "
+                    + "hasta 12 puntos de hasta 120 caracteres.")
+    @PutMapping("/settings")
+    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    public DailySettingsResponse saveSettings(
+            @PathVariable String slug, @PathVariable UUID projectId, @AuthenticationPrincipal UserPrincipal me,
+            @Valid @RequestBody DailySettingsRequest request) {
+        return settingsService.save(slug, projectId, me.getId(), request);
     }
 }
