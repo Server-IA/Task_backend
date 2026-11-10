@@ -37,5 +37,6 @@ public interface WorkspaceMapper {
     @Mapping(target = "workspaceName", source = "workspace.name")
     @Mapping(target = "workspaceSlug", source = "workspace.slug")
     @Mapping(target = "invitedByName", source = "invitedBy.fullName")
+    @Mapping(target = "roleName", expression = "java(com.taskflow.api.security.AccessControl.roleName(invitation))")
     InvitationDetailsResponse toInvitationDetails(WorkspaceInvitation invitation);
 }

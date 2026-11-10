@@ -70,7 +70,9 @@ public class InvitationServiceImpl implements InvitationService {
         rateLimitService.consume(RateLimitRule.INVITE_SENDER, inviterId.toString());
         rateLimitService.consume(RateLimitRule.INVITE_RECIPIENT, email);
 
-        // Con un rol del workspace: debe existir y quien invita no puede dar un rol con permisos que el suyo no tiene
+        // Con un rol del workspace: debe existir y quien invita no puede dar un rol con permisos que el suyo no tiene.
+        // Sin rol entra como «Miembro», el rol de entrada del workspace: eso no se restringe (quien puede invitar puede
+        // sumar gente con el rol base, aunque el suyo tenga menos permisos), o «invitar» no serviría sin más permisos
         CustomRole customRole = null;
         if (request.roleId() != null) {
             customRole = customRoleRepository.findByIdAndWorkspaceId(request.roleId(), workspace.getId())

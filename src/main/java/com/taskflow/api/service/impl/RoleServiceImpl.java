@@ -1,5 +1,7 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.repository.WorkspaceInvitationRepository;
+import com.taskflow.api.repository.WorkspaceRepository;
 import com.taskflow.api.dto.request.RolePermissionsRequest;
 import com.taskflow.api.dto.request.RoleRequest;
 import com.taskflow.api.dto.request.UpdateRoleRequest;
@@ -47,6 +49,8 @@ public class RoleServiceImpl implements RoleService {
 
     private final CustomRoleRepository roleRepository;
     private final WorkspaceMemberRepository memberRepository;
+    private final WorkspaceInvitationRepository invitationRepository;
+    private final WorkspaceRepository workspaceRepository;
     private final AccessControl accessControl;
     private final ResourceLookup lookup;
 
@@ -86,9 +90,8 @@ public class RoleServiceImpl implements RoleService {
     @Override
     @Transactional
     public RoleResponse create(String slug, UUID actorId, RoleRequest request) {
-        Workspace workspace = lookup.workspace(slug);
         // Con la fila del workspace bloqueada: dos creaciones a la vez no pasan juntas del máximo ni repiten nombre
-        lookup.lockWorkspace(workspace);
+        Workspace workspace = lockedWorkspace(slug);
         if (roleRepository.countByWorkspaceId(workspace.getId()) >= MAX_CUSTOM_ROLES) {
             throw new ConflictException(LIMIT_MESSAGE);
         }
@@ -107,8 +110,7 @@ public class RoleServiceImpl implements RoleService {
     @Override
     @Transactional
     public RoleResponse update(String slug, UUID actorId, UUID roleId, UpdateRoleRequest request) {
-        Workspace workspace = lookup.workspace(slug);
-        lookup.lockWorkspace(workspace);
+        Workspace workspace = lockedWorkspace(slug);
         CustomRole role = findRole(workspace, roleId);
         // Un rol con permisos que a quien edita le faltan no se toca: podría quitárselos a otros o ponérselo después
         ensureMayGrant(slug, actorId, role.permissionSet());
@@ -133,8 +135,7 @@ public class RoleServiceImpl implements RoleService {
     @Override
     @Transactional
     public RoleResponse updateMemberPermissions(String slug, UUID actorId, RolePermissionsRequest request) {
-        Workspace workspace = lookup.workspace(slug);
-        lookup.lockWorkspace(workspace);
+        Workspace workspace = lockedWorkspace(slug);
         Set<Permission> permissions = parse(request.permissions());
         ensureMayGrant(slug, actorId, workspace.memberPermissionSet());
         ensureMayGrant(slug, actorId, permissions);
@@ -145,10 +146,16 @@ public class RoleServiceImpl implements RoleService {
     @Override
     @Transactional
     public void delete(String slug, UUID actorId, UUID roleId) {
-        Workspace workspace = lookup.workspace(slug);
-        lookup.lockWorkspace(workspace);
+        Workspace workspace = lockedWorkspace(slug);
         CustomRole role = findRole(workspace, roleId);
         ensureMayGrant(slug, actorId, role.permissionSet());
+        // Quienes lo tienen (y las invitaciones pendientes con él) pasan a «Miembro»: si eso les da permisos que a quien
+        // elimina le faltan, sería una forma de subirlos (o de subirse, si el rol es el suyo)
+        boolean inUse = memberRepository.countByCustomRoleId(role.getId()) > 0
+                || invitationRepository.countByCustomRoleIdAndAcceptedFalse(role.getId()) > 0;
+        if (inUse) {
+            ensureMayGrant(slug, actorId, workspace.memberPermissionSet());
+        }
         // La base de datos deja en «Miembro» a quienes lo tenían y a las invitaciones pendientes (ON DELETE SET NULL)
         roleRepository.delete(role);
     }
@@ -198,6 +205,15 @@ public class RoleServiceImpl implements RoleService {
     private static String cleanDescription(String description) {
         String text = VisibleText.strip(description);
         return text == null || text.isEmpty() ? null : text;
+    }
+
+    /**
+     * El workspace leído con su fila bloqueada hasta el final de la transacción: las validaciones (permisos de
+     * «Miembro», nombres, cantidad de roles) se hacen sobre lo que hay después de esperar a quien lo estaba cambiando.
+     */
+    private Workspace lockedWorkspace(String slug) {
+        return workspaceRepository.findBySlugForUpdate(slug)
+                .orElseThrow(() -> new ResourceNotFoundException("Workspace no encontrado"));
     }
 
     private CustomRole findRole(Workspace workspace, UUID roleId) {

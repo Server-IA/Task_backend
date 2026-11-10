@@ -19,11 +19,13 @@ import com.taskflow.api.entity.enums.WorkspaceRole;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ForbiddenException;
+import com.taskflow.api.repository.StoredFileRepository;
 import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.security.UserPrincipal;
 import com.taskflow.api.security.WorkspaceSecurity;
 import com.taskflow.api.service.InvitationService;
 import com.taskflow.api.service.IssueService;
+import com.taskflow.api.service.NotificationService;
 import com.taskflow.api.service.ProjectService;
 import com.taskflow.api.service.RoleService;
 import com.taskflow.api.service.WorkspaceService;
@@ -92,6 +94,10 @@ class RolesIntegrationTest {
     private IssueService issueService;
     @Autowired
     private WorkspaceSecurity workspaceSecurity;
+    @Autowired
+    private StoredFileRepository fileRepository;
+    @Autowired
+    private NotificationService notificationService;
 
     private User pm;
     private User dev;
@@ -363,6 +369,68 @@ class RolesIntegrationTest {
         assertThat(promoted.role()).isEqualTo(WorkspaceRole.OWNER);
         assertThat(promoted.roleId()).isNull();
         assertThat(promoted.roleName()).isEqualTo("Project manager");
+    }
+
+    @Test
+    void eliminarUnRolEnUsoNoSirveParaSubirASusMiembrosAMiembro() {
+        // «Admin de roles» solo gestiona roles: al eliminar su propio rol caería a «Miembro», que tiene más permisos
+        RoleResponse admin = roleService.create(slug, pm.getId(), new RoleRequest("Admin de roles", null, List.of("ROLE_MANAGE")));
+        RoleResponse empty = roleService.create(slug, pm.getId(), new RoleRequest("Sin nada", null, List.of()));
+        workspaceService.updateMemberRole(slug, pm.getId(), dev.getId(),
+                new UpdateMemberRoleRequest(WorkspaceRole.MEMBER, admin.id()));
+
+        assertThatThrownBy(() -> roleService.delete(slug, dev.getId(), admin.id()))
+                .isInstanceOf(ForbiddenException.class);
+        // Uno que nadie tiene sí lo puede eliminar (no sube a nadie)
+        roleService.delete(slug, dev.getId(), empty.id());
+        assertThat(roleService.list(slug)).extracting(RoleResponse::name).doesNotContain("Sin nada").contains("Admin de roles");
+    }
+
+    // ----- Ver todos los proyectos -----
+
+    @Test
+    void verTodosLosProyectosTambienValeParaArchivosMencionesYLaBandeja() {
+        User auditor = user("aud-" + UUID.randomUUID().toString().substring(0, 8) + "@test.com", "Aura Auditora");
+        RoleResponse role = roleService.create(slug, pm.getId(), new RoleRequest("Auditor", null, List.of("PROJECT_VIEW_ALL")));
+        sql("INSERT INTO workspace_members (id, workspace_id, user_id, role, custom_role_id) VALUES (gen_random_uuid(), '"
+                + workspaceId + "', '" + auditor.getId() + "', 'MEMBER', '" + role.id() + "')");
+        UUID secret = projectService.create(slug, pm.getId(), new CreateProjectRequest("Privado",
+                "V" + UUID.randomUUID().toString().substring(0, 4).toUpperCase().replaceAll("[0-9]", "X"), null, null)).id();
+
+        // La función que usan las consultas: el project manager y quien tiene el permiso; un miembro corriente, no
+        assertThat(value("SELECT sees_all_projects('" + workspaceId + "', '" + pm.getId() + "')")).isEqualTo("t");
+        assertThat(value("SELECT sees_all_projects('" + workspaceId + "', '" + auditor.getId() + "')")).isEqualTo("t");
+        assertThat(value("SELECT sees_all_projects('" + workspaceId + "', '" + dev.getId() + "')")).isEqualTo("f");
+        assertThat(value("SELECT sees_all_projects('" + workspaceId + "', '" + UUID.randomUUID() + "')")).isEqualTo("f");
+
+        // Archivos: ve los de un proyecto del que no es miembro; el miembro corriente, no
+        assertThat(fileRepository.findAccessibleProjectIds(List.of(secret), auditor.getId())).containsExactly(secret);
+        assertThat(fileRepository.findAccessibleProjectIds(List.of(secret), dev.getId())).isEmpty();
+        // Menciones
+        assertThat(userRepository.findMentionable(List.of(auditor.getId(), dev.getId()), secret, workspaceId))
+                .extracting(User::getId).containsExactly(auditor.getId());
+        // La bandeja (la consulta con la función dentro de JPQL) responde sin error
+        assertThat(notificationService.countUnread(auditor.getId()).count()).isZero();
+
+        // Y si «Miembro» recibe el permiso, vale para quien no tiene rol propio
+        roleService.updateMemberPermissions(slug, pm.getId(), new RolePermissionsRequest(List.of("PROJECT_VIEW_ALL")));
+        assertThat(value("SELECT sees_all_projects('" + workspaceId + "', '" + dev.getId() + "')")).isEqualTo("t");
+        login(dev);
+        assertThat(workspaceSecurity.canAccessProject(slug, secret)).isTrue();
+    }
+
+    @Test
+    void quienAbreLaInvitacionVeConQueRolEntra() {
+        RoleResponse guestRole = roleService.create(slug, pm.getId(), new RoleRequest("Invitado", null, List.of()));
+        String token = "tok-" + UUID.randomUUID();
+        sql("INSERT INTO workspace_invitations (id, workspace_id, email, role, custom_role_id, token_hash, invited_by_id, "
+                + "expires_at, accepted) VALUES (gen_random_uuid(), '" + workspaceId + "', 'x-" + UUID.randomUUID()
+                + "@test.com', 'MEMBER', '" + guestRole.id() + "', '" + TokenUtils.sha256(token) + "', '" + pm.getId()
+                + "', now() + interval '7 days', false)");
+
+        assertThat(invitationService.getDetails(token).roleName()).isEqualTo("Invitado");
+        roleService.delete(slug, pm.getId(), guestRole.id());
+        assertThat(invitationService.getDetails(token).roleName()).isEqualTo("Miembro");
     }
 
     // ----- Utilidades -----

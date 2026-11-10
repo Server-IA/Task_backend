@@ -92,6 +92,7 @@ class ReportServiceImplTest {
         service = new ReportServiceImpl(issueRepository, stateRepository, labelRepository, cycleRepository,
                 moduleRepository, userRepository, lookup, new AppProperties(null, null, null, "America/Bogota", null));
         Workspace workspace = new Workspace();
+        workspace.setId(UUID.randomUUID());
         workspace.setName("Equipo Producto");
         project = new Project();
         project.setId(UUID.randomUUID());
@@ -218,7 +219,8 @@ class ReportServiceImplTest {
     @Test
     void describeLosFiltrosConNombres() {
         UUID goneState = UUID.randomUUID();
-        when(userRepository.findAllById(List.of(luis.getId()))).thenReturn(List.of(luis));
+        when(userRepository.findAllByIdInWorkspace(List.of(luis.getId()), project.getWorkspace().getId()))
+                .thenReturn(List.of(luis));
         when(cycleRepository.findByIdAndProjectId(any(), any())).thenReturn(Optional.empty());
 
         List<FilterLine> filters = build(

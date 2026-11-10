@@ -53,4 +53,7 @@ public interface WorkspaceInvitationRepository extends JpaRepository<WorkspaceIn
     @Modifying
     @Query("delete from WorkspaceInvitation i where i.expiresAt < :now")
     int deleteExpired(@Param("now") Instant now);
+
+    /** Invitaciones sin aceptar que entrarían con ese rol del workspace. */
+    long countByCustomRoleIdAndAcceptedFalse(UUID customRoleId);
 }

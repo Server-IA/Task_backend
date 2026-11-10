@@ -194,7 +194,9 @@ public class ReportServiceImpl implements ReportService {
                     .toList())));
         }
         if (hasValues(filter.assignee())) {
-            List<String> names = userRepository.findAllById(filter.assignee()).stream()
+            // Solo gente del workspace: un id de fuera no revela el nombre de esa persona
+            List<String> names = userRepository
+                    .findAllByIdInWorkspace(filter.assignee(), project.getWorkspace().getId()).stream()
                     .map(User::getFullName)
                     .sorted(BY_NAME)
                     .toList();

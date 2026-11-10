@@ -22,7 +22,7 @@ public record DailySettingsRequest(
 
         @Valid
         @Size(max = 200, message = "No puede haber más de 200 tiempos por persona")
-        List<PersonTime> personTimes,
+        List<@NotNull(message = "Un tiempo por persona no puede estar vacío") @Valid PersonTime> personTimes,
 
         @Valid
         @NotNull(message = "Indica qué bloques se exponen")

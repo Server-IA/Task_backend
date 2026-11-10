@@ -183,10 +183,10 @@ class ControllerPermissionsTest {
         rule(IssueController.class, "update", inProject(Permission.ISSUE_EDIT));
         rule(IssueController.class, "move", inProject(Permission.ISSUE_EDIT));
         rule(IssueController.class, "delete", ACCESS);
-        // Comentarios: borrar lo valida el servicio (el autor, o quien puede borrar los de otros)
+        // Comentarios: editar el propio y borrar los valida el servicio (el autor, o quien puede borrar los de otros)
         rule(CommentController.class, "getComments", ACCESS);
         rule(CommentController.class, "create", inProject(Permission.COMMENT_CREATE));
-        rule(CommentController.class, "update", inProject(Permission.COMMENT_CREATE));
+        rule(CommentController.class, "update", ACCESS);
         rule(CommentController.class, "delete", ACCESS);
         // Dependencias y checklist
         rule(IssueRelationController.class, "getRelations", ACCESS);

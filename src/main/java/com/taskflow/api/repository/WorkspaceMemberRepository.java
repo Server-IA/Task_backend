@@ -60,6 +60,8 @@ public interface WorkspaceMemberRepository extends JpaRepository<WorkspaceMember
             """)
     List<Object[]> countByCustomRole(@Param("workspaceId") UUID workspaceId);
 
+    long countByCustomRoleId(UUID customRoleId);
+
     /** Cuántas personas tienen ese rol base sin rol propio (los project managers, o quienes usan «Miembro»). */
     @Query("select count(m) from WorkspaceMember m where m.workspace.id = :workspaceId and m.role = :role "
             + "and m.customRole is null")

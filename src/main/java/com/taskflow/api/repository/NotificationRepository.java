@@ -20,20 +20,18 @@ import java.util.UUID;
 public interface NotificationRepository extends JpaRepository<Notification, UUID> {
 
     /**
-     * Solo las de proyectos que el destinatario puede ver todavía (miembro del proyecto o project manager del
-     * workspace): las de un proyecto o workspace del que lo quitaron no se muestran ni cuentan.
+     * Solo las de proyectos que el destinatario puede ver todavía (miembro del proyecto, o ve todos los del workspace:
+     * project manager o permiso {@code PROJECT_VIEW_ALL}, con la función {@code sees_all_projects}): las de un proyecto
+     * o workspace del que lo quitaron no se muestran ni cuentan. Las del workspace (el almacenamiento) siguen siendo de
+     * los project managers.
      */
     String ACCESSIBLE = """
             (n.issue is null or exists (select 1 from Issue i where i = n.issue and (
                 exists (select 1 from ProjectMember pm where pm.project = i.project and pm.user.id = :recipientId)
-                or exists (select 1 from WorkspaceMember wm where wm.workspace = i.project.workspace
-                           and wm.user.id = :recipientId
-                           and wm.role = com.taskflow.api.entity.enums.WorkspaceRole.OWNER))))
+                or function('sees_all_projects', i.project.workspace.id, :recipientId) = true)))
             and (n.cycle is null or exists (select 1 from Cycle c where c = n.cycle and (
                 exists (select 1 from ProjectMember pm where pm.project = c.project and pm.user.id = :recipientId)
-                or exists (select 1 from WorkspaceMember wm where wm.workspace = c.project.workspace
-                           and wm.user.id = :recipientId
-                           and wm.role = com.taskflow.api.entity.enums.WorkspaceRole.OWNER))))
+                or function('sees_all_projects', c.project.workspace.id, :recipientId) = true)))
             and (n.workspace is null or exists (select 1 from WorkspaceMember wm where wm.workspace = n.workspace
                            and wm.user.id = :recipientId
                            and wm.role = com.taskflow.api.entity.enums.WorkspaceRole.OWNER))

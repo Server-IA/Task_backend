@@ -75,15 +75,16 @@ public interface StoredFileRepository extends JpaRepository<StoredFile, UUID> {
     List<StoredFile> findReadyByIds(@Param("ids") Collection<UUID> ids);
 
     /**
-     * De esos proyectos, los que el usuario puede ver: es miembro de su workspace y además project manager de él o
-     * miembro del proyecto (el mismo criterio que {@code WorkspaceSecurity.canAccessProject}).
+     * De esos proyectos, los que el usuario puede ver: es miembro de su workspace y además ve todos sus proyectos
+     * (project manager, o con el permiso {@code PROJECT_VIEW_ALL}: la función {@code sees_all_projects}) o es miembro
+     * del proyecto. El mismo criterio que {@code WorkspaceSecurity.canAccessProject}.
      */
     @Query(value = """
             SELECT p.id FROM projects p
             WHERE p.id IN (:projectIds)
               AND EXISTS (SELECT 1 FROM workspace_members wm
                           WHERE wm.workspace_id = p.workspace_id AND wm.user_id = :userId
-                            AND (wm.role = 'OWNER'
+                            AND (sees_all_projects(p.workspace_id, :userId)
                                  OR EXISTS (SELECT 1 FROM project_members pm
                                             WHERE pm.project_id = p.id AND pm.user_id = :userId)))
             """, nativeQuery = true)

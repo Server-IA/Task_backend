@@ -112,7 +112,9 @@ public class IssueServiceImpl implements IssueService {
     public IssueResponse create(String slug, UUID projectId, UUID userId, CreateIssueRequest request) {
         Project project = lookup.project(slug, projectId);
         IssueType type = request.type() != null ? request.type() : IssueType.TASK;
-        // Una historia pide el permiso de gestionar historias; una tarea o un bug, el de crear tareas
+        // Una historia pide el permiso de gestionar historias; una tarea o un bug, el de crear tareas. El checklist y la
+        // relación con los que nace la tarea (los de su plantilla, «crear tarea relacionada») son parte de crearla: los
+        // permisos del checklist y de las dependencias valen para cambiar los de una tarea que ya existe
         if (type == IssueType.STORY && !can(slug, userId, Permission.STORY_MANAGE)) {
             throw new ForbiddenException(StoryRules.CREATE_FORBIDDEN);
         }
