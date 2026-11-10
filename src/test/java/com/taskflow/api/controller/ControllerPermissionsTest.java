@@ -196,6 +196,9 @@ class ControllerPermissionsTest {
         // Sus ajustes (tiempos, bloques y puntos a tratar) los ve cualquiera del proyecto y los cambia el project manager
         rule(DailyController.class, "getSettings", ACCESS);
         rule(DailyController.class, "saveSettings", MANAGE);
+        // Reportes en PDF: cualquiera del proyecto
+        rule(ReportController.class, "previewIssues", ACCESS);
+        rule(ReportController.class, "issuesPdf", ACCESS);
         // Endpoints nuevos
         rule(ProjectStatsController.class, "getStats", ACCESS);
         rule(MyWorkController.class, "getMyWork", MEMBER);

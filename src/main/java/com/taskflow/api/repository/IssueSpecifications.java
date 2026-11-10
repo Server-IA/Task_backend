@@ -14,6 +14,8 @@ import jakarta.persistence.criteria.Root;
 import jakarta.persistence.criteria.Subquery;
 import org.springframework.data.jpa.domain.Specification;
 
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -64,6 +66,39 @@ public final class IssueSpecifications {
             }
             if (filter.search() != null && !filter.search().isBlank()) {
                 predicates.add(searchPredicate(root, cb, filter.search().trim(), false));
+            }
+            return cb.and(predicates.toArray(Predicate[]::new));
+        };
+    }
+
+    /**
+     * Tareas creadas en {@code [from, toExclusive)}; un extremo {@code null} deja ese lado abierto (los reportes).
+     */
+    public static Specification<Issue> createdBetween(Instant from, Instant toExclusive) {
+        return (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            if (from != null) {
+                predicates.add(cb.greaterThanOrEqualTo(root.get("createdAt"), from));
+            }
+            if (toExclusive != null) {
+                predicates.add(cb.lessThan(root.get("createdAt"), toExclusive));
+            }
+            return cb.and(predicates.toArray(Predicate[]::new));
+        };
+    }
+
+    /**
+     * Tareas con fecha límite entre {@code from} y {@code to}, los dos inclusive; un extremo {@code null} deja ese
+     * lado abierto. Con algún extremo, las tareas sin fecha límite quedan fuera.
+     */
+    public static Specification<Issue> dueBetween(LocalDate from, LocalDate to) {
+        return (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            if (from != null) {
+                predicates.add(cb.greaterThanOrEqualTo(root.get("dueDate"), from));
+            }
+            if (to != null) {
+                predicates.add(cb.lessThanOrEqualTo(root.get("dueDate"), to));
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };

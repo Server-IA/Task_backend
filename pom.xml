@@ -25,6 +25,7 @@
         <springdoc.version>3.1.1</springdoc.version>
         <resend.version>4.29.0</resend.version>
         <awssdk.version>2.56.0</awssdk.version>
+        <openpdf.version>2.4.0</openpdf.version>
     </properties>
 
     <dependencyManagement>
@@ -135,6 +136,13 @@
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>url-connection-client</artifactId>
+        </dependency>
+
+        <!-- Reportes en PDF (se arman en el servidor) -->
+        <dependency>
+            <groupId>com.github.librepdf</groupId>
+            <artifactId>openpdf</artifactId>
+            <version>${openpdf.version}</version>
         </dependency>
 
         <!-- Documentación -->
