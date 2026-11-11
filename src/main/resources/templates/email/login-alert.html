@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org" lang="es"
-      th:replace="~{email/layout :: layout('~/correo/seguridad', |Nuevo inicio de sesión desde ${device}.|, ~{::content})}">
+      th:replace="~{email/layout :: layout(#{security.meta}, #{login.preheader(${device})}, ~{::content})}">
 <body>
 <div th:fragment="content">
-    <div th:replace="~{email/parts :: heading('>_', 'accent', 'Nuevo inicio de sesión')}"></div>
+    <div th:replace="~{email/parts :: heading('>_', 'accent', #{login.title})}"></div>
     <p class="tf-muted" style="margin:12px 0 0;color:#67615A;">
-        Hola <strong class="tf-ink" style="color:#23201B;" th:text="${name}">Ana</strong>, detectamos un nuevo
-        inicio de sesión en tu cuenta:
+        <th:block th:text="#{greeting}">Hola</th:block> <strong class="tf-ink" style="color:#23201B;" th:text="${name}">Ana</strong><th:block th:text="#{login.intro}">, detectamos un nuevo
+        inicio de sesión en tu cuenta:</th:block>
     </p>
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:18px;">
@@ -14,17 +14,17 @@
             <td class="tf-panel" style="padding:6px 16px;background-color:#F8F7F4;border:1px solid #E6E2DA;border-radius:12px;">
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;">
                     <tr>
-                        <td class="tf-muted" width="96" style="padding:8px 12px 8px 0;color:#67615A;">Fecha</td>
+                        <td class="tf-muted" width="96" style="padding:8px 12px 8px 0;color:#67615A;" th:text="#{login.date}">Fecha</td>
                         <td class="tf-ink" style="padding:8px 0;color:#23201B;" th:text="${date}">1 de enero de 2026, 10:00 a. m.</td>
                     </tr>
                     <tr>
-                        <td class="tf-muted tf-line" style="padding:8px 12px 8px 0;border-top:1px solid #E6E2DA;color:#67615A;">IP</td>
+                        <td class="tf-muted tf-line" style="padding:8px 12px 8px 0;border-top:1px solid #E6E2DA;color:#67615A;" th:text="#{login.ip}">IP</td>
                         <td class="tf-ink tf-line"
                             style="padding:8px 0;border-top:1px solid #E6E2DA;font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;color:#23201B;"
                             th:text="${ip}">127.0.0.1</td>
                     </tr>
                     <tr>
-                        <td class="tf-muted tf-line" style="padding:8px 12px 8px 0;border-top:1px solid #E6E2DA;color:#67615A;">Dispositivo</td>
+                        <td class="tf-muted tf-line" style="padding:8px 12px 8px 0;border-top:1px solid #E6E2DA;color:#67615A;" th:text="#{login.device}">Dispositivo</td>
                         <td class="tf-ink tf-line" style="padding:8px 0;border-top:1px solid #E6E2DA;color:#23201B;" th:text="${device}">Chrome en Windows</td>
                     </tr>
                 </table>
@@ -32,8 +32,8 @@
         </tr>
     </table>
 
-    <p class="tf-muted" style="margin:18px 0 0;color:#67615A;">Si fuiste tú, no tienes que hacer nada.</p>
-    <div th:replace="~{email/parts :: notYou(${link}, 'Cambia tu contraseña')}"></div>
+    <p class="tf-muted" style="margin:18px 0 0;color:#67615A;" th:text="#{login.itWasYou}">Si fuiste tú, no tienes que hacer nada.</p>
+    <div th:replace="~{email/parts :: notYou(${link}, #{login.action})}"></div>
 </div>
 </body>
 </html>

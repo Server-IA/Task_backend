@@ -7,6 +7,7 @@ import com.taskflow.api.dto.response.DailyNoteResponse;
 import com.taskflow.api.dto.response.DailyResponse;
 import com.taskflow.api.dto.response.DailyResponse.DailyBlocker;
 import com.taskflow.api.dto.response.DailyResponse.DailyChange;
+import com.taskflow.api.dto.response.DailyResponse.DailyChangeKind;
 import com.taskflow.api.dto.response.DailyResponse.DailyCycle;
 import com.taskflow.api.dto.response.DailyResponse.DailyPerson;
 import com.taskflow.api.dto.response.DailyResponse.DailySummary;
@@ -246,7 +247,7 @@ public class DailyServiceImpl implements DailyService {
         return best.values().stream()
                 .sorted(Comparator.comparingInt(Change::rank).thenComparing(Change::at, Comparator.reverseOrder()))
                 .limit(MAX_ITEMS)
-                .map(change -> new DailyChange(issueMapper.toRelated(change.issue()), change.label(),
+                .map(change -> new DailyChange(issueMapper.toRelated(change.issue()), change.kind(), change.label(),
                         change.fromState(), change.toState()))
                 .toList();
     }
@@ -327,6 +328,17 @@ public class DailyServiceImpl implements DailyService {
 
         Change(Issue issue, String label, int rank, Instant at) {
             this(issue, label, rank, at, null, null);
+        }
+
+        /** La clase de cambio (lo mismo que dice {@code rank}), para que el frontend no dependa del texto. */
+        DailyChangeKind kind() {
+            return switch (rank) {
+                case 0 -> DailyChangeKind.COMPLETED;
+                case 1 -> DailyChangeKind.MOVED;
+                case 2 -> DailyChangeKind.CREATED;
+                case 3 -> DailyChangeKind.COMMENTED;
+                default -> DailyChangeKind.UPDATED;
+            };
         }
 
         static Change of(IssueActivity activity, Map<String, StateGroup> groupByStateName) {

@@ -78,6 +78,7 @@ class ControllerPermissionsTest {
             // Mi perfil y mi contraseña
             "UserController.getProfile",
             "UserController.updateProfile",
+            "UserController.updateLanguage",
             "UserController.changePassword",
             // Mi foto de perfil (subirla, confirmarla y quitarla)
             "UserController.startAvatarUpload",

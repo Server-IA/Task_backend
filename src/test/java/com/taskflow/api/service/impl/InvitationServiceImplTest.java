@@ -80,7 +80,7 @@ class InvitationServiceImplTest {
                 new InviteMemberRequest("Victima@Test.com")))
                 .isInstanceOf(TooManyRequestsException.class);
         verify(emailNotifier, times(RateLimitRule.INVITE_RECIPIENT.getCapacity()))
-                .sendWorkspaceInvitation(any(), any(), any(), any());
+                .sendWorkspaceInvitation(any(), any(), any(), any(), any());
     }
 
     @Test

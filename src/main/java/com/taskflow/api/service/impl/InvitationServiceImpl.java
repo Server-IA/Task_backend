@@ -15,6 +15,7 @@ import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.exception.ResourceNotFoundException;
+import com.taskflow.api.i18n.Language;
 import com.taskflow.api.mapper.WorkspaceMapper;
 import com.taskflow.api.ratelimit.RateLimitRule;
 import com.taskflow.api.ratelimit.RateLimitService;
@@ -101,7 +102,11 @@ public class InvitationServiceImpl implements InvitationService {
         invitation.setExpiresAt(Instant.now().plus(Duration.ofDays(properties.tokens().invitationDays())));
         invitationRepository.save(invitation);
 
-        emailNotifier.sendWorkspaceInvitation(email, inviter.getFullName(), workspace.getName(), rawToken);
+        // En el idioma de la persona invitada si ya tiene cuenta y lo eligió; si no, en el de quien invita
+        Language language = lookup.findUserByEmail(email)
+                .map(user -> Language.fromCode(user.getLanguage()))
+                .orElse(null);
+        emailNotifier.sendWorkspaceInvitation(email, inviter.getFullName(), workspace.getName(), rawToken, language);
         return workspaceMapper.toInvitationResponse(invitation);
     }
 

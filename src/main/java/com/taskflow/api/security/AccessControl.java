@@ -6,6 +6,7 @@ import com.taskflow.api.entity.WorkspaceMember;
 import com.taskflow.api.entity.enums.Permission;
 import com.taskflow.api.entity.enums.WorkspaceRole;
 import com.taskflow.api.exception.ForbiddenException;
+import com.taskflow.api.i18n.Language;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -29,6 +30,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AccessControl {
 
+    /** Nombres de los dos roles de fábrica (en español; se muestran en el idioma de la petición). */
     public static final String MANAGER_ROLE_NAME = "Project manager";
     public static final String MEMBER_ROLE_NAME = "Miembro";
 
@@ -59,32 +61,56 @@ public class AccessControl {
 
         public static Access of(WorkspaceMember member) {
             if (member.getRole().isManager()) {
-                return new Access(WorkspaceRole.OWNER, null, MANAGER_ROLE_NAME, Permission.ALL);
+                return new Access(WorkspaceRole.OWNER, null, managerRoleName(), Permission.ALL);
             }
             CustomRole custom = member.getCustomRole();
             if (custom != null) {
                 return new Access(WorkspaceRole.MEMBER, custom.getId(), custom.getName(), custom.permissionSet());
             }
-            return new Access(WorkspaceRole.MEMBER, null, MEMBER_ROLE_NAME, member.getWorkspace().memberPermissionSet());
+            return new Access(WorkspaceRole.MEMBER, null, memberRoleName(), member.getWorkspace().memberPermissionSet());
         }
 
         /** El de quien acaba de crear el workspace: project manager. */
         public static Access manager() {
-            return new Access(WorkspaceRole.OWNER, null, MANAGER_ROLE_NAME, Permission.ALL);
+            return new Access(WorkspaceRole.OWNER, null, managerRoleName(), Permission.ALL);
         }
     }
 
-    /** Nombre del rol de un miembro como se muestra: el de fábrica o el del rol creado por el workspace. */
+    /** «Project manager», en el idioma de la petición. */
+    public static String managerRoleName() {
+        return Language.current().t(MANAGER_ROLE_NAME);
+    }
+
+    /** «Miembro» («Member» en inglés), en el idioma de la petición. */
+    public static String memberRoleName() {
+        return Language.current().t(MEMBER_ROLE_NAME);
+    }
+
+    /** Si el nombre es el de un rol de fábrica en cualquiera de los idiomas (sin importar mayúsculas). */
+    public static boolean isFactoryRoleName(String name) {
+        for (Language language : Language.values()) {
+            if (name.equalsIgnoreCase(language.t(MANAGER_ROLE_NAME))
+                    || name.equalsIgnoreCase(language.t(MEMBER_ROLE_NAME))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Nombre del rol de un miembro como se muestra: el de fábrica (en el idioma de la petición) o el del rol creado
+     * por el workspace.
+     */
     public static String roleName(WorkspaceMember member) {
         if (member.getRole().isManager()) {
-            return MANAGER_ROLE_NAME;
+            return managerRoleName();
         }
-        return member.getCustomRole() != null ? member.getCustomRole().getName() : MEMBER_ROLE_NAME;
+        return member.getCustomRole() != null ? member.getCustomRole().getName() : memberRoleName();
     }
 
     /** Nombre del rol con el que entra una persona invitada. */
     public static String roleName(WorkspaceInvitation invitation) {
-        return invitation.getCustomRole() != null ? invitation.getCustomRole().getName() : MEMBER_ROLE_NAME;
+        return invitation.getCustomRole() != null ? invitation.getCustomRole().getName() : memberRoleName();
     }
 
     /** El acceso de la persona; vacío si no es miembro del workspace. */

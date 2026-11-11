@@ -21,6 +21,7 @@ import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.exception.ResourceNotFoundException;
+import com.taskflow.api.i18n.Language;
 import com.taskflow.api.mapper.PlanningMapper;
 import com.taskflow.api.repository.CycleRepository;
 import com.taskflow.api.repository.IssueRepository;
@@ -257,7 +258,9 @@ public class RetroServiceImpl implements RetroService {
 
     /** Descripción (markdown) que apunta a la retrospectiva; si el título no es el texto completo, lo incluye. */
     static String issueDescription(Cycle cycle, String text, String title) {
-        String description = "Acción acordada en la retrospectiva del ciclo «" + cycle.getName() + "».";
+        // Se guarda en la tarea: queda en el idioma de quien la convierte
+        String description = Language.current().t(
+                "Acción acordada en la retrospectiva del ciclo «" + cycle.getName() + "».");
         return title.equals(text.strip())
                 ? description
                 : description + "\n\n> " + text.strip().replace("\n", "\n> ");

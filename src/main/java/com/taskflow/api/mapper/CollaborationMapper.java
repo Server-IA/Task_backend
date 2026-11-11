@@ -18,11 +18,12 @@ import com.taskflow.api.entity.IssueActivity;
 import com.taskflow.api.entity.Notification;
 import com.taskflow.api.entity.StoredFile;
 import com.taskflow.api.entity.Workspace;
+import com.taskflow.api.i18n.Language;
 import com.taskflow.api.util.MentionParser;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 
-@Mapper(uses = UserMapper.class)
+@Mapper(uses = UserMapper.class, imports = Language.class)
 public interface CollaborationMapper {
 
     /** Largo máximo del extracto del comentario de una notificación. */
@@ -36,6 +37,11 @@ public interface CollaborationMapper {
     @Mapping(target = "project", source = "issue.project")
     ActivityFeedItemResponse toFeedItem(IssueActivity activity);
 
+    /**
+     * El mensaje se guarda redactado en español; al leerlo sale en el idioma de la petición (los patrones de
+     * {@code i18n/en.json}).
+     */
+    @Mapping(target = "message", expression = "java(Language.current().t(notification.getMessage()))")
     NotificationResponse toNotificationResponse(Notification notification);
 
     @Mapping(target = "projectId", source = "project.id")

@@ -5,6 +5,7 @@ import com.taskflow.api.dto.response.UserResponse;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ResourceNotFoundException;
+import com.taskflow.api.i18n.Language;
 import com.taskflow.api.mapper.FileMapper;
 import com.taskflow.api.mapper.UserMapper;
 import com.taskflow.api.repository.UserRepository;
@@ -47,6 +48,18 @@ public class UserServiceImpl implements UserService {
             // La foto subida que tenía ya no se usa
             fileService.deleteAvatars(userId);
         }
+        return userMapper.toResponse(user);
+    }
+
+    @Override
+    @Transactional
+    public UserResponse updateLanguage(UUID userId, String language) {
+        Language chosen = Language.fromCode(language);
+        if (chosen == null) {
+            throw BadRequestException.forField("language", "El idioma debe ser es o en");
+        }
+        User user = findUser(userId);
+        user.setLanguage(chosen.code());
         return userMapper.toResponse(user);
     }
 

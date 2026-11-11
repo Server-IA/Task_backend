@@ -44,4 +44,8 @@ public class User extends BaseEntity {
      */
     @Column(name = "credentials_version", nullable = false)
     private int credentialsVersion;
+
+    /** Idioma que eligió para la aplicación y sus correos: «es» o «en»; {@code null} si nunca lo eligió. */
+    @Column(length = 5)
+    private String language;
 }

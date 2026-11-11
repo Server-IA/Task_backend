@@ -13,6 +13,8 @@ import com.taskflow.api.entity.enums.IssuePriority;
 import com.taskflow.api.entity.enums.IssueType;
 import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.exception.BadRequestException;
+import com.taskflow.api.i18n.Language;
+import com.taskflow.api.i18n.StateNames;
 import com.taskflow.api.report.IssuesReport;
 import com.taskflow.api.report.IssuesReport.Count;
 import com.taskflow.api.report.IssuesReport.FilterLine;
@@ -46,13 +48,15 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
 /**
  * Arma el reporte de tareas: aplica los filtros del listado y los rangos de fechas, resuelve los nombres de lo que
  * se filtró, cuenta y agrupa en memoria (un reporte trae como mucho {@link IssuesReport#MAX_ISSUES} tareas).
+ * <p>
+ * Los textos que redacta (prioridades, tipos, «Sin asignar», nombres de filtros, fechas) y los nombres de los estados
+ * de fábrica ({@link StateNames}) van en el idioma de la petición.
  */
 @Service
 @RequiredArgsConstructor
@@ -61,8 +65,6 @@ public class ReportServiceImpl implements ReportService {
     static final String UNASSIGNED = "Sin asignar";
     static final String GONE = "(ya no existe)";
 
-    private static final Locale SPANISH = Locale.forLanguageTag("es");
-    private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("d MMM yyyy", SPANISH);
     private static final Comparator<String> BY_NAME = String.CASE_INSENSITIVE_ORDER;
 
     private static final Map<IssuePriority, String> PRIORITY_LABELS = Map.of(
@@ -89,7 +91,7 @@ public class ReportServiceImpl implements ReportService {
     @Transactional(readOnly = true)
     public IssuesReportPreview previewIssues(String slug, UUID projectId, UUID userId, IssueFilter filter,
                                              ReportOptions options) {
-        IssuesReport report = build(slug, projectId, userId, filter, options);
+        IssuesReport report = build(slug, projectId, userId, filter, options, Language.current());
         return new IssuesReportPreview(report.totalMatching(), report.truncated(), IssuesReport.MAX_ISSUES,
                 report.totals(), report.byState(), report.byPriority(), report.byAssignee(), report.byType());
     }
@@ -100,14 +102,16 @@ public class ReportServiceImpl implements ReportService {
         if (!options.includeSummary() && !options.includeIssues()) {
             throw new BadRequestException("El reporte debe incluir el resumen, el listado o ambos");
         }
-        IssuesReport report = build(slug, projectId, userId, filter, options);
+        Language language = Language.current();
+        IssuesReport report = build(slug, projectId, userId, filter, options, language);
         String day = LocalDate.ofInstant(report.generatedAt(), report.zone()).toString();
         // El identificador solo tiene letras y números: sirve tal cual en el nombre del archivo
-        String fileName = "reporte-tareas-" + report.identifier() + "-" + day + ".pdf";
-        return new ReportFile(fileName, IssuesReportPdf.render(report));
+        String fileName = language.t("reporte-tareas") + "-" + report.identifier() + "-" + day + ".pdf";
+        return new ReportFile(fileName, IssuesReportPdf.render(report, language));
     }
 
-    IssuesReport build(String slug, UUID projectId, UUID userId, IssueFilter filter, ReportOptions options) {
+    IssuesReport build(String slug, UUID projectId, UUID userId, IssueFilter filter, ReportOptions options,
+                       Language language) {
         Project project = lookup.project(slug, projectId);
         ZoneId zone = ZoneId.of(properties.timezone());
         checkRange(options.createdFrom(), options.createdTo(), "creación");
@@ -131,13 +135,13 @@ public class ReportServiceImpl implements ReportService {
                 lookup.user(userId).getFullName(),
                 Instant.now(),
                 zone,
-                filterLines(project, filter, options, states),
+                filterLines(project, filter, options, states, language),
                 totals(issues, today),
-                byState(issues, states),
-                byPriority(issues),
-                byAssignee(issues),
-                byType(issues),
-                groups(issues, states, options.groupByOrDefault(), today),
+                byState(issues, states, language),
+                byPriority(issues, language),
+                byAssignee(issues, language),
+                byType(issues, language),
+                groups(issues, states, options.groupByOrDefault(), today, language),
                 page.getTotalElements(),
                 page.getTotalElements() > issues.size(),
                 options);
@@ -171,26 +175,28 @@ public class ReportServiceImpl implements ReportService {
 
     // ---------------------------------------------------------------- filtros legibles
 
-    private List<FilterLine> filterLines(Project project, IssueFilter filter, ReportOptions options, List<State> states) {
+    private List<FilterLine> filterLines(Project project, IssueFilter filter, ReportOptions options, List<State> states,
+                                         Language language) {
         List<FilterLine> lines = new ArrayList<>();
         if (hasValues(filter.state())) {
             // En el orden del tablero; un estado borrado después de armar el enlace se avisa
             List<String> names = states.stream()
                     .filter(state -> filter.state().contains(state.getId()))
-                    .map(State::getName)
+                    .map(state -> StateNames.display(state.getName(), language))
                     .toList();
-            lines.add(new FilterLine("Estado", joined(names, filter.state().size())));
+            lines.add(new FilterLine(language.t("Estado"), joined(names, filter.state().size(), language)));
         }
         if (hasValues(filter.priority())) {
-            lines.add(new FilterLine("Prioridad", String.join(", ", IssuePriorityOrder.sorted(filter.priority()).stream()
-                    .map(PRIORITY_LABELS::get)
-                    .toList())));
+            lines.add(new FilterLine(language.t("Prioridad"), String.join(", ",
+                    IssuePriorityOrder.sorted(filter.priority()).stream()
+                            .map(priority -> language.t(PRIORITY_LABELS.get(priority)))
+                            .toList())));
         }
         if (hasValues(filter.type())) {
-            lines.add(new FilterLine("Tipo", String.join(", ", filter.type().stream()
+            lines.add(new FilterLine(language.t("Tipo"), String.join(", ", filter.type().stream()
                     .distinct()
                     .sorted()
-                    .map(TYPE_LABELS::get)
+                    .map(type -> language.t(TYPE_LABELS.get(type)))
                     .toList())));
         }
         if (hasValues(filter.assignee())) {
@@ -200,55 +206,61 @@ public class ReportServiceImpl implements ReportService {
                     .map(User::getFullName)
                     .sorted(BY_NAME)
                     .toList();
-            lines.add(new FilterLine("Asignado", joined(names, filter.assignee().size())));
+            lines.add(new FilterLine(language.t("Asignado"), joined(names, filter.assignee().size(), language)));
         }
         if (hasValues(filter.label())) {
             List<String> names = labelRepository.findAllByProjectIdAndIdIn(project.getId(), filter.label()).stream()
                     .map(Label::getName)
                     .sorted(BY_NAME)
                     .toList();
-            lines.add(new FilterLine("Etiqueta", joined(names, filter.label().size())));
+            lines.add(new FilterLine(language.t("Etiqueta"), joined(names, filter.label().size(), language)));
         }
         if (filter.cycle() != null) {
-            lines.add(new FilterLine("Ciclo", cycleRepository.findByIdAndProjectId(filter.cycle(), project.getId())
-                    .map(cycle -> cycle.getName())
-                    .orElse(GONE)));
+            lines.add(new FilterLine(language.t("Ciclo"),
+                    cycleRepository.findByIdAndProjectId(filter.cycle(), project.getId())
+                            .map(cycle -> cycle.getName())
+                            .orElse(language.t(GONE))));
         }
         if (filter.module() != null) {
-            lines.add(new FilterLine("Módulo", moduleRepository.findByIdAndProjectId(filter.module(), project.getId())
-                    .map(module -> module.getName())
-                    .orElse(GONE)));
+            lines.add(new FilterLine(language.t("Módulo"),
+                    moduleRepository.findByIdAndProjectId(filter.module(), project.getId())
+                            .map(module -> module.getName())
+                            .orElse(language.t(GONE))));
         }
         if (filter.blocked() != null) {
-            lines.add(new FilterLine("Bloqueo", filter.blocked() ? "solo bloqueadas" : "solo las que no están bloqueadas"));
+            lines.add(new FilterLine(language.t("Bloqueo"),
+                    language.t(filter.blocked() ? "solo bloqueadas" : "solo las que no están bloqueadas")));
         }
         if (filter.search() != null && !filter.search().isBlank()) {
-            lines.add(new FilterLine("Búsqueda", "«" + filter.search().trim() + "»"));
+            lines.add(new FilterLine(language.t("Búsqueda"), language.t("«" + filter.search().trim() + "»")));
         }
-        rangeText(options.createdFrom(), options.createdTo())
-                .ifPresent(text -> lines.add(new FilterLine("Creadas", text)));
-        rangeText(options.dueFrom(), options.dueTo())
-                .ifPresent(text -> lines.add(new FilterLine("Fecha límite", text)));
+        rangeText(options.createdFrom(), options.createdTo(), language)
+                .ifPresent(text -> lines.add(new FilterLine(language.t("Creadas"), text)));
+        rangeText(options.dueFrom(), options.dueTo(), language)
+                .ifPresent(text -> lines.add(new FilterLine(language.t("Fecha límite"), text)));
         return lines;
     }
 
     /** «a, b» y, si alguno de los pedidos ya no existe, «a, b (ya no existe)». */
-    private static String joined(List<String> names, int requested) {
+    private static String joined(List<String> names, int requested, Language language) {
         if (names.isEmpty()) {
-            return GONE;
+            return language.t(GONE);
         }
         String text = String.join(", ", names);
-        return names.size() < requested ? text + " " + GONE : text;
+        return names.size() < requested ? text + " " + language.t(GONE) : text;
     }
 
-    private static java.util.Optional<String> rangeText(LocalDate from, LocalDate to) {
+    /** «del 1 nov 2026 al 10 nov 2026», «desde el…» o «hasta el…», con las fechas en el formato del idioma. */
+    private static java.util.Optional<String> rangeText(LocalDate from, LocalDate to, Language language) {
         if (from == null && to == null) {
             return java.util.Optional.empty();
         }
+        DateTimeFormatter day = IssuesReportPdf.dayFormat(language);
         if (from != null && to != null) {
-            return java.util.Optional.of("del " + DAY.format(from) + " al " + DAY.format(to));
+            return java.util.Optional.of(language.t("del " + day.format(from) + " al " + day.format(to)));
         }
-        return java.util.Optional.of(from != null ? "desde el " + DAY.format(from) : "hasta el " + DAY.format(to));
+        return java.util.Optional.of(language.t(
+                from != null ? "desde el " + day.format(from) : "hasta el " + day.format(to)));
     }
 
     // ---------------------------------------------------------------- conteos
@@ -278,39 +290,39 @@ public class ReportServiceImpl implements ReportService {
         return issue.getState().getStateGroup().isOpen() && issue.getDueDate() != null && issue.getDueDate().isBefore(today);
     }
 
-    private static List<Count> byState(List<Issue> issues, List<State> states) {
+    private static List<Count> byState(List<Issue> issues, List<State> states, Language language) {
         return states.stream()
-                .map(state -> new Count(state.getName(), (int) issues.stream()
+                .map(state -> new Count(StateNames.display(state.getName(), language), (int) issues.stream()
                         .filter(issue -> issue.getState().getId().equals(state.getId()))
                         .count()))
                 .filter(count -> count.count() > 0)
                 .toList();
     }
 
-    private static List<Count> byPriority(List<Issue> issues) {
+    private static List<Count> byPriority(List<Issue> issues, Language language) {
         List<Count> counts = new ArrayList<>();
         for (IssuePriority priority : IssuePriority.values()) {
             int count = (int) issues.stream().filter(issue -> issue.getPriority() == priority).count();
             if (count > 0) {
-                counts.add(new Count(PRIORITY_LABELS.get(priority), count));
+                counts.add(new Count(language.t(PRIORITY_LABELS.get(priority)), count));
             }
         }
         return counts;
     }
 
-    private static List<Count> byType(List<Issue> issues) {
+    private static List<Count> byType(List<Issue> issues, Language language) {
         List<Count> counts = new ArrayList<>();
         for (IssueType type : IssueType.values()) {
             int count = (int) issues.stream().filter(issue -> issue.getType() == type).count();
             if (count > 0) {
-                counts.add(new Count(TYPE_LABELS.get(type), count));
+                counts.add(new Count(language.t(TYPE_LABELS.get(type)), count));
             }
         }
         return counts;
     }
 
     /** De más a menos tareas (a igual cantidad, por nombre) y «Sin asignar» al final. */
-    private static List<Count> byAssignee(List<Issue> issues) {
+    private static List<Count> byAssignee(List<Issue> issues, Language language) {
         Map<String, Integer> byName = new LinkedHashMap<>();
         int unassigned = 0;
         for (Issue issue : issues) {
@@ -326,39 +338,40 @@ public class ReportServiceImpl implements ReportService {
                 .sorted(Comparator.comparingInt(Count::count).reversed().thenComparing(Count::name, BY_NAME))
                 .toList());
         if (unassigned > 0) {
-            counts.add(new Count(UNASSIGNED, unassigned));
+            counts.add(new Count(language.t(UNASSIGNED), unassigned));
         }
         return counts;
     }
 
     // ---------------------------------------------------------------- grupos
 
-    static List<Group> groups(List<Issue> issues, List<State> states, ReportOptions.GroupBy groupBy, LocalDate today) {
+    static List<Group> groups(List<Issue> issues, List<State> states, ReportOptions.GroupBy groupBy, LocalDate today,
+                              Language language) {
         if (issues.isEmpty()) {
             return List.of();
         }
         List<Group> groups = new ArrayList<>();
         switch (groupBy) {
-            case NONE -> groups.add(new Group(null, rows(issues, today)));
+            case NONE -> groups.add(new Group(null, rows(issues, today, language)));
             case STATE -> {
                 for (State state : states) {
-                    addGroup(groups, state.getName(), issues.stream()
+                    addGroup(groups, StateNames.display(state.getName(), language), issues.stream()
                             .filter(issue -> issue.getState().getId().equals(state.getId()))
-                            .toList(), today);
+                            .toList(), today, language);
                 }
             }
             case PRIORITY -> {
                 for (IssuePriority priority : IssuePriority.values()) {
-                    addGroup(groups, PRIORITY_LABELS.get(priority), issues.stream()
+                    addGroup(groups, language.t(PRIORITY_LABELS.get(priority)), issues.stream()
                             .filter(issue -> issue.getPriority() == priority)
-                            .toList(), today);
+                            .toList(), today, language);
                 }
             }
             case TYPE -> {
                 for (IssueType type : IssueType.values()) {
-                    addGroup(groups, TYPE_LABELS.get(type), issues.stream()
+                    addGroup(groups, language.t(TYPE_LABELS.get(type)), issues.stream()
                             .filter(issue -> issue.getType() == type)
-                            .toList(), today);
+                            .toList(), today, language);
                 }
             }
             case ASSIGNEE -> {
@@ -373,30 +386,31 @@ public class ReportServiceImpl implements ReportService {
                     addGroup(groups, person.getFullName(), issues.stream()
                             .filter(issue -> issue.getAssignees().stream()
                                     .anyMatch(assignee -> assignee.getId().equals(person.getId())))
-                            .toList(), today);
+                            .toList(), today, language);
                 }
-                addGroup(groups, UNASSIGNED, issues.stream()
+                addGroup(groups, language.t(UNASSIGNED), issues.stream()
                         .filter(issue -> issue.getAssignees().isEmpty())
-                        .toList(), today);
+                        .toList(), today, language);
             }
         }
         return groups;
     }
 
-    private static void addGroup(List<Group> groups, String title, List<Issue> issues, LocalDate today) {
+    private static void addGroup(List<Group> groups, String title, List<Issue> issues, LocalDate today,
+                                 Language language) {
         if (!issues.isEmpty()) {
-            groups.add(new Group(title, rows(issues, today)));
+            groups.add(new Group(title, rows(issues, today, language)));
         }
     }
 
-    private static List<Row> rows(Collection<Issue> issues, LocalDate today) {
+    private static List<Row> rows(Collection<Issue> issues, LocalDate today, Language language) {
         return issues.stream()
                 .map(issue -> new Row(
                         issue.getCode(),
-                        TYPE_LABELS.get(issue.getType()),
+                        language.t(TYPE_LABELS.get(issue.getType())),
                         issue.getTitle(),
-                        issue.getState().getName(),
-                        PRIORITY_LABELS.get(issue.getPriority()),
+                        StateNames.display(issue.getState().getName(), language),
+                        language.t(PRIORITY_LABELS.get(issue.getPriority())),
                         issue.getAssignees().stream().map(User::getFullName).sorted(BY_NAME).toList(),
                         issue.getLabels().stream().map(Label::getName).sorted(BY_NAME).toList(),
                         issue.getDueDate(),

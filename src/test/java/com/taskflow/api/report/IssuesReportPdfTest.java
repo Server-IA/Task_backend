@@ -3,6 +3,7 @@ package com.taskflow.api.report;
 import com.lowagie.text.pdf.PdfReader;
 import com.lowagie.text.pdf.parser.PdfTextExtractor;
 import com.taskflow.api.dto.request.ReportOptions;
+import com.taskflow.api.i18n.Language;
 import com.taskflow.api.report.IssuesReport.Count;
 import com.taskflow.api.report.IssuesReport.FilterLine;
 import com.taskflow.api.report.IssuesReport.Group;
@@ -94,6 +95,30 @@ class IssuesReportPdfTest {
                 .contains("Valentina Ríos, Mateo Herrera")
                 .contains("4 nov 2026")
                 .contains("Página 1 de 1");
+    }
+
+    @Test
+    void enInglesLosTextosFijosYLasFechasSalenEnIngles() throws IOException {
+        byte[] pdf = IssuesReportPdf.render(report(
+                List.of(new FilterLine("State", "Todo, In Progress")),
+                List.of(new Group("In Progress", List.of(row(26, "Tabla del historial con filtros por fecha y estado", true)))),
+                DEFAULTS, false), Language.EN);
+
+        String text = text(pdf);
+        assertThat(text)
+                .contains("Task report")
+                .contains("// APPLIED FILTERS")
+                .contains("// SUMMARY")
+                .contains("OVERDUE")
+                .contains("By person")
+                .contains("TITLE")
+                .contains("by Valentina Ríos")
+                .contains("Nov 4, 2026")
+                .contains("Page 1 of 1")
+                // Lo que escribió la gente no se traduce
+                .contains("Tabla del historial con filtros por fecha y estado")
+                .doesNotContain("Reporte de tareas")
+                .doesNotContain("Página");
     }
 
     @Test

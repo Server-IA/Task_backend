@@ -46,14 +46,14 @@ public class AuthController {
     @PostMapping("/verify-email")
     public MessageResponse verifyEmail(@Valid @RequestBody TokenRequest request) {
         authService.verifyEmail(request.token());
-        return new MessageResponse("Correo verificado. Ya puedes iniciar sesión");
+        return MessageResponse.of("Correo verificado. Ya puedes iniciar sesión");
     }
 
     @Operation(summary = "Reenviar correo de verificación")
     @PostMapping("/resend-verification")
     public MessageResponse resendVerification(@Valid @RequestBody EmailRequest request) {
         authService.resendVerification(request.email());
-        return new MessageResponse("Si la cuenta existe y no está verificada, te enviamos un nuevo correo");
+        return MessageResponse.of("Si la cuenta existe y no está verificada, te enviamos un nuevo correo");
     }
 
     @Operation(summary = "Iniciar sesión", description = "Devuelve accessToken (15 min) y refreshToken (7 días).")
@@ -79,7 +79,7 @@ public class AuthController {
     @PostMapping("/forgot-password")
     public MessageResponse forgotPassword(@Valid @RequestBody EmailRequest request) {
         authService.forgotPassword(request.email());
-        return new MessageResponse("Si el correo está registrado, te enviamos un enlace para restablecer la contraseña");
+        return MessageResponse.of("Si el correo está registrado, te enviamos un enlace para restablecer la contraseña");
     }
 
     @Operation(summary = "Comprobar el enlace para restablecer la contraseña",
@@ -95,6 +95,6 @@ public class AuthController {
     @PostMapping("/reset-password")
     public MessageResponse resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
         authService.resetPassword(request);
-        return new MessageResponse("Contraseña actualizada. Ya puedes iniciar sesión");
+        return MessageResponse.of("Contraseña actualizada. Ya puedes iniciar sesión");
     }
 }

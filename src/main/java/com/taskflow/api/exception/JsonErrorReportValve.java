@@ -1,9 +1,11 @@
 package com.taskflow.api.exception;
 
+import com.taskflow.api.i18n.Language;
 import com.taskflow.api.util.JsonResponseWriter;
 import org.apache.catalina.connector.Request;
 import org.apache.catalina.connector.Response;
 import org.apache.catalina.valves.ErrorReportValve;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 
 import java.io.IOException;
@@ -34,8 +36,10 @@ public class JsonErrorReportValve extends ErrorReportValve {
         HttpStatus status = HttpStatus.resolve(code);
         try {
             response.resetBuffer();
+            // Aquí no pasó ningún filtro: el idioma se lee de la cabecera
             writer.writeError(response, code, ApiErrorController.message(
-                    status != null ? status : HttpStatus.INTERNAL_SERVER_ERROR));
+                    status != null ? status : HttpStatus.INTERNAL_SERVER_ERROR),
+                    Language.fromHeader(request.getHeader(HttpHeaders.ACCEPT_LANGUAGE)));
             response.finishResponse();
         } catch (IOException | IllegalStateException ex) {
             // La conexión ya no admite respuesta: no hay nada más que hacer

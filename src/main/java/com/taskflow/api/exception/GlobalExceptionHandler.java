@@ -38,6 +38,9 @@ import java.util.Map;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    /** {@code code} del 403 de un login con el correo sin verificar. */
+    public static final String EMAIL_NOT_VERIFIED = "EMAIL_NOT_VERIFIED";
+
     static final String INVALID_TEXT_MESSAGE =
             "Datos inválidos: el texto tiene caracteres no permitidos o es demasiado largo";
 
@@ -146,7 +149,9 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(DisabledException.class)
     public ResponseEntity<ErrorResponse> handleDisabled(DisabledException ex) {
-        return build(HttpStatus.FORBIDDEN, "Debes verificar tu correo antes de iniciar sesión");
+        // Con código: el frontend decide con él (ofrecer reenviar el correo), no con el texto
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ErrorResponse.of(HttpStatus.FORBIDDEN.value(),
+                "Debes verificar tu correo antes de iniciar sesión", null, EMAIL_NOT_VERIFIED));
     }
 
     @ExceptionHandler(LockedException.class)

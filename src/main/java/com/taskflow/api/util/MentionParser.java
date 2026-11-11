@@ -1,5 +1,7 @@
 package com.taskflow.api.util;
 
+import com.taskflow.api.i18n.Language;
+
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -28,6 +30,7 @@ public final class MentionParser {
 
     /**
      * El texto en una línea, con cada mención como {@code @Nombre}, cada imagen subida como {@code [imagen: nombre]}
+     * ({@code [image: nombre]} si la petición es en inglés)
      * y los espacios seguidos reducidos a uno, cortado con «…» si supera {@code maxLength} caracteres; {@code null} si
      * el texto es {@code null}.
      */
@@ -35,8 +38,10 @@ public final class MentionParser {
         if (body == null) {
             return null;
         }
+        // «imagen» en el idioma de la petición: el extracto se arma al leer
+        String image = Language.current().t("imagen");
         String withImages = IMAGE.matcher(body).replaceAll(match -> Matcher.quoteReplacement(
-                match.group(1).isBlank() ? "[imagen]" : "[imagen: " + match.group(1).strip() + "]"));
+                match.group(1).isBlank() ? "[" + image + "]" : "[" + image + ": " + match.group(1).strip() + "]"));
         String text = MENTION.matcher(withImages)
                 .replaceAll(match -> Matcher.quoteReplacement("@" + match.group(1)))
                 .replaceAll("\\s+", " ")

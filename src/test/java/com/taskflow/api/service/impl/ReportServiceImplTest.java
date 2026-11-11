@@ -14,6 +14,7 @@ import com.taskflow.api.entity.enums.IssuePriority;
 import com.taskflow.api.entity.enums.IssueType;
 import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.exception.BadRequestException;
+import com.taskflow.api.i18n.Language;
 import com.taskflow.api.report.IssuesReport;
 import com.taskflow.api.report.IssuesReport.Count;
 import com.taskflow.api.report.IssuesReport.FilterLine;
@@ -143,7 +144,7 @@ class ReportServiceImplTest {
     }
 
     private IssuesReport build(IssueFilter filter, ReportOptions options) {
-        return service.build(SLUG, project.getId(), ana.getId(), filter, options);
+        return service.build(SLUG, project.getId(), ana.getId(), filter, options, Language.ES);
     }
 
     @Test
@@ -158,8 +159,9 @@ class ReportServiceImplTest {
 
         // Una completada o cancelada con la fecha pasada no cuenta como vencida, ni la que vence hoy
         assertThat(report.totals()).isEqualTo(new IssuesReport.Totals(4, 2, 1, 1, 1));
-        assertThat(report.byState()).containsExactly(new Count("Todo", 1), new Count("In Progress", 1),
-                new Count("Done", 1), new Count("Cancelled", 1));
+        // Los estados de fábrica (Todo, In Progress, Done, Cancelled) salen con su nombre en español
+        assertThat(report.byState()).containsExactly(new Count("Sin empezar", 1), new Count("En curso", 1),
+                new Count("Completado", 1), new Count("Cancelado", 1));
         assertThat(report.byPriority()).containsExactly(new Count("Alta", 2), new Count("Baja", 1),
                 new Count("Sin prioridad", 1));
         // Una tarea con dos asignados cuenta para ambos; «Sin asignar» va al final
@@ -180,7 +182,7 @@ class ReportServiceImplTest {
 
         List<Group> groups = build(NO_FILTER, DEFAULTS).groups();
 
-        assertThat(groups).extracting(Group::title).containsExactly("Todo", "In Progress");
+        assertThat(groups).extracting(Group::title).containsExactly("Sin empezar", "En curso");
         assertThat(groups.get(1).rows()).extracting(row -> row.title()).containsExactly("B", "C");
     }
 
@@ -230,7 +232,7 @@ class ReportServiceImplTest {
                         null, null, null, null)).filters();
 
         assertThat(filters).containsExactly(
-                new FilterLine("Estado", "Todo, In Progress (ya no existe)"),
+                new FilterLine("Estado", "Sin empezar, En curso (ya no existe)"),
                 new FilterLine("Prioridad", "Urgente, Baja"),
                 new FilterLine("Tipo", "Bug"),
                 new FilterLine("Asignado", "Luis Muñoz"),

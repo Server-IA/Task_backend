@@ -1,5 +1,7 @@
 package com.taskflow.api.dto.response;
 
+import com.taskflow.api.i18n.Language;
+
 import java.time.Instant;
 
 /**
@@ -24,7 +26,7 @@ public record DescriptionConflictResponse(
     public static final String CODE = "DESCRIPTION_CONFLICT";
 
     public static DescriptionConflictResponse of(String message, IssueResponse current) {
-        return new DescriptionConflictResponse(409, CODE, message, current.description(),
+        return new DescriptionConflictResponse(409, CODE, Language.current().t(message), current.description(),
                 current.descriptionVersion(), current.descriptionUpdatedBy(), current.descriptionUpdatedAt(), current,
                 Instant.now());
     }

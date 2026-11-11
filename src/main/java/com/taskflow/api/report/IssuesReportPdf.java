@@ -19,6 +19,7 @@ import com.lowagie.text.pdf.PdfPageEventHelper;
 import com.lowagie.text.pdf.PdfTemplate;
 import com.lowagie.text.pdf.PdfWriter;
 import com.taskflow.api.dto.request.ReportOptions;
+import com.taskflow.api.i18n.Language;
 import com.taskflow.api.report.IssuesReport.Count;
 import com.taskflow.api.report.IssuesReport.FilterLine;
 import com.taskflow.api.report.IssuesReport.Group;
@@ -29,7 +30,6 @@ import java.awt.Color;
 import java.io.ByteArrayOutputStream;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.Locale;
 
 /**
  * Dibuja el reporte de tareas en un PDF A4 horizontal: encabezado con el logo de TaskFlow, los filtros aplicados, el
@@ -38,6 +38,9 @@ import java.util.Locale;
  * su pie con «Página N de M».
  * <p>
  * Usa las fuentes estándar del PDF (Helvetica y Courier): por eso los textos pasan por {@link PdfText#clean}.
+ * <p>
+ * Los textos fijos (títulos, encabezados, avisos, «Página N de M») y las fechas salen en el idioma que se pide
+ * ({@link Language#t}); los datos del reporte ya vienen en ese idioma.
  */
 public final class IssuesReportPdf {
 
@@ -76,45 +79,64 @@ public final class IssuesReportPdf {
     private static final String[] ISSUE_HEADERS =
             {"Código", "Tipo", "Título", "Estado", "Prioridad", "Asignados", "Etiquetas", "Vence"};
 
-    private static final Locale SPANISH = Locale.forLanguageTag("es");
-    private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("d MMM yyyy", SPANISH);
-    private static final DateTimeFormatter MOMENT = DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm", SPANISH);
+    // «10 nov 2026, 21:09» en español y «Nov 10, 2026, 9:09 PM» en inglés
+    private static final DateTimeFormatter DAY_ES = DateTimeFormatter.ofPattern("d MMM yyyy", Language.ES.locale());
+    private static final DateTimeFormatter DAY_EN = DateTimeFormatter.ofPattern("MMM d, yyyy", Language.EN.locale());
+    private static final DateTimeFormatter MOMENT_ES =
+            DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm", Language.ES.locale());
+    private static final DateTimeFormatter MOMENT_EN =
+            DateTimeFormatter.ofPattern("MMM d, yyyy, h:mm a", Language.EN.locale());
 
     private IssuesReportPdf() {
     }
 
-    /** El reporte como bytes de un PDF. */
+    /** Formato de un día en el idioma dado. */
+    public static DateTimeFormatter dayFormat(Language language) {
+        return language == Language.EN ? DAY_EN : DAY_ES;
+    }
+
+    private static DateTimeFormatter momentFormat(Language language) {
+        return language == Language.EN ? MOMENT_EN : MOMENT_ES;
+    }
+
+    /** El reporte como bytes de un PDF, con los textos fijos en español. */
     public static byte[] render(IssuesReport report) {
+        return render(report, Language.ES);
+    }
+
+    /** El reporte como bytes de un PDF, con los textos fijos y las fechas en {@code lang}. */
+    public static byte[] render(IssuesReport report, Language lang) {
         Document document = new Document(PageSize.A4.rotate(), 36, 36, 36, 46);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try {
             PdfWriter writer = PdfWriter.getInstance(document, out);
-            writer.setPageEvent(new Footer(PdfText.clean(report.identifier() + " · " + report.projectName())));
-            document.addTitle(PdfText.clean("Reporte de tareas · " + report.projectName()));
+            writer.setPageEvent(new Footer(PdfText.clean(report.identifier() + " · " + report.projectName()), lang));
+            document.addTitle(PdfText.clean(lang.t("Reporte de tareas") + " · " + report.projectName()));
             document.addAuthor(PdfText.clean(report.generatedBy()));
             document.addCreator("TaskFlow");
             document.open();
 
-            document.add(header(writer, report));
-            document.add(sectionTitle("Filtros aplicados"));
-            document.add(filters(report.filters()));
+            document.add(header(writer, report, lang));
+            document.add(sectionTitle(lang.t("Filtros aplicados"), lang));
+            document.add(filters(report.filters(), lang));
             if (report.truncated()) {
-                document.add(note("Hay " + report.totalMatching() + " tareas con estos filtros: el reporte trae las primeras "
-                        + IssuesReport.MAX_ISSUES + ". Afina los filtros para verlas todas."));
+                document.add(note(lang.t("Hay " + report.totalMatching()
+                        + " tareas con estos filtros: el reporte trae las primeras " + IssuesReport.MAX_ISSUES
+                        + ". Afina los filtros para verlas todas.")));
             }
             if (report.options().includeSummary()) {
-                document.add(sectionTitle("Resumen"));
-                document.add(tiles(report.totals()));
+                document.add(sectionTitle(lang.t("Resumen"), lang));
+                document.add(tiles(report.totals(), lang));
                 if (report.totals().total() > 0) {
-                    document.add(breakdowns(report));
+                    document.add(breakdowns(report, lang));
                 }
             }
             if (report.options().includeIssues()) {
-                document.add(sectionTitle("Tareas · " + groupingText(report.options())));
+                document.add(sectionTitle(lang.t("Tareas") + " · " + groupingText(report.options(), lang), lang));
                 if (report.totals().total() == 0) {
-                    document.add(note("No hay tareas que cumplan estos filtros."));
+                    document.add(note(lang.t("No hay tareas que cumplan estos filtros.")));
                 } else {
-                    document.add(issues(report.groups()));
+                    document.add(issues(report.groups(), lang));
                 }
             }
             document.close();
@@ -126,7 +148,7 @@ public final class IssuesReportPdf {
 
     // ---------------------------------------------------------------- encabezado
 
-    private static PdfPTable header(PdfWriter writer, IssuesReport report) throws DocumentException {
+    private static PdfPTable header(PdfWriter writer, IssuesReport report, Language lang) throws DocumentException {
         PdfPTable table = new PdfPTable(new float[]{46, 470, 254});
         table.setWidthPercentage(100);
 
@@ -136,7 +158,7 @@ public final class IssuesReportPdf {
         table.addCell(logo);
 
         PdfPCell title = plainCell();
-        Paragraph heading = new Paragraph("Reporte de tareas", TITLE);
+        Paragraph heading = new Paragraph(lang.t("Reporte de tareas"), TITLE);
         heading.setLeading(22);
         title.addElement(heading);
         Paragraph project = new Paragraph(
@@ -149,12 +171,12 @@ public final class IssuesReportPdf {
         Paragraph brand = new Paragraph("TaskFlow", BRAND);
         brand.setAlignment(Element.ALIGN_RIGHT);
         meta.addElement(brand);
-        Paragraph generated = new Paragraph(
-                PdfText.clean("Generado el " + MOMENT.format(report.generatedAt().atZone(report.zone()))), BODY_MUTED);
+        Paragraph generated = new Paragraph(PdfText.clean(lang.t("Generado el") + " "
+                + momentFormat(lang).format(report.generatedAt().atZone(report.zone()))), BODY_MUTED);
         generated.setAlignment(Element.ALIGN_RIGHT);
         generated.setSpacingBefore(2);
         meta.addElement(generated);
-        Paragraph author = new Paragraph(PdfText.clean("por " + report.generatedBy()), BODY_MUTED);
+        Paragraph author = new Paragraph(PdfText.clean(lang.t("por") + " " + report.generatedBy()), BODY_MUTED);
         author.setAlignment(Element.ALIGN_RIGHT);
         meta.addElement(author);
         table.addCell(meta);
@@ -198,11 +220,11 @@ public final class IssuesReportPdf {
 
     // ---------------------------------------------------------------- filtros
 
-    private static PdfPTable filters(List<FilterLine> filters) {
+    private static PdfPTable filters(List<FilterLine> filters, Language lang) {
         if (filters.isEmpty()) {
             PdfPTable table = new PdfPTable(1);
             table.setWidthPercentage(100);
-            PdfPCell cell = boxCell(new Phrase("Ninguno: todas las tareas del proyecto.", BODY));
+            PdfPCell cell = boxCell(new Phrase(lang.t("Ninguno: todas las tareas del proyecto."), BODY));
             table.addCell(cell);
             return table;
         }
@@ -210,7 +232,7 @@ public final class IssuesReportPdf {
         PdfPTable table = new PdfPTable(new float[]{78, 307, 78, 307});
         table.setWidthPercentage(100);
         for (FilterLine filter : filters) {
-            PdfPCell label = new PdfPCell(new Phrase(PdfText.clean(filter.label()).toUpperCase(SPANISH), LABEL));
+            PdfPCell label = new PdfPCell(new Phrase(PdfText.clean(filter.label()).toUpperCase(lang.locale()), LABEL));
             styleFilterCell(label);
             label.setPaddingLeft(8);
             table.addCell(label);
@@ -239,25 +261,25 @@ public final class IssuesReportPdf {
 
     // ---------------------------------------------------------------- resumen
 
-    private static PdfPTable tiles(Totals totals) {
+    private static PdfPTable tiles(Totals totals, Language lang) {
         PdfPTable table = new PdfPTable(5);
         table.setWidthPercentage(100);
-        table.addCell(tile("Tareas", totals.total(), NUMBER));
-        table.addCell(tile("Abiertas", totals.open(), NUMBER));
-        table.addCell(tile("Completadas", totals.completed(), totals.completed() > 0 ? NUMBER_OK : NUMBER));
-        table.addCell(tile("Canceladas", totals.cancelled(), NUMBER));
-        table.addCell(tile("Vencidas", totals.overdue(), totals.overdue() > 0 ? NUMBER_LATE : NUMBER));
+        table.addCell(tile(lang.t("Tareas"), totals.total(), NUMBER, lang));
+        table.addCell(tile(lang.t("Abiertas"), totals.open(), NUMBER, lang));
+        table.addCell(tile(lang.t("Completadas"), totals.completed(), totals.completed() > 0 ? NUMBER_OK : NUMBER, lang));
+        table.addCell(tile(lang.t("Canceladas"), totals.cancelled(), NUMBER, lang));
+        table.addCell(tile(lang.t("Vencidas"), totals.overdue(), totals.overdue() > 0 ? NUMBER_LATE : NUMBER, lang));
         return table;
     }
 
-    private static PdfPCell tile(String label, int value, Font numberFont) {
+    private static PdfPCell tile(String label, int value, Font numberFont, Language lang) {
         PdfPCell cell = plainCell();
         cell.setCellEvent(new RoundedBox());
         cell.setPadding(0);
         cell.setPaddingLeft(13);
         cell.setPaddingTop(9);
         cell.setPaddingBottom(11);
-        Paragraph name = new Paragraph(label.toUpperCase(SPANISH), LABEL);
+        Paragraph name = new Paragraph(label.toUpperCase(lang.locale()), LABEL);
         cell.addElement(name);
         Paragraph number = new Paragraph(String.valueOf(value), numberFont);
         number.setLeading(22);
@@ -265,15 +287,15 @@ public final class IssuesReportPdf {
         return cell;
     }
 
-    private static PdfPTable breakdowns(IssuesReport report) {
+    private static PdfPTable breakdowns(IssuesReport report, Language lang) {
         PdfPTable table = new PdfPTable(4);
         table.setWidthPercentage(100);
         table.setSpacingBefore(4);
-        table.addCell(breakdown("Por estado", report.byState(), report.totals().total(), true));
-        table.addCell(breakdown("Por prioridad", report.byPriority(), report.totals().total(), true));
+        table.addCell(breakdown(lang.t("Por estado"), report.byState(), report.totals().total(), true, lang));
+        table.addCell(breakdown(lang.t("Por prioridad"), report.byPriority(), report.totals().total(), true, lang));
         // Una tarea con dos asignados cuenta para las dos personas: ahí un porcentaje del total engañaría
-        table.addCell(breakdown("Por persona", report.byAssignee(), report.totals().total(), false));
-        table.addCell(breakdown("Por tipo", report.byType(), report.totals().total(), true));
+        table.addCell(breakdown(lang.t("Por persona"), report.byAssignee(), report.totals().total(), false, lang));
+        table.addCell(breakdown(lang.t("Por tipo"), report.byType(), report.totals().total(), true, lang));
         return table;
     }
 
@@ -281,7 +303,7 @@ public final class IssuesReportPdf {
      * Un reparto: título y, por fila, nombre y cantidad; con {@code withShare}, también qué parte del total es. Sin
      * barras: con tan pocas filas el número ya lo dice todo.
      */
-    private static PdfPCell breakdown(String title, List<Count> counts, int total, boolean withShare) {
+    private static PdfPCell breakdown(String title, List<Count> counts, int total, boolean withShare, Language lang) {
         PdfPCell panel = plainCell();
         panel.setCellEvent(new RoundedBox());
         panel.setPadding(0);
@@ -313,13 +335,14 @@ public final class IssuesReportPdf {
         }
         if (shown.size() < counts.size()) {
             int rest = counts.subList(shown.size(), counts.size()).stream().mapToInt(Count::count).sum();
-            PdfPCell more = plainCell(new Phrase("y " + (counts.size() - shown.size()) + " más (" + rest + ")", BODY_MUTED));
+            PdfPCell more = plainCell(new Phrase(
+                    lang.t("y " + (counts.size() - shown.size()) + " más (" + rest + ")"), BODY_MUTED));
             more.setColspan(2);
             more.setPaddingTop(3);
             rows.addCell(more);
         }
         if (counts.isEmpty() || total == 0) {
-            PdfPCell empty = plainCell(new Phrase("Sin tareas", BODY_MUTED));
+            PdfPCell empty = plainCell(new Phrase(lang.t("Sin tareas"), BODY_MUTED));
             empty.setColspan(2);
             rows.addCell(empty);
         }
@@ -329,14 +352,14 @@ public final class IssuesReportPdf {
 
     // ---------------------------------------------------------------- listado
 
-    private static PdfPTable issues(List<Group> groups) {
+    private static PdfPTable issues(List<Group> groups, Language lang) {
         PdfPTable table = new PdfPTable(ISSUE_COLUMNS);
         table.setWidthPercentage(100);
         // El encabezado de columnas se repite en cada página y una tarea no se parte entre dos páginas
         table.setHeaderRows(1);
         table.setSplitLate(true);
         for (String header : ISSUE_HEADERS) {
-            PdfPCell cell = new PdfPCell(new Phrase(header.toUpperCase(SPANISH), LABEL));
+            PdfPCell cell = new PdfPCell(new Phrase(lang.t(header).toUpperCase(lang.locale()), LABEL));
             cell.setBackgroundColor(COLUMN);
             cell.setBorder(Rectangle.NO_BORDER);
             cell.setPadding(6);
@@ -348,7 +371,7 @@ public final class IssuesReportPdf {
                 int size = group.rows().size();
                 Phrase phrase = new Phrase();
                 phrase.add(new Chunk(PdfText.clean(group.title()), GROUP));
-                phrase.add(new Chunk("   " + size + (size == 1 ? " tarea" : " tareas"), CODE));
+                phrase.add(new Chunk("   " + size + " " + lang.t(size == 1 ? "tarea" : "tareas"), CODE));
                 PdfPCell cell = new PdfPCell(phrase);
                 cell.setColspan(ISSUE_COLUMNS.length);
                 cell.setBackgroundColor(SUBTLE);
@@ -370,7 +393,7 @@ public final class IssuesReportPdf {
                 table.addCell(issueCell(new Phrase(listText(row.labels()), BODY_MUTED)));
                 table.addCell(issueCell(row.dueDate() == null
                         ? new Phrase("—", BODY_MUTED)
-                        : new Phrase(DAY.format(row.dueDate()), row.overdue() ? BODY_LATE : text)));
+                        : new Phrase(dayFormat(lang).format(row.dueDate()), row.overdue() ? BODY_LATE : text)));
             }
         }
         return table;
@@ -392,7 +415,7 @@ public final class IssuesReportPdf {
         return values == null || values.isEmpty() ? "—" : PdfText.clean(String.join(", ", values));
     }
 
-    static String groupingText(ReportOptions options) {
+    static String groupingText(ReportOptions options, Language lang) {
         String group = switch (options.groupByOrDefault()) {
             case NONE -> "sin agrupar";
             case STATE -> "por estado";
@@ -409,13 +432,13 @@ public final class IssuesReportPdf {
             case TITLE -> "título";
             case MANUAL -> "el del tablero";
         };
-        return group + ", orden: " + sort;
+        return lang.t(group) + ", " + lang.t("orden") + ": " + lang.t(sort);
     }
 
     // ---------------------------------------------------------------- piezas comunes
 
-    private static Paragraph sectionTitle(String text) {
-        Paragraph paragraph = new Paragraph(PdfText.clean("// " + text).toUpperCase(SPANISH), LABEL);
+    private static Paragraph sectionTitle(String text, Language lang) {
+        Paragraph paragraph = new Paragraph(PdfText.clean("// " + text).toUpperCase(lang.locale()), LABEL);
         paragraph.setSpacingBefore(14);
         paragraph.setSpacingAfter(6);
         return paragraph;
@@ -467,11 +490,13 @@ public final class IssuesReportPdf {
     /** Pie de cada página: a la izquierda de qué es el reporte y a la derecha «Página N de M». */
     private static final class Footer extends PdfPageEventHelper {
         private final String project;
+        private final Language lang;
         private PdfTemplate total;
         private BaseFont font;
 
-        private Footer(String project) {
+        private Footer(String project, Language lang) {
             this.project = project;
+            this.lang = lang;
         }
 
         @Override
@@ -497,8 +522,9 @@ public final class IssuesReportPdf {
             canvas.setColorFill(MUTED);
             canvas.beginText();
             canvas.setFontAndSize(font, 8);
-            canvas.showTextAligned(Element.ALIGN_LEFT, "TaskFlow · Reporte de tareas · " + project, document.left(), y, 0);
-            String page = "Página " + writer.getPageNumber() + " de ";
+            canvas.showTextAligned(Element.ALIGN_LEFT, "TaskFlow · " + lang.t("Reporte de tareas") + " · " + project,
+                    document.left(), y, 0);
+            String page = lang.t("Página " + writer.getPageNumber() + " de ");
             float totalWidth = font.getWidthPoint("000", 8);
             canvas.showTextAligned(Element.ALIGN_RIGHT, page, document.right() - totalWidth, y, 0);
             canvas.endText();

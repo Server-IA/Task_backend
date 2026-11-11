@@ -16,6 +16,7 @@ import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.exception.ResourceNotFoundException;
+import com.taskflow.api.i18n.Language;
 import com.taskflow.api.repository.CustomRoleRepository;
 import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.security.AccessControl;
@@ -56,13 +57,16 @@ public class RoleServiceImpl implements RoleService {
 
     @Override
     public PermissionCatalogResponse catalog() {
+        // Etiquetas y descripciones en el idioma de la petición
+        Language language = Language.current();
         List<PermissionCatalogResponse.Group> groups = new ArrayList<>();
         for (PermissionGroup group : PermissionGroup.values()) {
-            groups.add(new PermissionCatalogResponse.Group(group.name(), group.getLabel(),
+            groups.add(new PermissionCatalogResponse.Group(group.name(), language.t(group.getLabel()),
                     Arrays.stream(Permission.values())
                             .filter(permission -> permission.getGroup() == group)
-                            .map(permission -> new PermissionCatalogResponse.Item(permission.name(), permission.getLabel(),
-                                    permission.getDescription(), Permission.MEMBER_DEFAULTS.contains(permission)))
+                            .map(permission -> new PermissionCatalogResponse.Item(permission.name(),
+                                    language.t(permission.getLabel()), language.t(permission.getDescription()),
+                                    Permission.MEMBER_DEFAULTS.contains(permission)))
                             .toList()));
         }
         return new PermissionCatalogResponse(groups);
@@ -78,7 +82,8 @@ public class RoleServiceImpl implements RoleService {
         }
         List<RoleResponse> roles = new ArrayList<>();
         roles.add(new RoleResponse(RoleResponse.Kind.MANAGER.name(), null, RoleResponse.Kind.MANAGER,
-                AccessControl.MANAGER_ROLE_NAME, MANAGER_DESCRIPTION, Permission.names(Permission.ALL),
+                AccessControl.managerRoleName(), Language.current().t(MANAGER_DESCRIPTION),
+                Permission.names(Permission.ALL),
                 memberRepository.countWithBaseRole(workspace.getId(), WorkspaceRole.OWNER)));
         roles.add(memberRole(workspace));
         for (CustomRole role : roleRepository.findAllByWorkspace(workspace.getId())) {
@@ -95,7 +100,7 @@ public class RoleServiceImpl implements RoleService {
         if (roleRepository.countByWorkspaceId(workspace.getId()) >= MAX_CUSTOM_ROLES) {
             throw new ConflictException(LIMIT_MESSAGE);
         }
-        String name = checkedName(workspace, request.name(), null);
+        String name = checkedName(workspace, request.name(), null, null);
         Set<Permission> permissions = parse(request.permissions());
         ensureMayGrant(slug, actorId, permissions);
 
@@ -115,7 +120,7 @@ public class RoleServiceImpl implements RoleService {
         // Un rol con permisos que a quien edita le faltan no se toca: podría quitárselos a otros o ponérselo después
         ensureMayGrant(slug, actorId, role.permissionSet());
         if (request.name() != null) {
-            role.setName(checkedName(workspace, request.name(), role.getId()));
+            role.setName(checkedName(workspace, request.name(), role.getId(), role.getName()));
         }
         if (request.description() != null) {
             role.setDescription(cleanDescription(request.description()));
@@ -171,9 +176,11 @@ public class RoleServiceImpl implements RoleService {
         if (actor.isManager() || actor.covers(permissions)) {
             return;
         }
+        // Los nombres de los permisos, ya en el idioma de la petición (el resto del mensaje se traduce al responder)
+        Language language = Language.current();
         String missing = permissions.stream()
                 .filter(permission -> !actor.can(permission))
-                .map(Permission::getLabel)
+                .map(permission -> language.t(permission.getLabel()))
                 .collect(Collectors.joining(", "));
         throw new ForbiddenException("No puedes dar ni quitar permisos que tu rol no tiene: " + missing);
     }
@@ -191,11 +198,14 @@ public class RoleServiceImpl implements RoleService {
         return permissions.isEmpty() ? EnumSet.noneOf(Permission.class) : permissions;
     }
 
-    /** El nombre limpio; 409 si ya lo usa otro rol del workspace o es el de un rol de fábrica. */
-    private String checkedName(Workspace workspace, String rawName, UUID excludedId) {
+    /**
+     * El nombre limpio; 409 si ya lo usa otro rol del workspace o es el de un rol de fábrica en cualquiera de los
+     * idiomas («Project manager», «Miembro», «Member»). Un rol que ya se llamaba así antes de que el nombre quedara
+     * reservado ({@code currentName}) puede conservarlo.
+     */
+    private String checkedName(Workspace workspace, String rawName, UUID excludedId, String currentName) {
         String name = HumanNames.required(rawName, "name");
-        boolean reserved = name.equalsIgnoreCase(AccessControl.MANAGER_ROLE_NAME)
-                || name.equalsIgnoreCase(AccessControl.MEMBER_ROLE_NAME);
+        boolean reserved = AccessControl.isFactoryRoleName(name) && !name.equalsIgnoreCase(currentName);
         if (reserved || roleRepository.existsByName(workspace.getId(), name, excludedId)) {
             throw new ConflictException("Ya hay un rol llamado «" + name + "»");
         }
@@ -223,7 +233,8 @@ public class RoleServiceImpl implements RoleService {
 
     private RoleResponse memberRole(Workspace workspace) {
         return new RoleResponse(RoleResponse.Kind.MEMBER.name(), null, RoleResponse.Kind.MEMBER,
-                AccessControl.MEMBER_ROLE_NAME, MEMBER_DESCRIPTION, Permission.names(workspace.memberPermissionSet()),
+                AccessControl.memberRoleName(), Language.current().t(MEMBER_DESCRIPTION),
+                Permission.names(workspace.memberPermissionSet()),
                 memberRepository.countWithBaseRole(workspace.getId(), WorkspaceRole.MEMBER));
     }
 
