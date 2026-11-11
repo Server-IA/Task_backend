@@ -89,6 +89,17 @@ app:
     # Cola de borrado de objetos (StorageCleanup) y limpieza de subidas abandonadas
     drain-interval: PT1M
     cleanup-cron: ${STORAGE_CLEANUP_CRON:0 15 * * * *}
+  # Integración con GitHub: la GitHub App de TaskFlow (una para todos los workspaces). Sin estos datos la integración
+  # queda apagada y la app lo dice en Ajustes › Integraciones
+  github:
+    app-id: ${GITHUB_APP_ID:}
+    # El nombre de la app en su dirección pública: github.com/apps/<slug>
+    app-slug: ${GITHUB_APP_SLUG:}
+    # Ruta al archivo .pem con la clave privada que genera GitHub para la app
+    private-key-path: ${GITHUB_PRIVATE_KEY_PATH:}
+    webhook-secret: ${GITHUB_WEBHOOK_SECRET:}
+    api-url: ${GITHUB_API_URL:https://api.github.com}
+    web-url: ${GITHUB_WEB_URL:https://github.com}
   tokens:
     email-verification-hours: 24
     password-reset-minutes: 60

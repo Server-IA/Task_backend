@@ -106,11 +106,15 @@ class ControllerPermissionsTest {
             "AuthController.validateResetToken",
             "AuthController.resetPassword",
             "InvitationController.getDetails",
+            // Lo que llama GitHub: avisos firmados con el secreto de la app y la vuelta de instalarla (enlace firmado)
+            "GithubWebhookController.webhook",
+            "GithubWebhookController.setup",
             // /error: el formato común de los errores que no pasan por un controlador (público en SecurityConfig)
             "ApiErrorController.error");
 
     /** Rutas públicas de {@code SecurityConfig} (permitAll). */
-    private static final List<String> PUBLIC_PATTERNS = List.of("/api/v1/auth/**", "GET /api/v1/invitations/*");
+    private static final List<String> PUBLIC_PATTERNS = List.of("/api/v1/auth/**", "GET /api/v1/invitations/*",
+            "/api/v1/github/webhook", "/api/v1/github/setup");
 
     private static void rule(Class<?> controller, String method, String expected) {
         RULES.put(controller.getSimpleName() + "." + method, expected);
@@ -248,6 +252,25 @@ class ControllerPermissionsTest {
                 "report")) {
             rule(ImportController.class, method, can(Permission.DATA_IMPORT));
         }
+
+        // GitHub: ver es de quien ve el proyecto (el estado de la conexión, de cualquier miembro); conectar y configurar,
+        // y ejecutar workflows, van por permiso; crear la rama de una tarea o enlazarle un pull request es editarla
+        rule(GithubController.class, "status", MEMBER);
+        for (String method : List.of("install", "sync", "disconnect")) {
+            rule(GithubController.class, method, can(Permission.GITHUB_MANAGE));
+        }
+        for (String method : List.of("status", "pullRequests", "runs", "workflows", "branches", "linkedBranches", "summary", "issue", "checks")) {
+            rule(ProjectGithubController.class, method, ACCESS);
+        }
+        for (String method : List.of("setRepositories", "saveSettings", "addRule", "deleteRule")) {
+            rule(ProjectGithubController.class, method, inProject(Permission.GITHUB_MANAGE));
+        }
+        for (String method : List.of("dispatch", "rerun", "cancel")) {
+            rule(ProjectGithubController.class, method, inProject(Permission.GITHUB_RUN));
+        }
+        rule(ProjectGithubController.class, "linkPullRequest", inProject(Permission.ISSUE_EDIT));
+        rule(ProjectGithubController.class, "createBranch", inProject(Permission.ISSUE_EDIT));
+        rule(ProjectGithubController.class, "linkBranch", inProject(Permission.ISSUE_EDIT));
     }
 
     /** Un endpoint: su controlador y su método. */

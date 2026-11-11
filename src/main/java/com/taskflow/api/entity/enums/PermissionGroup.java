@@ -13,7 +13,8 @@ public enum PermissionGroup {
     DAILY("Daily"),
     INSIGHTS("Vistas, estadísticas y reportes"),
     PROJECTS("Proyectos"),
-    WORKSPACE("Workspace y equipo");
+    WORKSPACE("Workspace y equipo"),
+    INTEGRATIONS("Integraciones");
 
     private final String label;
 

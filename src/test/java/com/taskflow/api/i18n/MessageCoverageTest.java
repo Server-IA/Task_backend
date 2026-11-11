@@ -55,8 +55,8 @@ class MessageCoverageTest {
             // Importar: la cabecera OAuth de Trello, las consultas GraphQL de Linear y el nombre que Asana le da a la
             // sección de lo que no tiene sección (sus mensajes para la persona son las constantes de SourceHttp)
             "TrelloSource.java", "LinearSource.java", "AsanaSource.java",
-            // Importar: consultas SQL
-            "ImportStore.java");
+            // Importar y GitHub: consultas SQL
+            "ImportStore.java", "GithubStore.java");
 
     private static List<Found> found;
 

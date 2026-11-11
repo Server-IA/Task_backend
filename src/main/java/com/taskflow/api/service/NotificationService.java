@@ -71,6 +71,12 @@ public interface NotificationService {
     void notifyUnblocked(Issue blocked, Issue blocker, User actor);
 
     /**
+     * El pull request de una tarea se fusionó y la automatización del proyecto la habría completado, pero le faltan
+     * criterios de aceptación: se le avisa a quienes la tienen asignada ({@code PR_MERGED_PENDING}), que deciden.
+     */
+    void notifyMergedWithPendingCriteria(Issue issue, int pullRequestNumber);
+
+    /**
      * Avisa a los miembros del proyecto del ciclo (menos a quien la abrió) de que se abrió la retrospectiva
      * ({@code RETRO_STARTED}). Solo en la app: no envía correo.
      */

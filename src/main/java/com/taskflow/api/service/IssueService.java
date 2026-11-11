@@ -45,6 +45,17 @@ public interface IssueService {
      */
     IssueResponse move(String slug, UUID projectId, UUID issueId, UUID userId, MoveIssueRequest request);
 
+    /**
+     * Pasa una tarea a otro estado por una automatización (la integración con GitHub), sin persona de por medio: el
+     * historial lo registra sin autor. No toca historias, no mueve una tarea que no esté en uno de los grupos
+     * indicados (así no reabre trabajo terminado ni retrocede lo que ya avanzó) y no la completa si tiene criterios de
+     * aceptación sin marcar.
+     *
+     * @param fromGroups los grupos desde los que se permite el cambio
+     * @return si la tarea cambió de estado
+     */
+    boolean moveAutomatically(UUID issueId, UUID stateId, java.util.Set<com.taskflow.api.entity.enums.StateGroup> fromGroups);
+
     /** Solo el project manager o quien creó la tarea pueden eliminarla (403 si no). */
     void delete(String slug, UUID projectId, UUID issueId, UUID userId);
 

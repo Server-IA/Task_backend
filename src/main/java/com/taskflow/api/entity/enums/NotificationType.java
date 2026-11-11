@@ -20,5 +20,10 @@ public enum NotificationType {
      */
     STORAGE_WARNING,
     /** Una importación desde otra herramienta terminó (o falló): se le avisa a quien la lanzó. */
-    IMPORT_FINISHED
+    IMPORT_FINISHED,
+    /**
+     * El pull request de una tarea se fusionó, pero la tarea no se completó sola porque le faltan criterios de
+     * aceptación. Lo manda TaskFlow (sin autor) a quienes la tienen asignada.
+     */
+    PR_MERGED_PENDING
 }

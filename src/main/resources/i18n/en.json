@@ -489,9 +489,38 @@
     "Motivo": "Reason",
     "Detalle": "Detail",
     "Enlace": "Link",
-    "Story points": "Story points"
+    "Story points": "Story points",
+    "Integraciones": "Integrations",
+    "Configurar GitHub": "Set up GitHub",
+    "Conectar el workspace con GitHub, elegir los repositorios de cada proyecto, las automatizaciones y las reglas de Actions.": "Connect the workspace to GitHub and choose each project's repositories, automations and Actions rules.",
+    "Ejecutar workflows": "Run workflows",
+    "Ejecutar a mano un workflow de GitHub Actions, repetirlo o cancelarlo.": "Run a GitHub Actions workflow manually, re-run it or cancel it.",
+    "Ejecución no encontrada": "Run not found",
+    "El nombre de la rama no es válido: usa letras, números, guiones, puntos y barras": "The branch name is not valid: use letters, numbers, hyphens, dots and slashes",
+    "Esa rama no es válida": "That branch is not valid",
+    "Esa regla no existe": "That rule does not exist",
+    "Esa tarea no es de este proyecto": "That task does not belong to this project",
+    "Ese repositorio no es de este proyecto": "That repository does not belong to this project",
+    "Este workspace no está conectado con GitHub": "This workspace is not connected to GitHub",
+    "GitHub no encontró eso: puede que el repositorio ya no esté compartido con TaskFlow": "GitHub could not find that: the repository may no longer be shared with TaskFlow",
+    "GitHub no respondió. Inténtalo de nuevo en un momento.": "GitHub did not respond. Try again in a moment.",
+    "GitHub todavía no ha empezado esa ejecución": "GitHub has not started that run yet",
+    "La app de TaskFlow no tiene permiso para eso en GitHub. Revisa los permisos de la app.": "The TaskFlow app is not allowed to do that on GitHub. Check the app's permissions.",
+    "La integración con GitHub no está configurada en este servidor": "The GitHub integration is not set up on this server",
+    "La rama de la que parte no existe en el repositorio": "The base branch does not exist in the repository",
+    "Pull request no encontrado": "Pull request not found",
+    "Regla no encontrada": "Rule not found",
+    "Uno de los estados no es de este proyecto": "One of the states does not belong to this project",
+    "Uno de los repositorios no está entre los que GitHub comparte con este workspace": "One of the repositories is not among those GitHub shares with this workspace",
+    "Ya existe una rama con ese nombre en el repositorio": "A branch with that name already exists in the repository",
+    "Esa rama no existe en el repositorio": "That branch does not exist in the repository",
+    "Ese formato de rama no existe": "That branch format does not exist"
   },
   "patterns": [
+    {
+      "es": "Se\\ fusionó\\ el\\ pull\\ request\\ \\#(.+?)\\ de\\ (.+?),\\ pero\\ la\\ tarea\\ no\\ se\\ completó\\ sola:\\ le\\ faltan\\ criterios\\ de\\ aceptación",
+      "en": "Pull request #{1} of {2} was merged, but the task was not completed automatically: it still has acceptance criteria pending"
+    },
     {
       "es": "La\\ importación\\ desde\\ (.+?)\\ no\\ terminó\\.\\ Lo\\ que\\ alcanzó\\ a\\ entrar\\ se\\ puede\\ revisar\\ o\\ deshacer\\ en\\ Ajustes\\ ›\\ Importar\\.",
       "en": "The import from {t:1} did not finish. What did get imported can be reviewed or undone in Settings › Import."

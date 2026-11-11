@@ -89,7 +89,14 @@ public enum Permission {
     ROLE_MANAGE(PermissionGroup.WORKSPACE, "Gestionar roles", "Crear, editar y eliminar roles y sus permisos."),
     STORAGE_VIEW(PermissionGroup.WORKSPACE, "Ver el almacenamiento", "Ver el detalle del espacio que ocupan los archivos."),
     DATA_IMPORT(PermissionGroup.WORKSPACE, "Importar datos",
-            "Traer proyectos y tareas desde Jira, Trello, Linear, Asana o un archivo, y deshacer una importación.");
+            "Traer proyectos y tareas desde Jira, Trello, Linear, Asana o un archivo, y deshacer una importación."),
+
+    // ----- Integraciones (ver las ramas, los pull requests y las ejecuciones lo da poder ver el proyecto)
+    GITHUB_MANAGE(PermissionGroup.INTEGRATIONS, "Configurar GitHub",
+            "Conectar el workspace con GitHub, elegir los repositorios de cada proyecto, las automatizaciones y las reglas "
+                    + "de Actions."),
+    GITHUB_RUN(PermissionGroup.INTEGRATIONS, "Ejecutar workflows",
+            "Ejecutar a mano un workflow de GitHub Actions, repetirlo o cancelarlo.");
 
     /** Todos: lo que tiene el project manager. */
     public static final Set<Permission> ALL = Collections.unmodifiableSet(EnumSet.allOf(Permission.class));

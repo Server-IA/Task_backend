@@ -52,6 +52,7 @@ import com.taskflow.api.util.VisibleText;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.taskflow.api.entity.enums.Permission;
@@ -97,6 +98,7 @@ public class IssueServiceImpl implements IssueService {
     private final ResourceLookup lookup;
     private final IssueMapper issueMapper;
     private final FileService fileService;
+    private final ApplicationEventPublisher events;
 
     @Override
     @Transactional(readOnly = true)
@@ -333,6 +335,7 @@ public class IssueServiceImpl implements IssueService {
         Issue saved = issueRepository.saveAndFlush(issue);
         if (completed) {
             relationService.notifyUnblocked(saved, actor);
+            events.publishEvent(new IssueCompletedEvent(saved.getId(), project.getId()));
         }
         if (storyRelevant) {
             storyProgress.childChanged(saved, previousParent, actor, started);
@@ -388,12 +391,50 @@ public class IssueServiceImpl implements IssueService {
         // Pasar de un grupo abierto a COMPLETED implica cambiar de estado, así que actor ya está cargado.
         if (becameCompleted(previousGroup, target.getStateGroup())) {
             relationService.notifyUnblocked(saved, actor);
+            events.publishEvent(new IssueCompletedEvent(saved.getId(), project.getId()));
         }
         if (stateChanged && saved.getParent() != null) {
             storyProgress.childChanged(saved, null, actor,
                     StoryRules.startsStory(previousGroup, target.getStateGroup()));
         }
         return issueMapper.toResponse(saved);
+    }
+
+    @Override
+    @Transactional
+    public boolean moveAutomatically(UUID issueId, UUID stateId, Set<StateGroup> fromGroups) {
+        issueRepository.lockById(issueId);
+        Issue issue = issueRepository.findById(issueId).orElse(null);
+        State target = stateRepository.findById(stateId).orElse(null);
+        if (issue == null || target == null || issue.isStory()
+                || !target.getProject().getId().equals(issue.getProject().getId())
+                || target.getId().equals(issue.getState().getId())) {
+            return false;
+        }
+        StateGroup previousGroup = issue.getState().getStateGroup();
+        if (!fromGroups.contains(previousGroup)) {
+            return false;
+        }
+        // Con criterios de aceptación sin marcar, completarla es una decisión de una persona
+        if (target.getStateGroup() == StateGroup.COMPLETED && issue.getCriteriaTotal() > issue.getCriteriaDone()) {
+            return false;
+        }
+        // Sin autor: el cambio lo hizo una automatización
+        activityService.record(issue, null, ActivityField.GITHUB_STATE, issue.getState().getName(), target.getName());
+        issue.setSortOrder(SortOrderCalculator.endOfColumn(issueRepository.findMaxSortOrder(target.getId())));
+        issue.setState(target);
+        Instant now = Instant.now();
+        updateCompletedAt(issue, previousGroup, now);
+        updateStartedAt(issue, now);
+        Issue saved = issueRepository.saveAndFlush(issue);
+        if (becameCompleted(previousGroup, target.getStateGroup())) {
+            relationService.notifyUnblocked(saved, null);
+            events.publishEvent(new IssueCompletedEvent(saved.getId(), saved.getProject().getId()));
+        }
+        if (saved.getParent() != null) {
+            storyProgress.childChanged(saved, null, null, StoryRules.startsStory(previousGroup, target.getStateGroup()));
+        }
+        return true;
     }
 
     @Override

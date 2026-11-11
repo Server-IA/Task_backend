@@ -107,6 +107,8 @@ class IssueServiceImplTest {
     private IssueMapper issueMapper;
     @Mock
     private FileService fileService;
+    @Mock
+    private org.springframework.context.ApplicationEventPublisher events;
 
     @InjectMocks
     private IssueServiceImpl issueService;
