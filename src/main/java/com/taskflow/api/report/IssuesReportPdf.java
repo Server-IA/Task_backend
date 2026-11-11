@@ -33,7 +33,7 @@ import java.util.Locale;
 
 /**
  * Dibuja el reporte de tareas en un PDF A4 horizontal: encabezado con el logo de TaskFlow, los filtros aplicados, el
- * resumen (totales y repartos con barras) y el listado en una tabla cuyo encabezado se repite en cada página. Todo
+ * resumen (totales y repartos con cantidad y porcentaje) y el listado en una tabla cuyo encabezado se repite en cada página. Todo
  * el texto va en celdas que ajustan su alto al contenido, así nada se monta sobre lo de al lado, y cada página lleva
  * su pie con «Página N de M».
  * <p>
@@ -60,6 +60,7 @@ public final class IssuesReportPdf {
     private static final Font BODY_LATE = new Font(Font.HELVETICA, 8.5f, Font.BOLD, LATE);
     private static final Font SUBTITLE = new Font(Font.HELVETICA, 10, Font.NORMAL, MUTED);
     private static final Font CODE = new Font(Font.COURIER, 8, Font.NORMAL, MUTED);
+    private static final Font CODE_INK = new Font(Font.COURIER, 8.5f, Font.BOLD, INK);
     private static final Font LABEL = new Font(Font.COURIER, 7.5f, Font.BOLD, MUTED);
     private static final Font NUMBER = new Font(Font.HELVETICA, 20, Font.BOLD, INK);
     private static final Font NUMBER_LATE = new Font(Font.HELVETICA, 20, Font.BOLD, LATE);
@@ -268,15 +269,19 @@ public final class IssuesReportPdf {
         PdfPTable table = new PdfPTable(4);
         table.setWidthPercentage(100);
         table.setSpacingBefore(4);
-        table.addCell(breakdown("Por estado", report.byState(), report.totals().total()));
-        table.addCell(breakdown("Por prioridad", report.byPriority(), report.totals().total()));
-        table.addCell(breakdown("Por persona", report.byAssignee(), report.totals().total()));
-        table.addCell(breakdown("Por tipo", report.byType(), report.totals().total()));
+        table.addCell(breakdown("Por estado", report.byState(), report.totals().total(), true));
+        table.addCell(breakdown("Por prioridad", report.byPriority(), report.totals().total(), true));
+        // Una tarea con dos asignados cuenta para las dos personas: ahí un porcentaje del total engañaría
+        table.addCell(breakdown("Por persona", report.byAssignee(), report.totals().total(), false));
+        table.addCell(breakdown("Por tipo", report.byType(), report.totals().total(), true));
         return table;
     }
 
-    /** Un reparto: título y, por fila, nombre, barra proporcional y cantidad. */
-    private static PdfPCell breakdown(String title, List<Count> counts, int total) {
+    /**
+     * Un reparto: título y, por fila, nombre y cantidad; con {@code withShare}, también qué parte del total es. Sin
+     * barras: con tan pocas filas el número ya lo dice todo.
+     */
+    private static PdfPCell breakdown(String title, List<Count> counts, int total, boolean withShare) {
         PdfPCell panel = plainCell();
         panel.setCellEvent(new RoundedBox());
         panel.setPadding(0);
@@ -288,9 +293,8 @@ public final class IssuesReportPdf {
         heading.setSpacingAfter(4);
         panel.addElement(heading);
 
-        PdfPTable rows = new PdfPTable(new float[]{78, 62, 26});
+        PdfPTable rows = new PdfPTable(new float[]{96, 70});
         rows.setWidthPercentage(100);
-        int max = counts.stream().mapToInt(Count::count).max().orElse(1);
         List<Count> shown = counts.size() > MAX_BREAKDOWN_ROWS ? counts.subList(0, MAX_BREAKDOWN_ROWS - 1) : counts;
         for (Count count : shown) {
             PdfPCell name = plainCell(new Phrase(PdfText.clean(count.name()), BODY));
@@ -298,10 +302,11 @@ public final class IssuesReportPdf {
             name.setPaddingBottom(3);
             name.setPaddingRight(6);
             rows.addCell(name);
-            PdfPCell bar = plainCell();
-            bar.setCellEvent(new Bar(count.count() / (float) Math.max(max, 1)));
-            rows.addCell(bar);
-            PdfPCell number = plainCell(new Phrase(String.valueOf(count.count()), CODE));
+            Phrase amount = new Phrase(String.valueOf(count.count()), CODE_INK);
+            if (withShare && total > 0) {
+                amount.add(new Chunk("  " + Math.round(count.count() * 100f / total) + " %", CODE));
+            }
+            PdfPCell number = plainCell(amount);
             number.setHorizontalAlignment(Element.ALIGN_RIGHT);
             number.setPaddingTop(3);
             rows.addCell(number);
@@ -309,13 +314,13 @@ public final class IssuesReportPdf {
         if (shown.size() < counts.size()) {
             int rest = counts.subList(shown.size(), counts.size()).stream().mapToInt(Count::count).sum();
             PdfPCell more = plainCell(new Phrase("y " + (counts.size() - shown.size()) + " más (" + rest + ")", BODY_MUTED));
-            more.setColspan(3);
+            more.setColspan(2);
             more.setPaddingTop(3);
             rows.addCell(more);
         }
         if (counts.isEmpty() || total == 0) {
             PdfPCell empty = plainCell(new Phrase("Sin tareas", BODY_MUTED));
-            empty.setColspan(3);
+            empty.setColspan(2);
             rows.addCell(empty);
         }
         panel.addElement(rows);
@@ -455,33 +460,6 @@ public final class IssuesReportPdf {
             canvas.roundRectangle(position.getLeft() + 3, position.getBottom() + 3,
                     position.getWidth() - 6, position.getHeight() - 6, 7);
             canvas.stroke();
-            canvas.restoreState();
-        }
-    }
-
-    /** Barra horizontal proporcional (riel gris y relleno dorado), centrada en el alto de la celda. */
-    private static final class Bar implements PdfPCellEvent {
-        private final float ratio;
-
-        private Bar(float ratio) {
-            this.ratio = Math.max(0, Math.min(1, ratio));
-        }
-
-        @Override
-        public void cellLayout(PdfPCell cell, Rectangle position, PdfContentByte[] canvases) {
-            PdfContentByte canvas = canvases[PdfPTable.BACKGROUNDCANVAS];
-            float height = 5;
-            float y = position.getBottom() + (position.getHeight() - height) / 2;
-            float width = position.getWidth() - 4;
-            canvas.saveState();
-            canvas.setColorFill(COLUMN);
-            canvas.roundRectangle(position.getLeft(), y, width, height, 2);
-            canvas.fill();
-            if (ratio > 0) {
-                canvas.setColorFill(GOLD);
-                canvas.roundRectangle(position.getLeft(), y, Math.max(height, width * ratio), height, 2);
-                canvas.fill();
-            }
             canvas.restoreState();
         }
     }
