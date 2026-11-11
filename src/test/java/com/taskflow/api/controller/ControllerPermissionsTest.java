@@ -243,6 +243,11 @@ class ControllerPermissionsTest {
         rule(ProjectFileController.class, "getAttachments", ACCESS);
         rule(StorageController.class, "getReport", can(Permission.STORAGE_VIEW));
         rule(StorageController.class, "getUsage", MEMBER);
+
+        for (String method : List.of("list", "get", "connect", "upload", "select", "saveMapping", "start", "stop", "undo", "discard",
+                "report")) {
+            rule(ImportController.class, method, can(Permission.DATA_IMPORT));
+        }
     }
 
     /** Un endpoint: su controlador y su método. */

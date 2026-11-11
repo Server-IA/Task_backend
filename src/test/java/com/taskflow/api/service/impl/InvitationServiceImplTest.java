@@ -1,5 +1,6 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.imports.ImportPendingAssignments;
 import com.taskflow.api.repository.CustomRoleRepository;
 import com.taskflow.api.security.AccessControl;
 import com.taskflow.api.config.AppProperties;
@@ -26,6 +27,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -60,7 +62,7 @@ class InvitationServiceImplTest {
                 new AppProperties.Tokens(24, 60, 7, 30));
         invitationService = new InvitationServiceImpl(invitationRepository, memberRepository,
                 lookup, workspaceMapper, emailNotifier, properties, new RateLimitService(), customRoleRepository,
-                accessControl);
+                accessControl, mock(ImportPendingAssignments.class));
         Workspace workspace = new Workspace();
         workspace.setId(UUID.randomUUID());
         workspace.setName("Mi equipo");

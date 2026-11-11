@@ -48,7 +48,12 @@ class MessageCoverageTest {
             // Consultas JPQL
             "NotificationRepository.java",
             // Los nombres de los estados de fábrica en cada idioma: son la tabla de la traducción
-            "StateNames.java");
+            "StateNames.java",
+            // Importar: los nombres con los que otras herramientas llaman a sus columnas, estados, tipos y prioridades
+            // (se comparan con lo que trae el archivo o el origen; nunca se muestran)
+            "CsvField.java", "CsvImport.java", "CsvDates.java", "ImportDefaults.java", "JiraSource.java",
+            // Importar: consultas SQL
+            "ImportStore.java");
 
     private static List<Found> found;
 

@@ -87,4 +87,14 @@ public interface NotificationService {
      * ({@code STORAGE_WARNING}). Lo manda TaskFlow (sin autor), como mucho una vez por semana por workspace.
      */
     void notifyStorageWarning(Workspace workspace, Collection<User> managers, int percent, String quota);
+
+    /**
+     * Una importación terminó (o no pudo terminar): se le avisa a quien la lanzó, que pudo cerrar la página mientras
+     * corría.
+     *
+     * @param sourceName de dónde se importaba, como se lee en una frase («Jira», «un archivo CSV»)
+     * @param completed  si terminó bien; si no, falló a la mitad
+     */
+    void notifyImportFinished(Workspace workspace, User recipient, String sourceName, boolean completed, int issues,
+                              int projects);
 }

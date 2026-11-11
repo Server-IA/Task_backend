@@ -18,5 +18,7 @@ public enum NotificationType {
      * El workspace pasó el 90 % de su espacio para archivos. Lo manda TaskFlow (sin autor) a sus project managers; la
      * notificación lleva el workspace, no una tarea.
      */
-    STORAGE_WARNING
+    STORAGE_WARNING,
+    /** Una importación desde otra herramienta terminó (o falló): se le avisa a quien la lanzó. */
+    IMPORT_FINISHED
 }

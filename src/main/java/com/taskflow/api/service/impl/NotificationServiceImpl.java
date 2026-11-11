@@ -229,6 +229,20 @@ public class NotificationServiceImpl implements NotificationService {
         });
     }
 
+    @Override
+    @Transactional
+    public void notifyImportFinished(Workspace workspace, User recipient, String sourceName, boolean completed, int issues,
+                                     int projects) {
+        String message = completed
+                ? "La importación desde " + sourceName + " terminó. Tareas: " + issues + " · proyectos: " + projects
+                + ". El informe está en Ajustes › Importar."
+                : "La importación desde " + sourceName + " no terminó. Lo que alcanzó a entrar se puede revisar o deshacer en "
+                + "Ajustes › Importar.";
+        Notification notification = notification(recipient, null, NotificationType.IMPORT_FINISHED, message);
+        notification.setWorkspace(workspace);
+        notificationRepository.save(notification);
+    }
+
     /**
      * De los usuarios, los que todavía pueden ver la tarea (miembros del proyecto o project managers del workspace):
      * quien creó la tarea o estaba asignado y ya salió del proyecto no recibe más avisos.

@@ -87,7 +87,9 @@ public enum Permission {
     MEMBER_REMOVE(PermissionGroup.WORKSPACE, "Quitar miembros", "Sacar personas del workspace."),
     MEMBER_ROLE(PermissionGroup.WORKSPACE, "Cambiar roles de miembros", "Asignar a cada persona uno de los roles del workspace."),
     ROLE_MANAGE(PermissionGroup.WORKSPACE, "Gestionar roles", "Crear, editar y eliminar roles y sus permisos."),
-    STORAGE_VIEW(PermissionGroup.WORKSPACE, "Ver el almacenamiento", "Ver el detalle del espacio que ocupan los archivos.");
+    STORAGE_VIEW(PermissionGroup.WORKSPACE, "Ver el almacenamiento", "Ver el detalle del espacio que ocupan los archivos."),
+    DATA_IMPORT(PermissionGroup.WORKSPACE, "Importar datos",
+            "Traer proyectos y tareas desde Jira, Trello, Linear, Asana o un archivo, y deshacer una importación.");
 
     /** Todos: lo que tiene el project manager. */
     public static final Set<Permission> ALL = Collections.unmodifiableSet(EnumSet.allOf(Permission.class));

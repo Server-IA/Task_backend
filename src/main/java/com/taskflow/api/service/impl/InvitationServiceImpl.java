@@ -11,6 +11,7 @@ import com.taskflow.api.entity.Workspace;
 import com.taskflow.api.entity.WorkspaceInvitation;
 import com.taskflow.api.entity.WorkspaceMember;
 import com.taskflow.api.entity.enums.WorkspaceRole;
+import com.taskflow.api.imports.ImportPendingAssignments;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
 import com.taskflow.api.exception.ForbiddenException;
@@ -54,6 +55,7 @@ public class InvitationServiceImpl implements InvitationService {
     private final RateLimitService rateLimitService;
     private final CustomRoleRepository customRoleRepository;
     private final AccessControl accessControl;
+    private final ImportPendingAssignments pendingAssignments;
 
     @Override
     @Transactional
@@ -173,6 +175,8 @@ public class InvitationServiceImpl implements InvitationService {
                     return memberRepository.save(created);
                 });
         invitation.setAccepted(true);
+        // Las tareas que una importación le dejó apuntadas mientras no era miembro
+        pendingAssignments.apply(workspace, user);
         return workspaceMapper.toResponse(workspace, Access.of(member));
     }
 

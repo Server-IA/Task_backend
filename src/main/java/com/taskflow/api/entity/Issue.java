@@ -148,6 +148,18 @@ public class Issue extends BaseEntity {
     @Column(name = "review_notified", nullable = false)
     private boolean reviewNotified;
 
+    /** Tarea importada: de qué herramienta vino ({@code JIRA}, {@code TRELLO}…). {@code null} si nació en TaskFlow. */
+    @Column(name = "import_source", length = 20)
+    private String importSource;
+
+    /** Tarea importada: su código en la herramienta de origen («PORT-123»), si lo tenía. */
+    @Column(name = "import_key", length = 100)
+    private String importKey;
+
+    /** Tarea importada: el enlace para abrirla en la herramienta de origen, si lo tenía. */
+    @Column(name = "import_url", length = 1000)
+    private String importUrl;
+
     @ManyToMany
     @JoinTable(name = "issue_assignees",
             joinColumns = @JoinColumn(name = "issue_id"),
