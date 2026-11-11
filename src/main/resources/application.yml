@@ -98,6 +98,9 @@ app:
     # Ruta al archivo .pem con la clave privada que genera GitHub para la app
     private-key-path: ${GITHUB_PRIVATE_KEY_PATH:}
     webhook-secret: ${GITHUB_WEBHOOK_SECRET:}
+    # Con estos dos cada persona enlaza su cuenta de GitHub (OAuth de la misma app)
+    client-id: ${GITHUB_CLIENT_ID:}
+    client-secret: ${GITHUB_CLIENT_SECRET:}
     api-url: ${GITHUB_API_URL:https://api.github.com}
     web-url: ${GITHUB_WEB_URL:https://github.com}
   tokens:

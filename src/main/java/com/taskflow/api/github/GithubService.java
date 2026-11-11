@@ -15,6 +15,7 @@ import com.taskflow.api.github.GithubStore.Branch;
 import com.taskflow.api.github.GithubStore.Installation;
 import com.taskflow.api.github.GithubStore.IssueRef;
 import com.taskflow.api.github.GithubStore.LinkedProject;
+import com.taskflow.api.github.GithubStore.MemberAccount;
 import com.taskflow.api.github.GithubStore.PullRequest;
 import com.taskflow.api.github.GithubStore.Repository;
 import com.taskflow.api.github.GithubStore.Rule;
@@ -24,6 +25,7 @@ import com.taskflow.api.github.GithubText.Code;
 import com.taskflow.api.repository.IssueRepository;
 import com.taskflow.api.repository.ProjectRepository;
 import com.taskflow.api.repository.StateRepository;
+import com.taskflow.api.repository.UserRepository;
 import com.taskflow.api.repository.WorkspaceRepository;
 import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.service.IssueService;
@@ -89,6 +91,8 @@ public class GithubService {
     private final IssueService issueService;
     private final ActivityService activityService;
     private final NotificationService notificationService;
+    private final GithubAccounts accounts;
+    private final UserRepository userRepository;
 
     // ----- Lo que se responde
 
@@ -102,9 +106,11 @@ public class GithubService {
     /**
      * @param configured si el servidor tiene los datos de la GitHub App (sin ellos no se puede conectar)
      * @param manageUrl  dónde se cambia en GitHub qué repositorios ve la app
+     * @param accounts   los miembros del workspace con su usuario de GitHub (sin él solo pueden ver)
      */
     public record WorkspaceStatus(boolean configured, boolean connected, String accountLogin, String accountType, String installedByName,
-                                  Instant installedAt, Instant lastEventAt, String manageUrl, List<RepositoryView> repositories) {
+                                  Instant installedAt, Instant lastEventAt, String manageUrl, List<RepositoryView> repositories,
+                                  List<MemberAccount> accounts) {
     }
 
     /**
@@ -135,13 +141,14 @@ public class GithubService {
         Workspace workspace = requireWorkspace(slug);
         Installation installation = store.installationOf(workspace.getId()).orElse(null);
         if (installation == null) {
-            return new WorkspaceStatus(properties.configured(), false, null, null, null, null, null, null, List.of());
+            return new WorkspaceStatus(properties.configured(), false, null, null, null, null, null, null, List.of(), List.of());
         }
         String manage = "Organization".equalsIgnoreCase(installation.accountType())
                 ? properties.webUrl() + "/organizations/" + installation.accountLogin() + "/settings/installations/" + installation.installationId()
                 : properties.webUrl() + "/settings/installations/" + installation.installationId();
         return new WorkspaceStatus(properties.configured(), true, installation.accountLogin(), installation.accountType(),
-                installation.installedByName(), installation.createdAt(), installation.lastEventAt(), manage, repositoryViews(workspace.getId()));
+                installation.installedByName(), installation.createdAt(), installation.lastEventAt(), manage, repositoryViews(workspace.getId()),
+                store.memberAccounts(workspace.getId()));
     }
 
     private List<RepositoryView> repositoryViews(UUID workspaceId) {
@@ -163,6 +170,10 @@ public class GithubService {
     public String installUrl(String slug, UUID userId) {
         requireConfigured();
         Workspace workspace = requireWorkspace(slug);
+        // Con su cuenta se comprueba, al volver, que la instalación es de quien la pidió
+        if (!accounts.linked(userId)) {
+            throw new ConflictException(GithubAccounts.NOT_LINKED);
+        }
         String payload = workspace.getId() + "|" + userId + "|" + Instant.now().plusSeconds(STATE_SECONDS).getEpochSecond();
         String encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(payload.getBytes(StandardCharsets.UTF_8));
         return properties.webUrl() + "/apps/" + properties.appSlug() + "/installations/new?state=" + encoded + "."
@@ -173,8 +184,8 @@ public class GithubService {
      * GitHub vuelve aquí cuando el PM termina de instalar la app. Guarda la instalación para el workspace que la pidió
      * y devuelve a dónde va el navegador.
      * <p>
-     * El número de instalación llega en la dirección, así que no se confía en él: la instalación tiene que ser
-     * reciente (acaba de hacerse) y no estar ya en otro workspace, o ser la que este workspace ya tenía.
+     * El número de instalación llega en la dirección, así que no se confía en él: no puede estar ya en otro workspace
+     * y GitHub tiene que confirmar que la cuenta de quien pidió conectar ve esa instalación (es de su organización).
      */
     @Transactional
     public String completeSetup(long installationId, String state) {
@@ -200,22 +211,23 @@ public class GithubService {
         if (bound != null && !bound.workspaceId().equals(workspace.getId())) {
             return back + "taken";
         }
+        UUID installer = UUID.fromString(parts[1]);
+        if (!accounts.linked(installer)) {
+            return back + "unlinked";
+        }
+        // El número de instalación llega en la dirección: solo vale si GitHub dice que la cuenta de quien la pidió la ve
+        if (!accounts.canAccessInstallation(installer, installationId)) {
+            return back + "foreign";
+        }
         JsonNode installation;
         try {
             installation = client.installation(installationId);
         } catch (GithubException ex) {
             return back + "failed";
         }
-        Instant created = instant(text(installation, "created_at"));
-        Instant updated = instant(text(installation, "updated_at"));
-        Instant recent = Instant.now().minusSeconds(900);
-        boolean fresh = (created != null && created.isAfter(recent)) || (updated != null && updated.isAfter(recent));
-        if (bound == null && !fresh) {
-            return back + "failed";
-        }
         if (bound == null) {
             store.saveInstallation(workspace.getId(), installationId, text(installation.path("account"), "login"),
-                    text(installation.path("account"), "type"), UUID.fromString(parts[1]));
+                    text(installation.path("account"), "type"), installer);
         }
         try {
             refreshRepositories(store.installation(installationId).orElseThrow());
@@ -418,23 +430,26 @@ public class GithubService {
         if (issueId != null && store.issue(issueId).filter(issue -> issue.projectId().equals(projectId)).isEmpty()) {
             throw new BadRequestException("Esa tarea no es de este proyecto");
         }
+        String token = accounts.token(userId);
         UUID runId = store.requestRun(repositoryId, workflowId, workflowName, ref.strip(), issueId, null, userId);
-        attempt(() -> client.dispatchWorkflow(repository.installationId(), repository.fullName(), workflowId, ref.strip(), inputs));
+        attemptAs(repository, () -> client.dispatchWorkflowAs(token, repository.fullName(), workflowId, ref.strip(), inputs));
         return store.run(runId).orElseThrow();
     }
 
-    @Transactional(readOnly = true)
-    public void rerun(String slug, UUID projectId, UUID runId) {
+    @Transactional
+    public void rerun(String slug, UUID projectId, UUID userId, UUID runId) {
         Run run = projectRun(slug, projectId, runId);
         Repository repository = store.repository(run.repositoryId()).orElseThrow();
-        attempt(() -> client.rerun(repository.installationId(), repository.fullName(), run.runId()));
+        String token = accounts.token(userId);
+        attemptAs(repository, () -> client.rerunAs(token, repository.fullName(), run.runId()));
     }
 
-    @Transactional(readOnly = true)
-    public void cancel(String slug, UUID projectId, UUID runId) {
+    @Transactional
+    public void cancel(String slug, UUID projectId, UUID userId, UUID runId) {
         Run run = projectRun(slug, projectId, runId);
         Repository repository = store.repository(run.repositoryId()).orElseThrow();
-        attempt(() -> client.cancel(repository.installationId(), repository.fullName(), run.runId()));
+        String token = accounts.token(userId);
+        attemptAs(repository, () -> client.cancelAs(token, repository.fullName(), run.runId()));
     }
 
     private Run projectRun(String slug, UUID projectId, UUID runId) {
@@ -493,7 +508,7 @@ public class GithubService {
 
     /** Enlaza con la tarea una rama que ya existe en el repositorio (una que no la nombra). */
     @Transactional
-    public IssueDev linkBranch(String slug, UUID projectId, UUID issueId, UUID repositoryId, String name) {
+    public IssueDev linkBranch(String slug, UUID projectId, UUID userId, UUID issueId, UUID repositoryId, String name) {
         Issue issue = requireIssue(slug, projectId, issueId);
         Repository repository = projectRepository(projectId, repositoryId);
         String branch = name == null ? "" : name.strip();
@@ -504,17 +519,19 @@ public class GithubService {
         if (sha == null || sha.isBlank()) {
             throw new BadRequestException("Esa rama no existe en el repositorio");
         }
-        branchLinked(repository, issue.getId(), branch, false);
+        branchLinked(repository, issue.getId(), branch, false, userId);
         return issue(slug, projectId, issueId);
     }
 
     /**
-     * Crea en GitHub la rama de la tarea, a partir de otra, y la deja enlazada.
+     * Crea en GitHub la rama de la tarea, a partir de otra, y la deja enlazada. La crea la persona con su cuenta de
+     * GitHub: tiene que tenerla enlazada y permiso de escritura en el repositorio.
      *
      * @param move si la tarea pasa al estado de la automatización «se crea la rama» del proyecto (si está encendida)
      */
     @Transactional
-    public IssueDev createBranch(String slug, UUID projectId, UUID issueId, UUID repositoryId, String base, String name, boolean move) {
+    public IssueDev createBranch(String slug, UUID projectId, UUID userId, UUID issueId, UUID repositoryId, String base, String name,
+                                 boolean move) {
         Issue issue = requireIssue(slug, projectId, issueId);
         Repository repository = projectRepository(projectId, repositoryId);
         String branch = name == null ? "" : name.strip();
@@ -526,15 +543,16 @@ public class GithubService {
         if (sha == null || sha.isBlank()) {
             throw new BadRequestException("La rama de la que parte no existe en el repositorio");
         }
+        String token = accounts.token(userId);
         try {
-            client.createBranch(repository.installationId(), repository.fullName(), branch, sha);
+            client.createBranchAs(token, repository.fullName(), branch, sha);
         } catch (GithubException ex) {
             if (ex.status() == 422) {
                 throw new ConflictException("Ya existe una rama con ese nombre en el repositorio");
             }
-            throw failure(ex);
+            throw failureAs(repository, ex);
         }
-        branchLinked(repository, issue.getId(), branch, move);
+        branchLinked(repository, issue.getId(), branch, move, userId);
         return issue(slug, projectId, issueId);
     }
 
@@ -579,10 +597,12 @@ public class GithubService {
                     log.info("GitHub: no se pudo releer la lista de repositorios de {}: {}", installation.accountLogin(), ex.getMessage());
                 }
             }
-            case "pull_request" -> repository(installationId, payload).ifPresent(repository -> onPullRequest(repository, payload.path("pull_request")));
+            case "pull_request" -> repository(installationId, payload).ifPresent(repository ->
+                    onPullRequest(repository, payload.path("pull_request"), text(payload.path("sender"), "login")));
             case "create" -> {
                 if ("branch".equals(text(payload, "ref_type"))) {
-                    repository(installationId, payload).ifPresent(repository -> onBranch(repository, text(payload, "ref")));
+                    repository(installationId, payload).ifPresent(repository ->
+                            onBranch(repository, text(payload, "ref"), text(payload.path("sender"), "login")));
                 }
             }
             case "delete" -> {
@@ -608,22 +628,26 @@ public class GithubService {
     }
 
     /** Una rama nueva: si nombra una tarea, queda enlazada a ella. */
-    private void onBranch(Repository repository, String branch) {
-        firstIssue(repository, branch).ifPresent(issue -> branchLinked(repository, issue.id(), branch, true));
+    private void onBranch(Repository repository, String branch, String senderLogin) {
+        UUID actor = store.memberByLogin(repository.id(), senderLogin).orElse(null);
+        firstIssue(repository, branch).ifPresent(issue -> branchLinked(repository, issue.id(), branch, true, actor));
     }
 
-    private void branchLinked(Repository repository, UUID issueId, String branch, boolean move) {
+    private void branchLinked(Repository repository, UUID issueId, String branch, boolean move, UUID actorId) {
         if (!store.linkBranch(repository.id(), issueId, branch)) {
             return;
         }
-        record(issueId, "BRANCH|" + branch);
+        record(issueId, "BRANCH|" + branch, actorId);
         if (move) {
             IssueRef issue = store.issue(issueId).orElseThrow();
             automate(issue, store.settings(issue.projectId()).onBranchStateId(), NOT_STARTED);
         }
     }
 
-    private void onPullRequest(Repository repository, JsonNode pull) {
+    /**
+     * @param senderLogin quién provocó el aviso en GitHub (quien abrió, fusionó o cerró el pull request)
+     */
+    private void onPullRequest(Repository repository, JsonNode pull, String senderLogin) {
         int number = pull.path("number").asInt(0);
         PullRequest before = store.pullRequest(repository.id(), number).orElse(null);
         savePullRequest(repository, pull);
@@ -640,16 +664,21 @@ public class GithubService {
         }
         IssueRef issue = store.issue(now.issueId()).orElseThrow();
         Settings settings = store.settings(issue.projectId());
+        // Quién lo hizo: abrirlo, su autor; fusionarlo o cerrarlo, quien lo fusionó o cerró (si GitHub lo dice)
+        String merger = text(pull.path("merged_by"), "login");
+        String who = "OPEN".equals(now.state()) ? now.authorLogin()
+                : !merger.isEmpty() ? merger : senderLogin != null && !senderLogin.isEmpty() ? senderLogin : now.authorLogin();
+        UUID actor = store.memberByLogin(repository.id(), who).orElse(null);
         // El título va al final: puede traer cualquier carácter
-        String detail = now.number() + "|" + (now.authorLogin() == null ? "" : now.authorLogin()) + "|" + now.title();
+        String detail = now.number() + "|" + (who == null ? "" : who) + "|" + now.title();
         switch (now.state()) {
             case "OPEN" -> {
                 // Abierto, o un borrador que pasó a listo para revisar
-                record(issue.id(), "PR_OPENED|" + detail);
+                record(issue.id(), "PR_OPENED|" + detail, actor);
                 automate(issue, settings.onPrOpenedStateId(), OPEN);
             }
             case "MERGED" -> {
-                record(issue.id(), "PR_MERGED|" + detail);
+                record(issue.id(), "PR_MERGED|" + detail, actor);
                 if (!automate(issue, settings.onPrMergedStateId(), OPEN)) {
                     warnPendingCriteria(issue, settings.onPrMergedStateId(), now.number());
                 }
@@ -658,7 +687,7 @@ public class GithubService {
                 }
             }
             case "CLOSED" -> {
-                record(issue.id(), "PR_CLOSED|" + detail);
+                record(issue.id(), "PR_CLOSED|" + detail, actor);
                 automate(issue, settings.onPrClosedStateId(), IN_PROGRESS);
             }
             default -> {
@@ -779,7 +808,16 @@ public class GithubService {
 
     /** Deja en el historial de la tarea lo que pasó en GitHub (sin autor de TaskFlow). */
     private void record(UUID issueId, String what) {
-        issueRepository.findById(issueId).ifPresent(issue -> activityService.record(issue, null, ActivityField.GITHUB, null, what));
+        record(issueId, what, null);
+    }
+
+    /**
+     * @param actorId la persona de TaskFlow que lo hizo en GitHub, si enlazó su cuenta ({@code null}: no se sabe quién
+     *                es aquí, y el historial muestra su usuario de GitHub)
+     */
+    private void record(UUID issueId, String what, UUID actorId) {
+        issueRepository.findById(issueId).ifPresent(issue -> activityService.record(issue,
+                actorId == null ? null : userRepository.findById(actorId).orElse(null), ActivityField.GITHUB, null, what));
     }
 
     // ----- Reglas
@@ -861,6 +899,26 @@ public class GithubService {
             call.run();
             return null;
         });
+    }
+
+    /** Una petición a GitHub hecha con la cuenta de la persona: si GitHub la rechaza, es su cuenta la que no tiene permiso. */
+    private void attemptAs(Repository repository, Runnable call) {
+        try {
+            call.run();
+        } catch (GithubException ex) {
+            throw failureAs(repository, ex);
+        }
+    }
+
+    private static ConflictException failureAs(Repository repository, GithubException ex) {
+        if (ex.status() == 401) {
+            return new ConflictException("GitHub ya no acepta tu cuenta. Vuelve a conectarla en tu perfil.");
+        }
+        if (ex.status() == 403 || ex.status() == 404) {
+            return new ConflictException("Tu cuenta de GitHub no tiene permiso de escritura en " + repository.fullName()
+                    + ". Pídeselo a quien administra el repositorio en GitHub.");
+        }
+        return new ConflictException(UNAVAILABLE);
     }
 
     private static ConflictException failure(GithubException ex) {

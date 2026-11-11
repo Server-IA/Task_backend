@@ -514,9 +514,20 @@
     "Uno de los repositorios no está entre los que GitHub comparte con este workspace": "One of the repositories is not among those GitHub shares with this workspace",
     "Ya existe una rama con ese nombre en el repositorio": "A branch with that name already exists in the repository",
     "Esa rama no existe en el repositorio": "That branch does not exist in the repository",
-    "Ese formato de rama no existe": "That branch format does not exist"
+    "Ese formato de rama no existe": "That branch format does not exist",
+    "Conecta tu cuenta de GitHub en tu perfil para hacer esto": "Connect your GitHub account in your profile to do this",
+    "El enlace para conectar tu cuenta caducó. Vuelve a intentarlo desde tu perfil.": "The link to connect your account expired. Try again from your profile.",
+    "Esa cuenta de GitHub ya está conectada a otro usuario de TaskFlow": "That GitHub account is already connected to another TaskFlow user",
+    "Ese enlace lo pidió otra persona. Conecta tu cuenta desde tu propio perfil.": "That link was requested by someone else. Connect your account from your own profile.",
+    "GitHub no aceptó la autorización. Vuelve a intentarlo desde tu perfil.": "GitHub did not accept the authorization. Try again from your profile.",
+    "GitHub ya no acepta tu cuenta. Vuelve a conectarla en tu perfil.": "GitHub no longer accepts your account. Connect it again in your profile.",
+    "Tu conexión con GitHub caducó. Vuelve a conectar tu cuenta en tu perfil.": "Your connection to GitHub expired. Connect your account again in your profile."
   },
   "patterns": [
+    {
+      "es": "Tu\\ cuenta\\ de\\ GitHub\\ no\\ tiene\\ permiso\\ de\\ escritura\\ en\\ (.+?)\\.\\ Pídeselo\\ a\\ quien\\ administra\\ el\\ repositorio\\ en\\ GitHub\\.",
+      "en": "Your GitHub account does not have write access to {1}. Ask whoever manages the repository on GitHub."
+    },
     {
       "es": "Se\\ fusionó\\ el\\ pull\\ request\\ \\#(.+?)\\ de\\ (.+?),\\ pero\\ la\\ tarea\\ no\\ se\\ completó\\ sola:\\ le\\ faltan\\ criterios\\ de\\ aceptación",
       "en": "Pull request #{1} of {2} was merged, but the task was not completed automatically: it still has acceptance criteria pending"

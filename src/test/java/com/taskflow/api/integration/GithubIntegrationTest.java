@@ -15,6 +15,7 @@ import com.taskflow.api.entity.enums.ChecklistItemKind;
 import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
+import com.taskflow.api.github.GithubAccounts;
 import com.taskflow.api.github.GithubService;
 import com.taskflow.api.github.GithubService.IssueDev;
 import com.taskflow.api.github.GithubService.ProjectStatus;
@@ -100,7 +101,9 @@ class GithubIntegrationTest {
         registry.add("app.github.private-key-path", () -> GITHUB.keyFile().toString());
         registry.add("app.github.webhook-secret", () -> SECRET);
         registry.add("app.github.api-url", GITHUB::url);
-        registry.add("app.github.web-url", () -> "https://github.test");
+        registry.add("app.github.client-id", () -> "Iv1.pruebas");
+        registry.add("app.github.client-secret", () -> "secreto-de-cliente");
+        registry.add("app.github.web-url", GITHUB::url);
     }
 
     @BeforeAll
@@ -124,6 +127,8 @@ class GithubIntegrationTest {
     private GithubService githubService;
     @Autowired
     private GithubWebhookController webhookController;
+    @Autowired
+    private GithubAccounts accounts;
 
     private String suffix;
     private User pm;
@@ -136,6 +141,8 @@ class GithubIntegrationTest {
     private long installationId;
     private long repositoryGithubId;
     private String repositoryName;
+    /** El usuario de GitHub de la PM (enlazado en cada prueba). */
+    private String pmLogin;
 
     @BeforeEach
     void setUp() {
@@ -157,6 +164,8 @@ class GithubIntegrationTest {
         repositoryGithubId = IDS.incrementAndGet();
         repositoryName = "acme-" + suffix + "/web";
         GITHUB.reset(installationId, repositoryGithubId, repositoryName);
+        pmLogin = "paula-" + suffix;
+        link(pm, pmLogin);
     }
 
     // ----- Conectar
@@ -167,7 +176,7 @@ class GithubIntegrationTest {
         assertThat(githubService.workspace(slug).configured()).isTrue();
 
         String url = githubService.installUrl(slug, pm.getId());
-        assertThat(url).startsWith("https://github.test/apps/taskflow-pruebas/installations/new?state=");
+        assertThat(url).startsWith(GITHUB.url() + "/apps/taskflow-pruebas/installations/new?state=");
 
         String back = githubService.completeSetup(installationId, state(url));
 
@@ -177,7 +186,9 @@ class GithubIntegrationTest {
         assertThat(status.accountLogin()).isEqualTo("acme");
         assertThat(status.accountType()).isEqualTo("Organization");
         assertThat(status.installedByName()).isEqualTo("Paula PM");
-        assertThat(status.manageUrl()).isEqualTo("https://github.test/organizations/acme/settings/installations/" + installationId);
+        assertThat(status.manageUrl()).isEqualTo(GITHUB.url() + "/organizations/acme/settings/installations/" + installationId);
+        // Se comprobó con la cuenta de quien conecta que la instalación es suya
+        assertThat(GITHUB.asUser()).contains("GET /user/installations como " + pmLogin);
         assertThat(status.repositories()).singleElement().satisfies(repository -> {
             assertThat(repository.fullName()).isEqualTo(repositoryName);
             assertThat(repository.defaultBranch()).isEqualTo("main");
@@ -204,6 +215,7 @@ class GithubIntegrationTest {
         // La instalación de un workspace no se la puede quedar otro
         assertThat(githubService.completeSetup(installationId, state)).endsWith("github=connected");
         User other = user("otra-" + suffix + "@test.com", "Olga Otra");
+        link(other, "olga-" + suffix);
         String otherSlug = workspaceService.create(other.getId(), new CreateWorkspaceRequest("Otro " + suffix, "go-" + suffix)).slug();
         assertThat(githubService.completeSetup(installationId, state(githubService.installUrl(otherSlug, other.getId()))))
                 .endsWith("github=taken");
@@ -212,11 +224,23 @@ class GithubIntegrationTest {
     }
 
     @Test
-    void unaInstalacionViejaQueNadieReclamoNoSeConecta() {
-        // Alguien con un enlace válido de su workspace que prueba con el número de una instalación que no acaba de hacer
-        GITHUB.installedAt(Instant.now().minusSeconds(86_400));
+    void unaInstalacionQueLaCuentaDeQuienConectaNoVeNoSeConecta() {
+        // Alguien con un enlace válido de su workspace que prueba con el número de la instalación de otra organización
+        GITHUB.outsider(pmLogin);
 
-        assertThat(githubService.completeSetup(installationId, state(githubService.installUrl(slug, pm.getId())))).endsWith("github=failed");
+        assertThat(githubService.completeSetup(installationId, state(githubService.installUrl(slug, pm.getId())))).endsWith("github=foreign");
+        assertThat(githubService.workspace(slug).connected()).isFalse();
+    }
+
+    @Test
+    void paraConectarElWorkspaceHayQueTenerLaCuentaEnlazada() {
+        String state = state(githubService.installUrl(slug, pm.getId()));
+        accounts.unlink(pm.getId());
+
+        // Ni pedir el enlace ni usar uno que se pidió antes de desenlazar
+        assertThatThrownBy(() -> githubService.installUrl(slug, pm.getId())).isInstanceOf(ConflictException.class)
+                .hasMessageContaining("Conecta tu cuenta de GitHub");
+        assertThat(githubService.completeSetup(installationId, state)).endsWith("github=unlinked");
         assertThat(githubService.workspace(slug).connected()).isFalse();
     }
 
@@ -359,6 +383,7 @@ class GithubIntegrationTest {
 
         assertThat(GITHUB.bodies("POST /repos/" + repositoryName + "/actions/workflows/77/dispatches")).singleElement()
                 .satisfies(body -> assertThat(body.path("ref").asString()).isEqualTo("main"));
+        assertThat(GITHUB.asUser()).noneMatch(request -> request.contains("/dispatches"));
         Run requested = githubService.runs(slug, projectId).getFirst();
         assertThat(requested.runId()).isNull();
         assertThat(requested.workflowName()).isEqualTo("Deploy");
@@ -428,11 +453,14 @@ class GithubIntegrationTest {
         });
 
         // Todavía no empezó en GitHub: no hay qué repetir ni cancelar
-        assertThatThrownBy(() -> githubService.rerun(slug, projectId, run.id())).isInstanceOf(ConflictException.class);
+        assertThatThrownBy(() -> githubService.rerun(slug, projectId, pm.getId(), run.id())).isInstanceOf(ConflictException.class);
 
         send("workflow_run", runEvent("in_progress", 9100, 77, "Deploy", "develop", "workflow_dispatch", "in_progress", null));
-        githubService.cancel(slug, projectId, run.id());
+        githubService.cancel(slug, projectId, pm.getId(), run.id());
         assertThat(GITHUB.requests()).contains("POST /repos/" + repositoryName + "/actions/runs/9100/cancel");
+        // Lo que pide una persona sale en GitHub con su cuenta, no con la de la app
+        assertThat(GITHUB.asUser()).contains("POST /repos/" + repositoryName + "/actions/workflows/77/dispatches como " + pmLogin,
+                "POST /repos/" + repositoryName + "/actions/runs/9100/cancel como " + pmLogin);
     }
 
     @Test
@@ -564,7 +592,7 @@ class GithubIntegrationTest {
         githubService.saveSettings(slug, projectId, new Settings(started, null, null, null));
         IssueResponse task = task("Sin código en la rama");
 
-        IssueDev dev = githubService.linkBranch(slug, projectId, task.id(), repositoryId, "main");
+        IssueDev dev = githubService.linkBranch(slug, projectId, pm.getId(), task.id(), repositoryId, "main");
 
         assertThat(dev.branches()).extracting("name").containsExactly("main");
         // Enlazarla a mano no es empezar la tarea
@@ -573,7 +601,7 @@ class GithubIntegrationTest {
             assertThat(branch.issueCode()).isEqualTo(identifier + "-" + task.sequenceId());
             assertThat(branch.issueTitle()).isEqualTo("Sin código en la rama");
         });
-        assertThatThrownBy(() -> githubService.linkBranch(slug, projectId, task.id(), repositoryId, "no-existe"))
+        assertThatThrownBy(() -> githubService.linkBranch(slug, projectId, pm.getId(), task.id(), repositoryId, "no-existe"))
                 .isInstanceOf(BadRequestException.class);
     }
 
@@ -583,7 +611,7 @@ class GithubIntegrationTest {
         githubService.saveSettings(slug, projectId, new Settings(started, null, null, null));
         IssueResponse task = task("Todavía no");
 
-        githubService.createBranch(slug, projectId, task.id(), repositoryId, "main", "rama-" + suffix, false);
+        githubService.createBranch(slug, projectId, pm.getId(), task.id(), repositoryId, "main", "rama-" + suffix, false);
 
         assertThat(group(task)).isEqualTo("UNSTARTED");
     }
@@ -598,7 +626,7 @@ class GithubIntegrationTest {
         assertThat(before.available()).isTrue();
         assertThat(before.suggestedBranch()).isEqualTo(identifier.toLowerCase() + "-" + task.sequenceId() + "-anadir-exportacion");
 
-        IssueDev after = githubService.createBranch(slug, projectId, task.id(), repositoryId, null, before.suggestedBranch(), true);
+        IssueDev after = githubService.createBranch(slug, projectId, pm.getId(), task.id(), repositoryId, null, before.suggestedBranch(), true);
 
         assertThat(after.branches()).extracting("name").containsExactly(before.suggestedBranch());
         assertThat(GITHUB.bodies("POST /repos/" + repositoryName + "/git/refs")).singleElement().satisfies(body -> {
@@ -606,13 +634,17 @@ class GithubIntegrationTest {
             assertThat(body.path("sha").asString()).isEqualTo("sha-de-main");
         });
         assertThat(group(task)).isEqualTo("STARTED");
+        // La rama la crea la persona con su cuenta, y la actividad de la tarea dice que fue ella
+        assertThat(GITHUB.asUser()).contains("POST /repos/" + repositoryName + "/git/refs como " + pmLogin);
+        assertThat(values("SELECT a.actor_id FROM issue_activities a WHERE a.issue_id = '" + task.id() + "' AND a.field = 'GITHUB'"))
+                .containsExactly(pm.getId().toString());
 
-        assertThatThrownBy(() -> githubService.createBranch(slug, projectId, task.id(), repositoryId, "main", "con espacio", true))
+        assertThatThrownBy(() -> githubService.createBranch(slug, projectId, pm.getId(), task.id(), repositoryId, "main", "con espacio", true))
                 .isInstanceOf(BadRequestException.class);
-        assertThatThrownBy(() -> githubService.createBranch(slug, projectId, task.id(), repositoryId, "no-existe", "otra", true))
+        assertThatThrownBy(() -> githubService.createBranch(slug, projectId, pm.getId(), task.id(), repositoryId, "no-existe", "otra", true))
                 .isInstanceOf(BadRequestException.class);
         GITHUB.fail("POST /repos/" + repositoryName + "/git/refs", 422);
-        assertThatThrownBy(() -> githubService.createBranch(slug, projectId, task.id(), repositoryId, "main", "repetida", true))
+        assertThatThrownBy(() -> githubService.createBranch(slug, projectId, pm.getId(), task.id(), repositoryId, "main", "repetida", true))
                 .isInstanceOf(ConflictException.class);
     }
 
@@ -627,7 +659,149 @@ class GithubIntegrationTest {
         assertThat(webhookController.setup(installationId, null).getHeaders().getFirst(HttpHeaders.LOCATION)).isEqualTo("http://localhost:5173/");
     }
 
+    // ----- La cuenta de GitHub de cada persona
+
+    @Test
+    void enlazarMiCuentaGuardaQuienSoyYLosTokensCifrados() {
+        User luis = user("luis-" + suffix + "@test.com", "Luis Muñoz");
+        assertThat(accounts.status(luis.getId()).linked()).isFalse();
+        assertThat(accounts.status(luis.getId()).configured()).isTrue();
+
+        String url = accounts.linkUrl(luis.getId());
+        assertThat(url).startsWith(GITHUB.url() + "/login/oauth/authorize?client_id=Iv1.pruebas&redirect_uri=")
+                .contains("http%3A%2F%2Flocalhost%3A5173%2Fgithub%2Fcallback");
+
+        GithubAccounts.MyAccount account = accounts.complete(luis.getId(), "codigo-luis-" + suffix, state(url));
+
+        assertThat(account.linked()).isTrue();
+        assertThat(account.login()).isEqualTo("luis-" + suffix);
+        assertThat(account.profileUrl()).isEqualTo(GITHUB.url() + "/luis-" + suffix);
+        assertThat(account.avatarUrl()).isEqualTo("https://avatars.test/luis-" + suffix);
+        // En la base no queda ningún token legible
+        assertThat(values("SELECT access_token || ' ' || refresh_token FROM github_accounts WHERE user_id = '" + luis.getId() + "'"))
+                .singleElement().asString().doesNotContain("acceso-").doesNotContain("refresco-");
+    }
+
+    @Test
+    void elEnlaceParaConectarSoloLeSirveAQuienLoPidio() {
+        User luis = user("luis-" + suffix + "@test.com", "Luis Muñoz");
+        String state = state(accounts.linkUrl(pm.getId()));
+
+        // Luis llega con el enlace que pidió la PM (se lo pasaron para que autorizara con su cuenta)
+        assertThatThrownBy(() -> accounts.complete(luis.getId(), "codigo-luis-" + suffix, state)).isInstanceOf(BadRequestException.class);
+        // Un estado sin firma o retocado, y un código que GitHub no acepta
+        String own = state(accounts.linkUrl(luis.getId()));
+        assertThatThrownBy(() -> accounts.complete(luis.getId(), "codigo-luis-" + suffix, "sin-firma")).isInstanceOf(BadRequestException.class);
+        assertThatThrownBy(() -> accounts.complete(luis.getId(), "codigo-luis-" + suffix, own.substring(0, own.length() - 2) + "00"))
+                .isInstanceOf(BadRequestException.class);
+        assertThatThrownBy(() -> accounts.complete(luis.getId(), "malo", own)).isInstanceOf(BadRequestException.class);
+        // El enlace de instalar un workspace no sirve para enlazar una cuenta
+        assertThatThrownBy(() -> accounts.complete(pm.getId(), "codigo-x", state(githubService.installUrl(slug, pm.getId()))))
+                .isInstanceOf(BadRequestException.class);
+        assertThat(accounts.status(luis.getId()).linked()).isFalse();
+    }
+
+    @Test
+    void unaCuentaDeGitHubNoSeEnlazaADosPersonas() {
+        User luis = user("luis-" + suffix + "@test.com", "Luis Muñoz");
+
+        assertThatThrownBy(() -> accounts.complete(luis.getId(), "codigo-" + pmLogin, state(accounts.linkUrl(luis.getId()))))
+                .isInstanceOf(ConflictException.class).hasMessageContaining("otro usuario");
+        // La misma persona sí puede volver a enlazar la suya
+        assertThat(accounts.complete(pm.getId(), "codigo-" + pmLogin, state(accounts.linkUrl(pm.getId()))).linked()).isTrue();
+    }
+
+    @Test
+    void sinCuentaEnlazadaSePuedeVerPeroNoActuar() {
+        UUID repositoryId = connect();
+        User luis = user("luis-" + suffix + "@test.com", "Luis Muñoz");
+        IssueResponse task = task("Solo mirar");
+        send("workflow_run", runEvent("completed", 9400, 78, "CI", "main", "push", "completed", "failure"));
+        UUID runId = githubService.runs(slug, projectId).getFirst().id();
+
+        assertThat(githubService.issue(slug, projectId, task.id()).available()).isTrue();
+        assertThat(githubService.workflows(slug, projectId, repositoryId)).isNotEmpty();
+        assertThatThrownBy(() -> githubService.dispatch(slug, projectId, luis.getId(), repositoryId, 77, "Deploy", "main", Map.of(), null))
+                .isInstanceOf(ConflictException.class).hasMessageContaining("Conecta tu cuenta de GitHub");
+        assertThatThrownBy(() -> githubService.rerun(slug, projectId, luis.getId(), runId)).isInstanceOf(ConflictException.class);
+        assertThatThrownBy(() -> githubService.createBranch(slug, projectId, luis.getId(), task.id(), repositoryId, "main", "rama-" + suffix, true))
+                .isInstanceOf(ConflictException.class).hasMessageContaining("Conecta tu cuenta de GitHub");
+        assertThat(GITHUB.requests()).noneMatch(request -> request.endsWith("/dispatches") || request.endsWith("/git/refs") || request.endsWith("/rerun"));
+        assertThat(githubService.runs(slug, projectId)).hasSize(1);
+    }
+
+    @Test
+    void siMiCuentaNoTienePermisoEnElRepositorioSeExplica() {
+        UUID repositoryId = connect();
+        GITHUB.readOnly(pmLogin);
+        IssueResponse task = task("Sin permiso");
+
+        assertThatThrownBy(() -> githubService.dispatch(slug, projectId, pm.getId(), repositoryId, 77, "Deploy", "main", Map.of(), null))
+                .isInstanceOf(ConflictException.class).hasMessageContaining("no tiene permiso de escritura en " + repositoryName);
+        assertThatThrownBy(() -> githubService.createBranch(slug, projectId, pm.getId(), task.id(), repositoryId, "main", "rama-" + suffix, true))
+                .isInstanceOf(ConflictException.class).hasMessageContaining(repositoryName);
+        assertThat(githubService.runs(slug, projectId)).isEmpty();
+        assertThat(githubService.issue(slug, projectId, task.id()).branches()).isEmpty();
+    }
+
+    @Test
+    void elTokenSeRenuevaSoloYSiGitHubYaNoLoAceptaLaCuentaSeDesenlaza() {
+        UUID repositoryId = connect();
+        sql("UPDATE github_accounts SET access_expires_at = now() - interval '1 minute' WHERE user_id = '" + pm.getId() + "'");
+
+        githubService.dispatch(slug, projectId, pm.getId(), repositoryId, 77, "Deploy", "main", Map.of(), null);
+
+        assertThat(GITHUB.bodies("POST /login/oauth/access_token")).last()
+                .satisfies(body -> assertThat(body.path("grant_type").asString()).isEqualTo("refresh_token"));
+        assertThat(values("SELECT (access_expires_at > now())::text FROM github_accounts WHERE user_id = '" + pm.getId() + "'")).containsExactly("true");
+
+        // La persona quitó la autorización en GitHub: al renovar ya no sirve, y la cuenta queda desenlazada
+        GITHUB.revoked(pmLogin);
+        sql("UPDATE github_accounts SET access_expires_at = now() - interval '1 minute' WHERE user_id = '" + pm.getId() + "'");
+        assertThatThrownBy(() -> githubService.dispatch(slug, projectId, pm.getId(), repositoryId, 77, "Deploy", "main", Map.of(), null))
+                .isInstanceOf(ConflictException.class).hasMessageContaining("caducó");
+        assertThat(accounts.status(pm.getId()).linked()).isFalse();
+    }
+
+    @Test
+    void desenlazarMiCuentaAnulaElTokenEnGitHub() {
+        accounts.unlink(pm.getId());
+
+        assertThat(accounts.status(pm.getId()).linked()).isFalse();
+        assertThat(GITHUB.requests()).contains("DELETE /applications/Iv1.pruebas/token");
+    }
+
+    @Test
+    void quienAbreElPullRequestEsLaPersonaDeTaskFlowSiEnlazoSuCuenta() {
+        connect();
+        IssueResponse task = task("Con autora");
+        IssueResponse other = task("De alguien de fuera");
+
+        send("pull_request", pullEvent("opened", 60, "Con autora", branch(task), "open", false, false, pmLogin));
+        send("pull_request", pullEvent("opened", 61, "De fuera", branch(other), "open", false, false, "externo"));
+
+        assertThat(githubService.issue(slug, projectId, task.id()).pullRequests()).singleElement().satisfies(pull -> {
+            assertThat(pull.authorName()).isEqualTo("Paula PM");
+            assertThat(pull.authorUserId()).isEqualTo(pm.getId());
+        });
+        assertThat(githubService.issue(slug, projectId, other.id()).pullRequests()).singleElement()
+                .satisfies(pull -> assertThat(pull.authorName()).isNull());
+        // En la actividad de la tarea, lo hizo ella; lo de alguien de fuera queda sin autor de TaskFlow
+        assertThat(values("SELECT coalesce(a.actor_id::text, 'nadie') FROM issue_activities a WHERE a.issue_id = '" + task.id()
+                + "' AND a.field = 'GITHUB' AND a.new_value LIKE 'PR_OPENED%'")).containsExactly(pm.getId().toString());
+        assertThat(values("SELECT coalesce(a.actor_id::text, 'nadie') FROM issue_activities a WHERE a.issue_id = '" + other.id()
+                + "' AND a.field = 'GITHUB' AND a.new_value LIKE 'PR_OPENED%'")).containsExactly("nadie");
+        // El equipo ve quién tiene su cuenta enlazada
+        assertThat(githubService.workspace(slug).accounts()).extracting("fullName", "login").containsExactly(
+                org.assertj.core.groups.Tuple.tuple("Paula PM", pmLogin));
+    }
+
     // ----- Ayudas
+
+    /** Enlaza la cuenta de GitHub de una persona (como si hubiera autorizado en GitHub con ese usuario). */
+    private void link(User user, String login) {
+        assertThat(accounts.complete(user.getId(), "codigo-" + login, state(accounts.linkUrl(user.getId()))).linked()).isTrue();
+    }
 
     /** Conecta el workspace y enlaza el repositorio al proyecto. */
     private UUID connect() {
@@ -638,8 +812,8 @@ class GithubIntegrationTest {
         return repositoryId;
     }
 
-    private static String state(String installUrl) {
-        return installUrl.substring(installUrl.indexOf("state=") + "state=".length());
+    private static String state(String url) {
+        return url.substring(url.indexOf("state=") + "state=".length());
     }
 
     private IssueResponse task(String title) {
@@ -670,6 +844,11 @@ class GithubIntegrationTest {
     }
 
     private Map<String, Object> pullEvent(String action, int number, String title, String head, String state, boolean merged, boolean draft) {
+        return pullEvent(action, number, title, head, state, merged, draft, "luis");
+    }
+
+    private Map<String, Object> pullEvent(String action, int number, String title, String head, String state, boolean merged, boolean draft,
+                                          String author) {
         Map<String, Object> pull = new java.util.LinkedHashMap<>();
         pull.put("number", number);
         pull.put("title", title);
@@ -681,7 +860,7 @@ class GithubIntegrationTest {
             pull.put("merged_at", "2026-11-10T10:00:00Z");
         }
         pull.put("html_url", "https://github.test/" + repositoryName + "/pull/" + number);
-        pull.put("user", Map.of("login", "luis"));
+        pull.put("user", Map.of("login", author));
         pull.put("head", Map.of("ref", head, "sha", "sha-del-pr"));
         pull.put("base", Map.of("ref", "main"));
         pull.put("requested_reviewers", List.of(Map.of("login", "marta")));
@@ -778,6 +957,14 @@ class GithubIntegrationTest {
         private volatile long repositoryId;
         private volatile String repository;
         private volatile Instant installedAt;
+        /** Lo que se pidió con la cuenta de una persona: «POST /ruta como usuario». */
+        private final List<String> asUser = new CopyOnWriteArrayList<>();
+        /** Personas que no ven la instalación, que no pueden escribir en el repositorio, o que anularon la autorización. */
+        private final java.util.Set<String> outsiders = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        private final java.util.Set<String> readOnly = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        private final java.util.Set<String> revoked = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        private final Map<String, Long> userIds = new java.util.concurrent.ConcurrentHashMap<>();
+        private final AtomicLong tokens = new AtomicLong();
 
         FakeGithub() {
             try {
@@ -814,6 +1001,32 @@ class GithubIntegrationTest {
             requests.clear();
             bodies.clear();
             failures.clear();
+            asUser.clear();
+            outsiders.clear();
+            readOnly.clear();
+            revoked.clear();
+        }
+
+        List<String> asUser() {
+            return asUser;
+        }
+
+        void outsider(String login) {
+            outsiders.add(login);
+        }
+
+        void readOnly(String login) {
+            readOnly.add(login);
+        }
+
+        void revoked(String login) {
+            revoked.add(login);
+        }
+
+        /** Los tokens de una persona: «acceso-<usuario>-<n>» y «refresco-<usuario>». */
+        private Map<String, Object> tokensOf(String login) {
+            return Map.of("access_token", "acceso-" + login + "-" + tokens.incrementAndGet(), "expires_in", 28800,
+                    "refresh_token", "refresco-" + login, "refresh_token_expires_in", 15897600, "token_type", "bearer");
         }
 
         void installedAt(Instant when) {
@@ -841,9 +1054,41 @@ class GithubIntegrationTest {
             Integer failure = failures.get(request);
             int status = 200;
             Object response;
-            if (authorization == null || !authorization.startsWith("Bearer ")) {
+            // La cuenta de una persona: su token es «acceso-<usuario>-<n>»
+            String login = authorization != null && authorization.startsWith("Bearer acceso-")
+                    ? authorization.substring("Bearer acceso-".length(), authorization.lastIndexOf('-')) : null;
+            if (login != null) {
+                asUser.add(request + " como " + login);
+            }
+            if (request.equals("POST /login/oauth/access_token")) {
+                // Cambiar el código (o el token de refresco) por los tokens de la persona; GitHub responde 200 también al fallar
+                JsonNode form = JSON.readTree(received);
+                bodies.add(Map.entry(request, form));
+                String code = form.path("code").asString("");
+                String refresh = form.path("refresh_token").asString("");
+                if (!"secreto-de-cliente".equals(form.path("client_secret").asString(""))) {
+                    response = Map.of("error", "incorrect_client_credentials");
+                } else if (code.startsWith("codigo-")) {
+                    response = tokensOf(code.substring("codigo-".length()));
+                } else if (refresh.startsWith("refresco-") && !revoked.contains(refresh.substring("refresco-".length()))) {
+                    response = tokensOf(refresh.substring("refresco-".length()));
+                } else {
+                    response = Map.of("error", code.isEmpty() ? "bad_refresh_token" : "bad_verification_code");
+                }
+            } else if (path.startsWith("/applications/") && authorization != null && authorization.startsWith("Basic ")) {
+                status = 204;
+                response = null;
+            } else if (authorization == null || !authorization.startsWith("Bearer ")) {
                 status = 401;
                 response = Map.of("message", "sin credenciales");
+            } else if (login != null && request.equals("GET /user")) {
+                response = Map.of("id", userIds.computeIfAbsent(login, key -> IDS.incrementAndGet()), "login", login,
+                        "avatar_url", "https://avatars.test/" + login);
+            } else if (login != null && request.equals("GET /user/installations")) {
+                response = Map.of("total_count", 1, "installations", outsiders.contains(login) ? List.of() : List.of(Map.of("id", installationId)));
+            } else if (login != null && readOnly.contains(login) && !exchange.getRequestMethod().equals("GET")) {
+                status = 403;
+                response = Map.of("message", "Resource not accessible by integration");
             } else if (failure != null) {
                 status = failure;
                 response = Map.of("message", "rechazado");

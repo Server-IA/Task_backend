@@ -84,6 +84,11 @@ class ControllerPermissionsTest {
             "UserController.startAvatarUpload",
             "UserController.confirmAvatar",
             "UserController.removeAvatar",
+            // Mi cuenta de GitHub (enlazarla, verla y desenlazarla): el servicio trabaja con el usuario de la sesión
+            "GithubAccountController.status",
+            "GithubAccountController.link",
+            "GithubAccountController.complete",
+            "GithubAccountController.unlink",
             // URLs firmadas de archivos: el servicio solo firma los de proyectos accesibles y las fotos de quien
             // comparte un workspace (un id ajeno, aunque se adivine, no viene)
             "FileController.resolveUrls",

@@ -143,16 +143,18 @@ public class ProjectGithubController {
     @PostMapping("/runs/{runId}/rerun")
     @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'GITHUB_RUN')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void rerun(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID runId) {
-        githubService.rerun(slug, projectId, runId);
+    public void rerun(@PathVariable String slug, @PathVariable UUID projectId, @AuthenticationPrincipal UserPrincipal me,
+                      @PathVariable UUID runId) {
+        githubService.rerun(slug, projectId, me.getId(), runId);
     }
 
     @Operation(summary = "Cancelar una ejecución")
     @PostMapping("/runs/{runId}/cancel")
     @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'GITHUB_RUN')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void cancel(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID runId) {
-        githubService.cancel(slug, projectId, runId);
+    public void cancel(@PathVariable String slug, @PathVariable UUID projectId, @AuthenticationPrincipal UserPrincipal me,
+                       @PathVariable UUID runId) {
+        githubService.cancel(slug, projectId, me.getId(), runId);
     }
 
     @Operation(summary = "Workflows que se pueden ejecutar a mano", description = "Con los datos que pide cada uno.")
@@ -195,18 +197,18 @@ public class ProjectGithubController {
     @PostMapping("/issues/{issueId}/branches")
     @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'ISSUE_EDIT')")
     @ResponseStatus(HttpStatus.CREATED)
-    public IssueDev createBranch(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID issueId,
-                                 @RequestBody BranchRequest request) {
-        return githubService.createBranch(slug, projectId, issueId, request.repositoryId(), request.base(), request.name(),
+    public IssueDev createBranch(@PathVariable String slug, @PathVariable UUID projectId, @AuthenticationPrincipal UserPrincipal me,
+                                 @PathVariable UUID issueId, @RequestBody BranchRequest request) {
+        return githubService.createBranch(slug, projectId, me.getId(), issueId, request.repositoryId(), request.base(), request.name(),
                 !Boolean.FALSE.equals(request.move()));
     }
 
     @Operation(summary = "Enlazar una rama que ya existe con la tarea")
     @PostMapping("/issues/{issueId}/branches/link")
     @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'ISSUE_EDIT')")
-    public IssueDev linkBranch(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID issueId,
-                               @RequestBody LinkBranchRequest request) {
-        return githubService.linkBranch(slug, projectId, issueId, request.repositoryId(), request.name());
+    public IssueDev linkBranch(@PathVariable String slug, @PathVariable UUID projectId, @AuthenticationPrincipal UserPrincipal me,
+                               @PathVariable UUID issueId, @RequestBody LinkBranchRequest request) {
+        return githubService.linkBranch(slug, projectId, me.getId(), issueId, request.repositoryId(), request.name());
     }
 
     @Operation(summary = "Ramas enlazadas a tareas del proyecto")

@@ -141,6 +141,86 @@ public class GithubClient {
         return pages(installationId, "/repos/" + repository + "/commits/" + sha + "/check-runs?", "check_runs");
     }
 
+    // ----- Como una persona (su cuenta de GitHub enlazada)
+
+    /**
+     * Los tokens de una persona. El de acceso dura horas; el de refresco, meses. Si la app no hace caducar sus tokens,
+     * solo viene el de acceso y no caduca.
+     */
+    public record UserToken(String accessToken, String refreshToken, Instant accessExpiresAt, Instant refreshExpiresAt) {
+    }
+
+    /** Cambia el código que GitHub entrega al autorizar por los tokens de la persona. */
+    public UserToken exchangeCode(String code) {
+        return oauth(Map.of("client_id", properties.clientId(), "client_secret", properties.clientSecret(), "code", code));
+    }
+
+    /** Pide tokens nuevos con el de refresco. */
+    public UserToken refresh(String refreshToken) {
+        return oauth(Map.of("client_id", properties.clientId(), "client_secret", properties.clientSecret(),
+                "grant_type", "refresh_token", "refresh_token", refreshToken));
+    }
+
+    private UserToken oauth(Map<String, String> body) {
+        JsonNode response = call("POST", properties.webUrl() + "/login/oauth/access_token", null, body);
+        String access = text(response, "access_token");
+        if (access.isEmpty()) {
+            // GitHub responde 200 con el error adentro (código vencido, refresco anulado…)
+            throw new GithubException(400, text(response, "error"), null);
+        }
+        Instant now = Instant.now();
+        long accessSeconds = response.path("expires_in").asLong(0);
+        long refreshSeconds = response.path("refresh_token_expires_in").asLong(0);
+        String refresh = text(response, "refresh_token");
+        return new UserToken(access, refresh.isEmpty() ? null : refresh, accessSeconds > 0 ? now.plusSeconds(accessSeconds) : null,
+                refreshSeconds > 0 ? now.plusSeconds(refreshSeconds) : null);
+    }
+
+    /** Quién es la persona en GitHub ({@code id}, {@code login}, {@code avatar_url}). */
+    public JsonNode user(String userToken) {
+        return send("GET", "/user", userToken, null);
+    }
+
+    /** Si la persona puede ver esa instalación de la app (es de su cuenta o de una organización suya). */
+    public boolean userCanAccess(String userToken, long installationId) {
+        for (int page = 1; page <= MAX_PAGES; page++) {
+            JsonNode list = send("GET", "/user/installations?per_page=" + PAGE + "&page=" + page, userToken, null).path("installations");
+            for (JsonNode installation : list) {
+                if (installation.path("id").asLong(0) == installationId) {
+                    return true;
+                }
+            }
+            if (list.size() < PAGE) {
+                break;
+            }
+        }
+        return false;
+    }
+
+    public void createBranchAs(String userToken, String repository, String name, String sha) {
+        send("POST", "/repos/" + repository + "/git/refs", userToken, Map.of("ref", "refs/heads/" + name, "sha", sha));
+    }
+
+    public void dispatchWorkflowAs(String userToken, String repository, long workflowId, String ref, Map<String, String> inputs) {
+        send("POST", "/repos/" + repository + "/actions/workflows/" + workflowId + "/dispatches", userToken,
+                inputs == null || inputs.isEmpty() ? Map.of("ref", ref) : Map.of("ref", ref, "inputs", inputs));
+    }
+
+    public void rerunAs(String userToken, String repository, long runId) {
+        send("POST", "/repos/" + repository + "/actions/runs/" + runId + "/rerun", userToken, null);
+    }
+
+    public void cancelAs(String userToken, String repository, long runId) {
+        send("POST", "/repos/" + repository + "/actions/runs/" + runId + "/cancel", userToken, null);
+    }
+
+    /** Anula el token de una persona (al desenlazar su cuenta). */
+    public void revoke(String userToken) {
+        String basic = java.util.Base64.getEncoder()
+                .encodeToString((properties.clientId() + ":" + properties.clientSecret()).getBytes(StandardCharsets.UTF_8));
+        call("DELETE", properties.apiUrl() + "/applications/" + properties.clientId() + "/token", "Basic " + basic, Map.of("access_token", userToken));
+    }
+
     // ----- Peticiones
 
     private JsonNode get(long installationId, String path) {
@@ -162,12 +242,20 @@ public class GithubClient {
     }
 
     private JsonNode send(String method, String path, String token, Object body) {
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(properties.apiUrl() + path))
+        return call(method, properties.apiUrl() + path, "Bearer " + token, body);
+    }
+
+    private JsonNode call(String method, String url, String authorization, Object body) {
+        String path = URI.create(url).getPath();
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(url))
                 .timeout(TIMEOUT)
-                .header("Accept", "application/vnd.github+json")
+                // El intercambio de OAuth responde JSON solo si se le pide así
+                .header("Accept", path.startsWith("/login/oauth/") ? "application/json" : "application/vnd.github+json")
                 .header("X-GitHub-Api-Version", "2022-11-28")
-                .header("User-Agent", "TaskFlow")
-                .header("Authorization", "Bearer " + token);
+                .header("User-Agent", "TaskFlow");
+        if (authorization != null) {
+            request.header("Authorization", authorization);
+        }
         if (body == null) {
             request.method(method, HttpRequest.BodyPublishers.noBody());
         } else {

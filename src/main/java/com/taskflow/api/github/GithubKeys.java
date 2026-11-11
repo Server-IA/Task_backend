@@ -1,12 +1,15 @@
 package com.taskflow.api.github;
 
+import javax.crypto.Cipher;
 import javax.crypto.Mac;
+import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
 import java.security.MessageDigest;
 import java.security.PrivateKey;
+import java.security.SecureRandom;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.Base64;
 import java.util.HexFormat;
@@ -80,19 +83,64 @@ public final class GithubKeys {
      * una firma de aviso nunca sirva como firma de enlace.
      */
     public static String sign(String secret, String text) {
+        return sign(secret, "install", text);
+    }
+
+    /**
+     * La firma de un enlace para un propósito ({@code install}: instalar la app en un workspace; {@code link}: enlazar
+     * la cuenta de una persona). La de un propósito no sirve para otro.
+     */
+    public static String sign(String secret, String purpose, String text) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            return HexFormat.of().formatHex(mac.doFinal(("taskflow-install:" + text).getBytes(StandardCharsets.UTF_8)));
+            return HexFormat.of().formatHex(mac.doFinal(("taskflow-" + purpose + ":" + text).getBytes(StandardCharsets.UTF_8)));
         } catch (GeneralSecurityException ex) {
-            throw new IllegalStateException("No se pudo firmar el enlace de instalación", ex);
+            throw new IllegalStateException("No se pudo firmar el enlace", ex);
         }
     }
 
     /** Si esa es la firma de ese texto; la comparación no depende de en qué carácter difieren. */
     public static boolean signed(String secret, String text, String signature) {
-        return signature != null && MessageDigest.isEqual(sign(secret, text).getBytes(StandardCharsets.UTF_8),
+        return signed(secret, "install", text, signature);
+    }
+
+    public static boolean signed(String secret, String purpose, String text, String signature) {
+        return signature != null && MessageDigest.isEqual(sign(secret, purpose, text).getBytes(StandardCharsets.UTF_8),
                 signature.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Cifra un token para guardarlo (AES-GCM con una clave derivada del secreto): {@code base64(iv + cifrado)}. Quien
+     * lea la base de datos sin el secreto del servidor no obtiene tokens de GitHub.
+     */
+    public static String seal(String secret, String text) {
+        try {
+            byte[] iv = new byte[12];
+            new SecureRandom().nextBytes(iv);
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE, tokenKey(secret), new GCMParameterSpec(128, iv));
+            return Base64.getEncoder().encodeToString(concat(iv, cipher.doFinal(text.getBytes(StandardCharsets.UTF_8))));
+        } catch (GeneralSecurityException ex) {
+            throw new IllegalStateException("No se pudo cifrar el token", ex);
+        }
+    }
+
+    /** Lo contrario de {@link #seal}. Falla si el texto se alteró o el secreto cambió. */
+    public static String open(String secret, String sealed) {
+        try {
+            byte[] all = Base64.getDecoder().decode(sealed);
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.DECRYPT_MODE, tokenKey(secret), new GCMParameterSpec(128, all, 0, 12));
+            return new String(cipher.doFinal(all, 12, all.length - 12), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException | GeneralSecurityException ex) {
+            throw new IllegalStateException("No se pudo leer el token guardado: el secreto de la app cambió", ex);
+        }
+    }
+
+    private static SecretKeySpec tokenKey(String secret) throws GeneralSecurityException {
+        byte[] key = MessageDigest.getInstance("SHA-256").digest(("taskflow-github-tokens:" + secret).getBytes(StandardCharsets.UTF_8));
+        return new SecretKeySpec(key, "AES");
     }
 
     /**

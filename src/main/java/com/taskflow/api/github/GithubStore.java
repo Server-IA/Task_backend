@@ -44,7 +44,7 @@ public class GithubStore {
                               String issueState, String issueStateGroup, UUID issueProjectId, int number, String title, String state,
                               String url, String authorLogin, String headBranch, String baseBranch, String headSha, String reviewers,
                               String checksState, int checksTotal, int checksFailed, Instant mergedAt, Instant openedAt,
-                              Instant changedAt) {
+                              Instant changedAt, UUID authorUserId, String authorName) {
     }
 
     public record Branch(UUID id, UUID repositoryId, String repository, UUID issueId, String issueCode, String issueTitle, String name,
@@ -268,15 +268,20 @@ public class GithubStore {
             SELECT pr.id, pr.repository_id, r.full_name, pr.issue_id,
                    CASE WHEN i.id IS NULL THEN NULL ELSE p.identifier || '-' || i.sequence_id END, i.title, s.name, s.state_group, i.project_id,
                    pr.number, pr.title, pr.state, pr.url, pr.author_login, pr.head_branch, pr.base_branch, pr.head_sha, pr.reviewers,
-                   pr.checks_state, pr.checks_total, pr.checks_failed, pr.merged_at, pr.opened_at, pr.changed_at
+                   pr.checks_state, pr.checks_total, pr.checks_failed, pr.merged_at, pr.opened_at, pr.changed_at, au.id, au.full_name
             FROM github_pull_requests pr JOIN github_repositories r ON r.id = pr.repository_id
+                 JOIN github_installations gi ON gi.id = r.installation_id
                  LEFT JOIN issues i ON i.id = pr.issue_id LEFT JOIN projects p ON p.id = i.project_id LEFT JOIN states s ON s.id = i.state_id
+                 -- Quien lo abrió, si es alguien del workspace que enlazó su cuenta de GitHub
+                 LEFT JOIN github_accounts ga ON lower(ga.login) = lower(pr.author_login)
+                      AND EXISTS (SELECT 1 FROM workspace_members wm WHERE wm.workspace_id = gi.workspace_id AND wm.user_id = ga.user_id)
+                 LEFT JOIN users au ON au.id = ga.user_id
             """;
     private static final RowMapper<PullRequest> PULL_ROW = (row, index) -> new PullRequest(uuid(row, 1), uuid(row, 2), row.getString(3),
             uuid(row, 4), row.getString(5), row.getString(6), row.getString(7), row.getString(8), uuid(row, 9), row.getInt(10),
             row.getString(11), row.getString(12), row.getString(13), row.getString(14), row.getString(15), row.getString(16),
             row.getString(17), row.getString(18), row.getString(19), row.getInt(20), row.getInt(21), instant(row, 22), instant(row, 23),
-            instant(row, 24));
+            instant(row, 24), uuid(row, 25), row.getString(26));
 
     public Optional<PullRequest> pullRequest(UUID repositoryId, int number) {
         return jdbc.query(PULL + " WHERE pr.repository_id = ? AND pr.number = ?", PULL_ROW, repositoryId, number).stream().findFirst();
@@ -522,6 +527,79 @@ public class GithubStore {
                   AND (pr.number IS NOT NULL OR EXISTS (SELECT 1 FROM github_branches b WHERE b.issue_id = i.id))
                 """, (row, index) -> new IssueSummary(uuid(row, 1), row.getString(2), row.getInt(3), intOrNull(row, 4), row.getString(5),
                 row.getString(6), row.getString(7), row.getBoolean(8)), projectId);
+    }
+
+    // ----- La cuenta de GitHub de cada persona
+
+    /** Los tokens vienen cifrados, como se guardan. */
+    public record Account(UUID userId, long githubId, String login, String avatarUrl, String accessToken, String refreshToken,
+                          Instant accessExpiresAt, Instant refreshExpiresAt, Instant createdAt) {
+    }
+
+    /** Alguien del workspace y su usuario de GitHub ({@code null} si no ha enlazado su cuenta). */
+    public record MemberAccount(UUID userId, String fullName, String login) {
+    }
+
+    public Optional<Account> account(UUID userId) {
+        return jdbc.query("""
+                SELECT user_id, github_id, login, avatar_url, access_token, refresh_token, access_expires_at, refresh_expires_at, created_at
+                FROM github_accounts WHERE user_id = ?
+                """, (row, index) -> new Account(uuid(row, 1), row.getLong(2), row.getString(3), row.getString(4), row.getString(5),
+                row.getString(6), instant(row, 7), instant(row, 8), instant(row, 9)), userId).stream().findFirst();
+    }
+
+    /** De quién es esa cuenta de GitHub en TaskFlow. */
+    public Optional<UUID> accountOwner(long githubId) {
+        return jdbc.query("SELECT user_id FROM github_accounts WHERE github_id = ?", (row, index) -> uuid(row, 1), githubId).stream().findFirst();
+    }
+
+    public void saveAccount(UUID userId, long githubId, String login, String avatarUrl, String accessToken, String refreshToken,
+                            Instant accessExpiresAt, Instant refreshExpiresAt) {
+        jdbc.update("""
+                INSERT INTO github_accounts (user_id, github_id, login, avatar_url, access_token, refresh_token, access_expires_at,
+                                             refresh_expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (user_id) DO UPDATE
+                SET github_id = EXCLUDED.github_id, login = EXCLUDED.login, avatar_url = EXCLUDED.avatar_url,
+                    access_token = EXCLUDED.access_token, refresh_token = EXCLUDED.refresh_token,
+                    access_expires_at = EXCLUDED.access_expires_at, refresh_expires_at = EXCLUDED.refresh_expires_at,
+                    created_at = now(), updated_at = now()
+                """, userId, githubId, cut(login, 100), cut(avatarUrl, 500), accessToken, refreshToken, timestamp(accessExpiresAt),
+                timestamp(refreshExpiresAt));
+    }
+
+    public void saveAccountTokens(UUID userId, String accessToken, String refreshToken, Instant accessExpiresAt, Instant refreshExpiresAt) {
+        jdbc.update("""
+                UPDATE github_accounts SET access_token = ?, refresh_token = ?, access_expires_at = ?, refresh_expires_at = ?, updated_at = now()
+                WHERE user_id = ?
+                """, accessToken, refreshToken, timestamp(accessExpiresAt), timestamp(refreshExpiresAt), userId);
+    }
+
+    public void deleteAccount(UUID userId) {
+        jdbc.update("DELETE FROM github_accounts WHERE user_id = ?", userId);
+    }
+
+    /** Los miembros del workspace con su usuario de GitHub, los enlazados primero. */
+    public List<MemberAccount> memberAccounts(UUID workspaceId) {
+        return jdbc.query("""
+                SELECT u.id, u.full_name, ga.login
+                FROM workspace_members wm JOIN users u ON u.id = wm.user_id LEFT JOIN github_accounts ga ON ga.user_id = u.id
+                WHERE wm.workspace_id = ? ORDER BY (ga.login IS NULL), lower(u.full_name)
+                """, (row, index) -> new MemberAccount(uuid(row, 1), row.getString(2), row.getString(3)), workspaceId);
+    }
+
+    /** La persona del workspace de ese repositorio que tiene enlazado ese usuario de GitHub. */
+    public Optional<UUID> memberByLogin(UUID repositoryId, String login) {
+        if (login == null || login.isBlank()) {
+            return Optional.empty();
+        }
+        return jdbc.query("""
+                SELECT ga.user_id
+                FROM github_accounts ga JOIN workspace_members wm ON wm.user_id = ga.user_id
+                     JOIN github_installations gi ON gi.workspace_id = wm.workspace_id
+                     JOIN github_repositories r ON r.installation_id = gi.id
+                WHERE r.id = ? AND lower(ga.login) = lower(?)
+                """, (row, index) -> uuid(row, 1), repositoryId, login).stream().findFirst();
     }
 
     // ----- Utilidades

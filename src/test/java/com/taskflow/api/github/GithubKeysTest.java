@@ -93,6 +93,32 @@ class GithubKeysTest {
     }
 
     @Test
+    void laFirmaDeUnPropositoNoSirveParaOtro() {
+        String install = GithubKeys.sign("secreto", "install", "datos");
+
+        assertThat(GithubKeys.signed("secreto", "install", "datos", install)).isTrue();
+        assertThat(GithubKeys.signed("secreto", "link", "datos", install)).isFalse();
+        // La firma sin propósito es la de instalar
+        assertThat(GithubKeys.sign("secreto", "datos")).isEqualTo(install);
+    }
+
+    @Test
+    void cifraLosTokensYSoloSeLeenConElMismoSecreto() {
+        String sealed = GithubKeys.seal("secreto-de-cliente", "ghu_token-de-una-persona");
+
+        assertThat(sealed).doesNotContain("ghu_");
+        assertThat(GithubKeys.open("secreto-de-cliente", sealed)).isEqualTo("ghu_token-de-una-persona");
+        // Cada vez sale distinto (vector aleatorio), así dos tokens iguales no se reconocen en la base
+        assertThat(GithubKeys.seal("secreto-de-cliente", "ghu_token-de-una-persona")).isNotEqualTo(sealed);
+        assertThatThrownBy(() -> GithubKeys.open("otro-secreto", sealed)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> GithubKeys.open("secreto-de-cliente", "no es base64 !")).isInstanceOf(IllegalStateException.class);
+        // Un cifrado retocado no se abre
+        char last = sealed.charAt(sealed.length() - 3);
+        String tampered = sealed.substring(0, sealed.length() - 3) + (last == 'A' ? 'B' : 'A') + sealed.substring(sealed.length() - 2);
+        assertThatThrownBy(() -> GithubKeys.open("secreto-de-cliente", tampered)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void unaFirmaDeAvisoNoValeComoFirmaDeEnlace() throws Exception {
         // Quien consiguiera que GitHub firmara un cuerpo elegido no obtiene con eso un enlace de instalación válido
         String text = "workspace|persona|123";
