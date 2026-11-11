@@ -421,14 +421,20 @@ public class GithubStore {
         return jdbc.query(RUN + " WHERE w.id = ?", RUN_ROW, id).stream().findFirst();
     }
 
+    /**
+     * Una ejecución que TaskFlow pidió y GitHub no anunció en una hora ya no va a llegar (el aviso se perdió o el
+     * workflow no arrancó): deja de mostrarse como pendiente.
+     */
+    private static final String NOT_LOST = " AND NOT (w.run_id IS NULL AND w.requested_at < now() - interval '1 hour')";
+
     public List<Run> runsOfProject(UUID projectId, int limit) {
-        return jdbc.query(RUN + " JOIN project_repositories link ON link.repository_id = w.repository_id WHERE link.project_id = ?"
+        return jdbc.query(RUN + " JOIN project_repositories link ON link.repository_id = w.repository_id WHERE link.project_id = ?" + NOT_LOST
                 + " ORDER BY coalesce(w.started_at, w.requested_at, w.changed_at) DESC LIMIT ?", RUN_ROW, projectId, limit);
     }
 
     public List<Run> runsOf(UUID issueId, int limit) {
-        return jdbc.query(RUN + " WHERE w.issue_id = ? ORDER BY coalesce(w.started_at, w.requested_at, w.changed_at) DESC LIMIT ?", RUN_ROW,
-                issueId, limit);
+        return jdbc.query(RUN + " WHERE w.issue_id = ?" + NOT_LOST + " ORDER BY coalesce(w.started_at, w.requested_at, w.changed_at) DESC LIMIT ?",
+                RUN_ROW, issueId, limit);
     }
 
     // ----- Ajustes y reglas del proyecto
@@ -460,7 +466,7 @@ public class GithubStore {
             FROM github_rules g JOIN github_repositories r ON r.id = g.repository_id
                  LEFT JOIN LATERAL (
                      SELECT w.started_at, w.requested_at, w.changed_at, w.status, w.conclusion FROM github_workflow_runs w
-                     WHERE w.rule_id = g.id ORDER BY coalesce(w.started_at, w.requested_at, w.changed_at) DESC LIMIT 1) last ON TRUE
+                     WHERE w.rule_id = g.id AND NOT (w.run_id IS NULL AND w.requested_at < now() - interval '1 hour') ORDER BY coalesce(w.started_at, w.requested_at, w.changed_at) DESC LIMIT 1) last ON TRUE
             """;
     private static final RowMapper<Rule> RULE_ROW = (row, index) -> new Rule(uuid(row, 1), uuid(row, 2), row.getString(3), uuid(row, 4),
             row.getString(5), row.getLong(6), row.getString(7), row.getString(8), instant(row, 9), row.getString(10), row.getString(11));
@@ -504,7 +510,8 @@ public class GithubStore {
                        (SELECT count(*) FROM github_branches b WHERE b.issue_id = i.id),
                        pr.number, pr.state, pr.checks_state, pr.url,
                        EXISTS (SELECT 1 FROM github_workflow_runs w WHERE w.issue_id = i.id AND w.status <> 'completed'
-                               AND coalesce(w.started_at, w.requested_at, w.changed_at) > now() - interval '2 hours')
+                               AND coalesce(w.started_at, w.requested_at, w.changed_at)
+                                   > now() - CASE WHEN w.run_id IS NULL THEN interval '10 minutes' ELSE interval '2 hours' END)
                 FROM issues i
                      LEFT JOIN LATERAL (
                          SELECT p.number, p.state, p.checks_state, p.url FROM github_pull_requests p WHERE p.issue_id = i.id

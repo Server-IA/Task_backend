@@ -436,6 +436,25 @@ class GithubIntegrationTest {
     }
 
     @Test
+    void unaEjecucionPedidaQueGitHubNuncaAnuncioDejaDeVerse() {
+        UUID repositoryId = connect();
+        IssueResponse task = task("Sin respuesta");
+        send("pull_request", pullEvent("closed", 50, "Sin respuesta", branch(task), "closed", true, false));
+        githubService.dispatch(slug, projectId, pm.getId(), repositoryId, 77, "Deploy", "main", Map.of(), task.id());
+        assertThat(githubService.runs(slug, projectId)).hasSize(1);
+        assertThat(githubService.summary(slug, projectId)).singleElement().satisfies(summary -> assertThat(summary.running()).isTrue());
+
+        // A los diez minutos ya no cuenta como «desplegando»; a la hora deja de listarse
+        sql("UPDATE github_workflow_runs SET requested_at = now() - interval '11 minutes' WHERE issue_id = '" + task.id() + "'");
+        assertThat(githubService.summary(slug, projectId)).singleElement().satisfies(summary -> assertThat(summary.running()).isFalse());
+        assertThat(githubService.runs(slug, projectId)).hasSize(1);
+
+        sql("UPDATE github_workflow_runs SET requested_at = now() - interval '61 minutes' WHERE issue_id = '" + task.id() + "'");
+        assertThat(githubService.runs(slug, projectId)).isEmpty();
+        assertThat(githubService.issue(slug, projectId, task.id()).runs()).isEmpty();
+    }
+
+    @Test
     void siGitHubNoDejaEjecutarSeExplicaYNoQuedaUnaEjecucionColgada() {
         UUID repositoryId = connect();
         GITHUB.fail("POST /repos/" + repositoryName + "/actions/workflows/77/dispatches", 403);
@@ -722,6 +741,15 @@ class GithubIntegrationTest {
         user.setPasswordHash(passwordEncoder.encode("Clave1234"));
         user.setEmailVerified(true);
         return userRepository.saveAndFlush(user);
+    }
+
+    private void sql(String statement) {
+        try (Connection connection = TestDatabase.connect();
+             PreparedStatement query = connection.prepareStatement(statement)) {
+            query.execute();
+        } catch (SQLException ex) {
+            throw new IllegalStateException(ex);
+        }
     }
 
     private List<String> values(String query) {
