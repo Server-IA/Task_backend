@@ -52,6 +52,9 @@ class MessageCoverageTest {
             // Importar: los nombres con los que otras herramientas llaman a sus columnas, estados, tipos y prioridades
             // (se comparan con lo que trae el archivo o el origen; nunca se muestran)
             "CsvField.java", "CsvImport.java", "CsvDates.java", "ImportDefaults.java", "JiraSource.java",
+            // Importar: la cabecera OAuth de Trello, las consultas GraphQL de Linear y el nombre que Asana le da a la
+            // sección de lo que no tiene sección (sus mensajes para la persona son las constantes de SourceHttp)
+            "TrelloSource.java", "LinearSource.java", "AsanaSource.java",
             // Importar: consultas SQL
             "ImportStore.java");
 

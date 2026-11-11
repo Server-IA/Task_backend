@@ -155,7 +155,7 @@ public final class CsvImport {
     }
 
     /** La categoría de un estado: la que diga el archivo o, si no, la que sugiere su nombre. */
-    static StatusCategory category(String declared, String status, boolean completed) {
+    public static StatusCategory category(String declared, String status, boolean completed) {
         String hint = CsvField.normalize(declared);
         if (hint.equals("done") || hint.equals("listo") || hint.equals("finalizado")) {
             return StatusCategory.DONE;
@@ -170,7 +170,9 @@ public final class CsvImport {
         if (matches(name, "cancel", "won't", "wont", "descart", "rechaz", "duplicate", "duplicad")) {
             return StatusCategory.CANCELLED;
         }
-        if (matches(name, "done", "complete", "closed", "resolved", "hech", "terminad", "completad", "list", "finaliz", "cerrad",
+        // «Listo» y «Lista» solos son un estado terminado; dentro de otro nombre no («Lista de pendientes», «Wishlist»)
+        if (name.equals("listo") || name.equals("lista") || name.equals("listos") || name.equals("listas")
+                || matches(name, "done", "complete", "closed", "resolved", "hech", "terminad", "completad", "finaliz", "cerrad",
                 "resuelt", "shipped", "released")) {
             return StatusCategory.DONE;
         }

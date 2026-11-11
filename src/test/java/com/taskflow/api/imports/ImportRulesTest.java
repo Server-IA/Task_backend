@@ -94,6 +94,22 @@ class ImportRulesTest {
     }
 
     @Test
+    void laCategoriaDeUnEstadoSaleDeSuNombreCuandoElOrigenNoLaDice() {
+        assertThat(CsvImport.category("", "Listo", false)).isEqualTo(StatusCategory.DONE);
+        assertThat(CsvImport.category("", "Terminadas", false)).isEqualTo(StatusCategory.DONE);
+        assertThat(CsvImport.category("", "En revisión", false)).isEqualTo(StatusCategory.IN_PROGRESS);
+        assertThat(CsvImport.category("", "Descartado", false)).isEqualTo(StatusCategory.CANCELLED);
+        assertThat(CsvImport.category("", "Backlog", false)).isEqualTo(StatusCategory.BACKLOG);
+        // Una lista que se llama «lista de algo» no es un estado terminado
+        assertThat(CsvImport.category("", "Lista de pendientes", false)).isEqualTo(StatusCategory.BACKLOG);
+        assertThat(CsvImport.category("", "Wishlist", false)).isEqualTo(StatusCategory.TODO);
+        assertThat(CsvImport.category("", "To do list", false)).isEqualTo(StatusCategory.TODO);
+        // Lo que diga el archivo manda sobre el nombre
+        assertThat(CsvImport.category("Done", "Publicado en web", false)).isEqualTo(StatusCategory.DONE);
+        assertThat(CsvImport.category("", "Publicado en web", true)).isEqualTo(StatusCategory.DONE);
+    }
+
+    @Test
     void lasEquivalenciasPropuestasSalenDelNombre() {
         assertThat(ImportDefaults.priorityFor("Highest")).isEqualTo(IssuePriority.URGENT);
         assertThat(ImportDefaults.priorityFor("High")).isEqualTo(IssuePriority.HIGH);
