@@ -61,7 +61,7 @@ public enum Permission {
     // ----- Daily
     DAILY_NOTE(PermissionGroup.DAILY, "Escribir la nota del día", "Editar las notas de la daily."),
     DAILY_SETTINGS(PermissionGroup.DAILY, "Configurar la daily",
-            "Cambiar el tiempo por persona, los bloques que se exponen y los puntos a tratar."),
+            "Elegir los bloques que se exponen y los puntos a tratar."),
 
     // ----- Vistas, estadísticas y reportes
     VIEW_SHARED(PermissionGroup.INSIGHTS, "Vistas compartidas",

@@ -79,20 +79,18 @@ public class DailyController {
     }
 
     @Operation(summary = "Ajustes de la daily",
-            description = "secondsPerPerson = tiempo sugerido por persona en «Presentar» (por defecto 120); "
-                    + "personTimes = quienes tienen un tiempo distinto al general; sections = qué bloques se exponen "
-                    + "(resumen, ayer, hoy, bloqueos y nota del día); agenda = puntos fijos a tratar, en orden. Un "
-                    + "proyecto que nunca los cambió devuelve los valores por defecto.")
+            description = "sections = qué bloques se exponen (resumen, ayer, hoy, bloqueos y nota del día); "
+                    + "agenda = puntos fijos a tratar, en orden. Un proyecto que nunca los cambió devuelve los "
+                    + "valores por defecto (todo visible, sin puntos).")
     @GetMapping("/settings")
     public DailySettingsResponse getSettings(@PathVariable String slug, @PathVariable UUID projectId) {
         return settingsService.get(slug, projectId);
     }
 
     @Operation(summary = "Guardar los ajustes de la daily",
-            description = "Pide el permiso de configurar la daily. Reemplaza todo lo guardado. secondsPerPerson y cada tiempo propio, "
-                    + "entre 15 y 3600 segundos; un tiempo propio igual al general no se guarda; las personas deben "
-                    + "ser del workspace. Debe quedar visible al menos uno de los bloques Ayer, Hoy o Bloqueos. agenda: "
-                    + "hasta 12 puntos de hasta 120 caracteres.")
+            description = "Pide el permiso de configurar la daily. Reemplaza todo lo guardado. Debe quedar visible "
+                    + "al menos uno de los bloques Ayer, Hoy o Bloqueos. agenda: hasta 12 puntos de hasta 120 "
+                    + "caracteres.")
     @PutMapping("/settings")
     @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'DAILY_SETTINGS')")
     public DailySettingsResponse saveSettings(

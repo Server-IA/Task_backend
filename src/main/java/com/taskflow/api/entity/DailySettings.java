@@ -14,14 +14,11 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Ajustes de la daily de un proyecto (como máximo una fila por proyecto; sin fila valen los valores por defecto):
- * el tiempo sugerido por persona en «Presentar», el de quienes tienen uno distinto, qué bloques se exponen y los
- * puntos fijos a tratar.
+ * qué bloques se exponen y los puntos fijos a tratar.
  */
 @Getter
 @Setter
@@ -30,17 +27,9 @@ import java.util.Map;
 @Table(name = "daily_settings")
 public class DailySettings extends BaseEntity {
 
-    /** Tiempo por persona cuando el proyecto no lo ha cambiado. */
-    public static final int DEFAULT_SECONDS = 120;
-    public static final int MIN_SECONDS = 15;
-    public static final int MAX_SECONDS = 3600;
-
     @OneToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "project_id", nullable = false)
     private Project project;
-
-    @Column(name = "seconds_per_person", nullable = false)
-    private int secondsPerPerson = DEFAULT_SECONDS;
 
     @Column(name = "show_summary", nullable = false)
     private boolean showSummary = true;
@@ -56,11 +45,6 @@ public class DailySettings extends BaseEntity {
 
     @Column(name = "show_note", nullable = false)
     private boolean showNote = true;
-
-    /** Id de usuario (texto) → segundos, solo de quienes tienen un tiempo distinto al general. */
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "person_seconds", nullable = false, columnDefinition = "jsonb")
-    private Map<String, Integer> personSeconds = new LinkedHashMap<>();
 
     /** Puntos a tratar, en orden. */
     @JdbcTypeCode(SqlTypes.JSON)
