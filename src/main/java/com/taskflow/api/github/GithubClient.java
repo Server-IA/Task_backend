@@ -341,10 +341,14 @@ public class GithubClient {
     private PrivateKey key() {
         PrivateKey key = privateKey;
         if (key == null) {
-            try {
-                key = GithubKeys.privateKey(Files.readString(Path.of(properties.privateKeyPath())));
-            } catch (IOException ex) {
-                throw new IllegalStateException("No se pudo leer la clave privada de la GitHub App en GITHUB_PRIVATE_KEY_PATH", ex);
+            if (!properties.privateKey().isEmpty()) {
+                key = GithubKeys.privateKey(properties.privateKey());
+            } else {
+                try {
+                    key = GithubKeys.privateKey(Files.readString(Path.of(properties.privateKeyPath())));
+                } catch (IOException ex) {
+                    throw new IllegalStateException("No se pudo leer la clave privada de la GitHub App en GITHUB_PRIVATE_KEY_PATH", ex);
+                }
             }
             privateKey = key;
         }

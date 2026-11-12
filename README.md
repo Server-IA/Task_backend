@@ -814,8 +814,9 @@ de 90 días se borran.
 
 ## Modelo de datos
 
-PostgreSQL 16 con 32 tablas. Migraciones en `src/main/resources/db/migration` (`V1__users.sql` …
-`V28__refresh_token_reuse_grace.sql`); Hibernate solo valida el esquema (`ddl-auto: validate`).
+PostgreSQL 16 con 48 tablas. El esquema completo está en una sola migración,
+`src/main/resources/db/migration/V1__esquema_inicial.sql` (las 37 del desarrollo se unificaron antes del primer
+despliegue); los cambios nuevos van en `V2__…`, `V3__…`. Hibernate solo valida el esquema (`ddl-auto: validate`).
 `V7` elimina el rol `ADMIN` (los admins e invitaciones con ese rol pasan a `MEMBER`) y `V8` agrega
 `issues.completed_at` (rellenado con la fecha del último cambio de estado hacia el estado actual, o
 `updated_at`). `V9` crea `issue_relations` (un índice único sobre el par de tareas sin importar la
@@ -872,15 +873,17 @@ Detalles a tener en cuenta:
 
 ## Docker / despliegue
 
-TaskFlow se despliega en **Dokploy** con tres contenedores en una red interna y un solo puerto expuesto (5446):
+TaskFlow se despliega en **Dokploy** con tres servicios en una red interna y un solo dominio (puerto 5446). Los
+pasos, las variables de producción, el correo con Gmail, la GitHub App de producción y el CORS de R2 están en
+**[DESPLIEGUE.md](DESPLIEGUE.md)**.
 
 | Servicio | Imagen | Puerto |
 |---|---|---|
-| `frontend` | nginx con la SPA compilada; reenvía `/api` al backend | 5446 (expuesto) |
-| `backend` | Este repositorio: `Dockerfile` multi-stage (Maven + `eclipse-temurin:21-jre-alpine`) | 8080 (interno) |
-| `db` | `postgres:16-alpine` con volumen persistente | 5432 (interno) |
+| `frontend` | nginx (sin privilegios) con la SPA compilada; reenvía `/api` al backend | 5446 (dominio) |
+| `backend` | Este repositorio: `Dockerfile` multi-stage (Maven + `eclipse-temurin:21-jre-alpine`), usuario sin privilegios, `HEALTHCHECK` contra `GET /api/v1/health` | 8080 (interno) |
+| `db` | PostgreSQL 16 de Dokploy, con respaldos a R2 | 5432 (interno) |
 
-Al arrancar, Flyway aplica las migraciones pendientes. Como el frontend y la API comparten origen, `FRONTEND_URL`
+Al arrancar, Flyway aplica las migraciones pendientes (en una base vacía, `V1__esquema_inicial.sql` crea todo). Como el frontend y la API comparten origen, `FRONTEND_URL`
 es la URL pública de la app. Los archivos no pasan por el servidor: el navegador sube y descarga directo de R2, así
 que el CORS del bucket debe permitir ese origen.
 
@@ -900,11 +903,12 @@ directamente a internet sin proxy.
 |---|---|
 | `JWT_SECRET` | Secreto aleatorio largo (`openssl rand -base64 48`) |
 | `FRONTEND_URL` | URL pública de la aplicación |
-| `FORWARD_HEADERS_STRATEGY` | `native` |
-| `MAIL_PROVIDER` / `RESEND_API_KEY` / `MAIL_FROM` | `resend`, la API key (sin ella la API no arranca) y un remitente del dominio verificado en Resend (registros SPF y DKIM) |
+| `FORWARD_HEADERS_STRATEGY` | `native` (ya viene en la imagen) |
+| `MAIL_PROVIDER` y lo suyo | `smtp` con Gmail (contraseña de aplicación; `MAIL_FROM` = esa cuenta) o `resend` con la API key y un remitente del dominio verificado (SPF y DKIM) |
 | `MAIL_LOG_LINKS` | Vacío o `false`: los enlaces de los correos nunca van al log |
-| `SPRINGDOC_ENABLED` | `false` para no publicar Swagger |
+| `SPRINGDOC_ENABLED` | `false` (ya viene en la imagen): sin Swagger público |
 | `R2_*` | Credenciales del bucket de producción |
+| `GITHUB_*` | Las de la GitHub App de producción; la clave privada en `GITHUB_PRIVATE_KEY` (contenido del `.pem` con `\n`) |
 
 Los secretos se guardan en el panel de entorno de Dokploy, nunca en el repositorio. La base se respalda a diario con
 `pg_dump`.

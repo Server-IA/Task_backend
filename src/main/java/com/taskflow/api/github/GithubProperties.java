@@ -9,6 +9,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param appId          el identificador numérico de la app
  * @param appSlug        su nombre en la dirección pública ({@code github.com/apps/<slug>})
  * @param privateKeyPath ruta al {@code .pem} con su clave privada
+ * @param privateKey     o la clave misma, el contenido del {@code .pem} (los saltos de línea pueden venir como {@code \n}):
+ *                       en un contenedor es más cómodo una variable que montar un archivo
  * @param webhookSecret  el secreto con el que GitHub firma sus avisos
  * @param clientId       el identificador de cliente de la app (con él cada persona enlaza su cuenta de GitHub)
  * @param clientSecret   el secreto de cliente de la app
@@ -16,13 +18,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param webUrl         el sitio de GitHub, para armar enlaces
  */
 @ConfigurationProperties(prefix = "app.github")
-public record GithubProperties(String appId, String appSlug, String privateKeyPath, String webhookSecret, String clientId,
-                               String clientSecret, String apiUrl, String webUrl) {
+public record GithubProperties(String appId, String appSlug, String privateKeyPath, String privateKey, String webhookSecret,
+                               String clientId, String clientSecret, String apiUrl, String webUrl) {
 
     public GithubProperties {
         appId = clean(appId);
         appSlug = clean(appSlug);
         privateKeyPath = clean(privateKeyPath);
+        privateKey = clean(privateKey).replace("\\n", "\n");
         webhookSecret = clean(webhookSecret);
         clientId = clean(clientId);
         clientSecret = clean(clientSecret);
@@ -32,7 +35,7 @@ public record GithubProperties(String appId, String appSlug, String privateKeyPa
 
     /** Si están todos los datos de la app: sin ellos la integración está apagada. */
     public boolean configured() {
-        return !appId.isEmpty() && !appSlug.isEmpty() && !privateKeyPath.isEmpty() && !webhookSecret.isEmpty()
+        return !appId.isEmpty() && !appSlug.isEmpty() && (!privateKeyPath.isEmpty() || !privateKey.isEmpty()) && !webhookSecret.isEmpty()
                 && !clientId.isEmpty() && !clientSecret.isEmpty();
     }
 
