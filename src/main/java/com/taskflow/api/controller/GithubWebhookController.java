@@ -53,16 +53,20 @@ public class GithubWebhookController {
         if (!properties.configured()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
-        // GitHub nunca manda más de 25 MB y siempre dice cuánto: lo demás se rechaza sin leerlo
+        // GitHub nunca manda más de 25 MB. Si lo anuncia más grande se rechaza sin leerlo; si no lo anuncia (un proxy o
+        // un túnel pueden reenviarlo por partes), se lee hasta pasarse del tope y nada más
         long length = request.getContentLengthLong();
-        if (length < 0 || length > MAX_BODY) {
+        if (length > MAX_BODY) {
             return ResponseEntity.status(HttpStatus.CONTENT_TOO_LARGE).build();
         }
         byte[] body;
         try {
-            body = request.getInputStream().readNBytes((int) length);
+            body = request.getInputStream().readNBytes((int) MAX_BODY + 1);
         } catch (IOException ex) {
             return ResponseEntity.badRequest().build();
+        }
+        if (body.length > MAX_BODY) {
+            return ResponseEntity.status(HttpStatus.CONTENT_TOO_LARGE).build();
         }
         return webhook(body, signature, event, delivery);
     }

@@ -801,17 +801,28 @@ class GithubIntegrationTest {
     }
 
     @Test
-    void unAvisoDemasiadoGrandeOSinTamanoSeRechazaSinLeerlo() {
+    void unAvisoDemasiadoGrandeSeRechazaYUnoSinTamanoDeclaradoSeLee() {
         org.springframework.mock.web.MockHttpServletRequest huge = new org.springframework.mock.web.MockHttpServletRequest() {
             @Override
             public long getContentLengthLong() {
                 return 26L * 1024 * 1024;
             }
         };
-        org.springframework.mock.web.MockHttpServletRequest unknown = new org.springframework.mock.web.MockHttpServletRequest();
-
         assertThat(webhookController.webhook(huge, "sha256=x", "push", "d1").getStatusCode().value()).isEqualTo(413);
-        assertThat(webhookController.webhook(unknown, "sha256=x", "push", "d2").getStatusCode().value()).isEqualTo(413);
+
+        // Un aviso reenviado por partes (sin tamaño declarado) se lee y se atiende si la firma es buena
+        connect();
+        IssueResponse task = task("Por partes");
+        byte[] body = json(branchEvent("create", branch(task)));
+        org.springframework.mock.web.MockHttpServletRequest chunked = new org.springframework.mock.web.MockHttpServletRequest() {
+            @Override
+            public long getContentLengthLong() {
+                return -1;
+            }
+        };
+        chunked.setContent(body);
+        assertThat(webhookController.webhook(chunked, signature(body), "create", "d-" + suffix).getStatusCode().value()).isEqualTo(204);
+        assertThat(githubService.issue(slug, projectId, task.id()).branches()).hasSize(1);
     }
 
     // ----- La cuenta de GitHub de cada persona
