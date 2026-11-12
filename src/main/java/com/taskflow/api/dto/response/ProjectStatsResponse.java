@@ -15,7 +15,7 @@ import java.util.UUID;
  * @param createdThisWeek       tareas creadas esta semana
  * @param completedThisWeek     tareas completadas esta semana
  * @param completedLastWeek     tareas completadas la semana pasada
- * @param overdue               abiertas con fecha límite anterior a hoy (máximo 10, la más vencida primero)
+ * @param overdue               abiertas con fecha límite anterior a hoy (todas, la más vencida primero)
  * @param cycleTimeDays         mediana de días «de En curso a Hecho» (de {@code startedAt} a {@code completedAt}) de
  *                              las tareas completadas en el periodo elegido; las que nunca pasaron por un estado
  *                              STARTED no cuentan; {@code null} si no queda ninguna

@@ -300,7 +300,7 @@ class ProjectStatsCalculatorTest {
         }
 
         @Test
-        void vencidasLaMasVencidaPrimeroYComoMaximoDiez() {
+        void vencidasTodasLaMasVencidaPrimero() {
             List<IssueStatsRow> issues = new ArrayList<>();
             for (int i = 1; i <= 12; i++) {
                 issues.add(open(todo, TODAY.minusDays(i), NOW));
@@ -311,9 +311,9 @@ class ProjectStatsCalculatorTest {
 
             List<IssueSummaryResponse> overdue = calculator.overdue(issues, "WEB");
 
-            assertThat(overdue).hasSize(ProjectStatsCalculator.MAX_OVERDUE);
+            assertThat(overdue).hasSize(12);                              // todas, no solo las primeras
             assertThat(overdue.getFirst().code()).isEqualTo("WEB-12");   // vencida hace 12 días
-            assertThat(overdue.get(9).code()).isEqualTo("WEB-3");
+            assertThat(overdue.getLast().code()).isEqualTo("WEB-1");
         }
 
         @Test

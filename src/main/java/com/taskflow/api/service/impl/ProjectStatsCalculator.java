@@ -39,7 +39,6 @@ import java.util.stream.Collectors;
  */
 final class ProjectStatsCalculator {
 
-    static final int MAX_OVERDUE = 10;
     static final int MAX_STALE = 5;
     /** Una tarea abierta sin cambios durante más de estos días se considera estancada. */
     static final int STALE_AFTER_DAYS = 14;
@@ -87,12 +86,11 @@ final class ProjectStatsCalculator {
                 stale(issues, identifier));
     }
 
-    /** Abiertas con fecha límite anterior a hoy: la más vencida primero, como máximo {@link #MAX_OVERDUE}. */
+    /** Abiertas con fecha límite anterior a hoy, todas (la pantalla abre cualquiera): la más vencida primero. */
     List<IssueSummaryResponse> overdue(List<IssueStatsRow> issues, String identifier) {
         return issues.stream()
                 .filter(this::isOverdue)
                 .sorted(Comparator.comparing(IssueStatsRow::dueDate).thenComparingInt(IssueStatsRow::sequenceId))
-                .limit(MAX_OVERDUE)
                 .map(issue -> new IssueSummaryResponse(issue.id(), code(identifier, issue), issue.title(),
                         issue.type()))
                 .toList();
