@@ -31,6 +31,11 @@ public class DisabledObjectStorage implements ObjectStorage {
     }
 
     @Override
+    public void put(String key, String contentType, byte[] content) {
+        throw unavailable();
+    }
+
+    @Override
     public byte[] readPrefix(String key, int bytes) {
         throw unavailable();
     }

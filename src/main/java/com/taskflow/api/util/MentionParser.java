@@ -1,5 +1,7 @@
 package com.taskflow.api.util;
 
+import com.taskflow.api.i18n.Language;
+
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -21,13 +23,14 @@ public final class MentionParser {
 
     /** Imagen subida dentro del texto: {@code ![nombre](/files/<id>)}. */
     private static final Pattern IMAGE = Pattern.compile(
-            "!\\[([^\\]\\r\\n]{0,255})]\\(/files/[0-9a-fA-F-]{36}\\)");
+            "!\\[([^\\]\\r\\n]{0,255})]\\(/files/([0-9a-fA-F-]{36})\\)");
 
     private MentionParser() {
     }
 
     /**
      * El texto en una línea, con cada mención como {@code @Nombre}, cada imagen subida como {@code [imagen: nombre]}
+     * ({@code [image: nombre]} si la petición es en inglés)
      * y los espacios seguidos reducidos a uno, cortado con «…» si supera {@code maxLength} caracteres; {@code null} si
      * el texto es {@code null}.
      */
@@ -35,13 +38,28 @@ public final class MentionParser {
         if (body == null) {
             return null;
         }
+        // «imagen» en el idioma de la petición: el extracto se arma al leer
+        String image = Language.current().t("imagen");
         String withImages = IMAGE.matcher(body).replaceAll(match -> Matcher.quoteReplacement(
-                match.group(1).isBlank() ? "[imagen]" : "[imagen: " + match.group(1).strip() + "]"));
+                match.group(1).isBlank() ? "[" + image + "]" : "[" + image + ": " + match.group(1).strip() + "]"));
         String text = MENTION.matcher(withImages)
                 .replaceAll(match -> Matcher.quoteReplacement("@" + match.group(1)))
                 .replaceAll("\\s+", " ")
                 .strip();
         return text.length() <= maxLength ? text : TextCut.prefix(text, maxLength).stripTrailing() + "…";
+    }
+
+    /** Ids (en minúsculas) de las imágenes subidas que aparecen en el texto; vacío si no hay o es {@code null}. */
+    public static Set<String> imageIds(String body) {
+        if (body == null || body.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Set<String> ids = new LinkedHashSet<>();
+        Matcher matcher = IMAGE.matcher(body);
+        while (matcher.find()) {
+            ids.add(matcher.group(2).toLowerCase(java.util.Locale.ROOT));
+        }
+        return ids;
     }
 
     /** Ids mencionados, sin repetir y en orden de aparición (como máximo {@link #MAX_MENTIONS}). */

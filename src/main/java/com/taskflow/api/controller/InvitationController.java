@@ -36,7 +36,7 @@ public class InvitationController {
 
     @Operation(summary = "Invitar por correo (project manager)", description = "La persona entra como MEMBER.")
     @PostMapping("/workspaces/{slug}/invitations")
-    @PreAuthorize("@workspaceSecurity.isManager(#slug)")
+    @PreAuthorize("@workspaceSecurity.can(#slug, 'MEMBER_INVITE')")
     @ResponseStatus(HttpStatus.CREATED)
     public InvitationResponse invite(@PathVariable String slug, @AuthenticationPrincipal UserPrincipal me,
                                      @Valid @RequestBody InviteMemberRequest request) {
@@ -45,14 +45,14 @@ public class InvitationController {
 
     @Operation(summary = "Invitaciones pendientes del workspace (project manager)")
     @GetMapping("/workspaces/{slug}/invitations")
-    @PreAuthorize("@workspaceSecurity.isManager(#slug)")
+    @PreAuthorize("@workspaceSecurity.can(#slug, 'MEMBER_INVITE')")
     public List<InvitationResponse> getPending(@PathVariable String slug) {
         return invitationService.getPending(slug);
     }
 
     @Operation(summary = "Cancelar una invitación pendiente (project manager)")
     @DeleteMapping("/workspaces/{slug}/invitations/{invitationId}")
-    @PreAuthorize("@workspaceSecurity.isManager(#slug)")
+    @PreAuthorize("@workspaceSecurity.can(#slug, 'MEMBER_INVITE')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void revoke(@PathVariable String slug, @PathVariable UUID invitationId) {
         invitationService.revoke(slug, invitationId);

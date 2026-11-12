@@ -47,6 +47,7 @@ public class IssueChecklistController {
             description = "Queda al final de los de su tipo. Una tarea admite como máximo 100 elementos (409).")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'ISSUE_CHECKLIST')")
     public ChecklistItemResponse create(@PathVariable String slug, @PathVariable UUID projectId,
                                         @PathVariable UUID issueId, @Valid @RequestBody ChecklistItemRequest request) {
         return checklistService.create(slug, projectId, issueId, request);
@@ -57,6 +58,7 @@ public class IssueChecklistController {
                     + "demás se renumeran. Al marcarlo (done: true) guarda checkedBy (yo) y checkedAt; al desmarcarlo "
                     + "los borra. Cualquier cambio de la checklist actualiza checklistUpdatedAt de la tarea.")
     @PatchMapping("/{itemId}")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'ISSUE_CHECKLIST')")
     public ChecklistItemResponse update(@PathVariable String slug, @PathVariable UUID projectId,
                                         @PathVariable UUID issueId, @PathVariable UUID itemId,
                                         @AuthenticationPrincipal UserPrincipal me,
@@ -67,6 +69,7 @@ public class IssueChecklistController {
     @Operation(summary = "Eliminar criterio o paso")
     @DeleteMapping("/{itemId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'ISSUE_CHECKLIST')")
     public void delete(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID issueId,
                        @PathVariable UUID itemId) {
         checklistService.delete(slug, projectId, issueId, itemId);

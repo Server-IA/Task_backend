@@ -2,6 +2,7 @@ package com.taskflow.api.email;
 
 import com.taskflow.api.config.AppProperties;
 import com.taskflow.api.entity.User;
+import com.taskflow.api.i18n.I18nConfig;
 import com.taskflow.api.util.ClientInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,6 +49,8 @@ class EmailNotifierTest {
         resolver.setCharacterEncoding("UTF-8");
         SpringTemplateEngine templateEngine = new SpringTemplateEngine();
         templateEngine.setTemplateResolver(resolver);
+        // Los textos de las plantillas (#{…}) salen de i18n/email*.properties
+        templateEngine.setTemplateEngineMessageSource(I18nConfig.emailMessages());
 
         AppProperties properties = new AppProperties(
                 new AppProperties.Jwt("secreto-de-pruebas-con-mas-de-32-caracteres", 15, 7),
@@ -55,7 +58,7 @@ class EmailNotifierTest {
                 APP,
                 "America/Bogota",
                 new AppProperties.Tokens(24, 60, 7, 30));
-        notifier = new EmailNotifier(emailService, templateEngine, properties);
+        notifier = new EmailNotifier(emailService, templateEngine, properties, I18nConfig.emailMessages());
     }
 
     private static User user() {
@@ -80,6 +83,20 @@ class EmailNotifierTest {
                 .contains("Verifica tu correo", "Ana Pérez", "vence en 24 h")
                 .contains(APP + "/verify-email?token=tok-123")
                 .contains(APP + "/email/logo.png");
+    }
+
+    @Test
+    void quienEligioInglesRecibeElCorreoEnIngles() {
+        User user = user();
+        user.setLanguage("en");
+
+        notifier.sendEmailVerification(user, "tok-123");
+
+        String html = sentHtml("ana@test.com", "Verify your TaskFlow account");
+        assertThat(html)
+                .contains("Verify your email", "Ana Pérez", "expires in 24 h")
+                .contains(APP + "/verify-email?token=tok-123")
+                .doesNotContain("Verifica tu correo");
     }
 
     @Test
@@ -109,7 +126,7 @@ class EmailNotifierTest {
 
     @Test
     void invitacionMuestraElWorkspaceConSuInicial() {
-        notifier.sendWorkspaceInvitation("luis@test.com", "Ana Pérez", "equipo diseño", "tok-789");
+        notifier.sendWorkspaceInvitation("luis@test.com", "Ana Pérez", "equipo diseño", "tok-789", null);
 
         // El asunto no lleva textos que escribe el usuario (el nombre de quien invita ni el del workspace)
         String html = sentHtml("luis@test.com", "Te invitaron a un workspace en TaskFlow");

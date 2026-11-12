@@ -49,7 +49,7 @@ public class ProjectController {
                     + "de la paleta (TEAL, AMBER, BLUE, PINK, VIOLET, ORANGE, GREEN); sin color, el menos usado del "
                     + "workspace (entre empatados, el primero de la paleta).")
     @PostMapping
-    @PreAuthorize("@workspaceSecurity.isManager(#slug)")
+    @PreAuthorize("@workspaceSecurity.can(#slug, 'PROJECT_CREATE')")
     @ResponseStatus(HttpStatus.CREATED)
     public ProjectResponse create(@PathVariable String slug, @AuthenticationPrincipal UserPrincipal me,
                                   @Valid @RequestBody CreateProjectRequest request) {
@@ -66,7 +66,7 @@ public class ProjectController {
     @Operation(summary = "Editar proyecto (project manager)",
             description = "Edición parcial: los campos nulos no se modifican. color es una clave de la paleta.")
     @PatchMapping("/{projectId}")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'PROJECT_EDIT')")
     public ProjectResponse update(@PathVariable String slug, @PathVariable UUID projectId,
                                   @Valid @RequestBody UpdateProjectRequest request) {
         return projectService.update(slug, projectId, request);
@@ -74,7 +74,7 @@ public class ProjectController {
 
     @Operation(summary = "Eliminar proyecto (project manager)")
     @DeleteMapping("/{projectId}")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'PROJECT_DELETE')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable String slug, @PathVariable UUID projectId) {
         projectService.delete(slug, projectId);
@@ -89,7 +89,7 @@ public class ProjectController {
 
     @Operation(summary = "Agregar miembro al proyecto (project manager)", description = "Debe ser miembro del workspace.")
     @PostMapping("/{projectId}/members")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'PROJECT_MEMBERS')")
     @ResponseStatus(HttpStatus.CREATED)
     public ProjectMemberResponse addMember(@PathVariable String slug, @PathVariable UUID projectId,
                                            @Valid @RequestBody AddProjectMemberRequest request) {
@@ -98,7 +98,7 @@ public class ProjectController {
 
     @Operation(summary = "Quitar miembro del proyecto (project manager)")
     @DeleteMapping("/{projectId}/members/{userId}")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'PROJECT_MEMBERS')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void removeMember(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID userId) {
         projectService.removeMember(slug, projectId, userId);

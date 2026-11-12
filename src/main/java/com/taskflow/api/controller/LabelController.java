@@ -39,7 +39,7 @@ public class LabelController {
 
     @Operation(summary = "Crear etiqueta (project manager)")
     @PostMapping
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'PROJECT_LABELS')")
     @ResponseStatus(HttpStatus.CREATED)
     public LabelResponse create(@PathVariable String slug, @PathVariable UUID projectId,
                                 @Valid @RequestBody LabelRequest request) {
@@ -48,7 +48,7 @@ public class LabelController {
 
     @Operation(summary = "Editar etiqueta (project manager)")
     @PatchMapping("/{labelId}")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'PROJECT_LABELS')")
     public LabelResponse update(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID labelId,
                                 @Valid @RequestBody LabelRequest request) {
         return labelService.update(slug, projectId, labelId, request);
@@ -56,7 +56,7 @@ public class LabelController {
 
     @Operation(summary = "Eliminar etiqueta (project manager)")
     @DeleteMapping("/{labelId}")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'PROJECT_LABELS')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID labelId) {
         labelService.delete(slug, projectId, labelId);

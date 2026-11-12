@@ -43,17 +43,24 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     List<Integer> lockById(@Param("id") UUID id);
 
     /**
-     * De los usuarios indicados, los que se pueden mencionar en una tarea del proyecto: sus miembros y los project
-     * managers del workspace (que ven todos los proyectos).
+     * De los usuarios indicados, los que se pueden mencionar en una tarea del proyecto: sus miembros y quienes ven todos
+     * los proyectos del workspace (los project managers y quien tiene el permiso {@code PROJECT_VIEW_ALL}: la función
+     * {@code sees_all_projects}).
      */
     @Query("""
             select u from User u
             where u.id in :ids
               and (exists (select 1 from ProjectMember pm where pm.project.id = :projectId and pm.user = u)
-                   or exists (select 1 from WorkspaceMember wm
-                              where wm.workspace.id = :workspaceId and wm.user = u
-                                and wm.role = com.taskflow.api.entity.enums.WorkspaceRole.OWNER))
+                   or function('sees_all_projects', :workspaceId, u.id) = true)
             """)
     List<User> findMentionable(@Param("ids") Collection<UUID> ids, @Param("projectId") UUID projectId,
                                @Param("workspaceId") UUID workspaceId);
+
+    /** De los usuarios indicados, los que son miembros del workspace (para no mostrar nombres de gente de fuera). */
+    @Query("""
+            select u from User u
+            where u.id in :ids
+              and exists (select 1 from WorkspaceMember wm where wm.workspace.id = :workspaceId and wm.user = u)
+            """)
+    List<User> findAllByIdInWorkspace(@Param("ids") Collection<UUID> ids, @Param("workspaceId") UUID workspaceId);
 }

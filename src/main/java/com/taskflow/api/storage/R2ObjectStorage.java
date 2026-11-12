@@ -3,6 +3,7 @@ package com.taskflow.api.storage;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.exception.SdkException;
+import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
@@ -105,6 +106,16 @@ public class R2ObjectStorage implements ObjectStorage, AutoCloseable {
             throw unreachable("HEAD", key, ex);
         } catch (SdkException ex) {
             throw unreachable("HEAD", key, ex);
+        }
+    }
+
+    @Override
+    public void put(String key, String contentType, byte[] content) {
+        try {
+            client.putObject(PutObjectRequest.builder().bucket(bucket).key(key).contentType(contentType).build(),
+                    RequestBody.fromBytes(content));
+        } catch (SdkException ex) {
+            throw unreachable("PUT", key, ex);
         }
     }
 

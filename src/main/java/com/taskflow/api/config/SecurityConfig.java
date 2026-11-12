@@ -32,6 +32,9 @@ public class SecurityConfig {
 
     private static final String[] PUBLIC_PATHS = {
             "/api/v1/auth/**",
+            // GitHub llama aquí sin sesión: los avisos van firmados y la vuelta de instalar la app trae un enlace firmado
+            "/api/v1/github/webhook",
+            "/api/v1/github/setup",
             "/swagger-ui.html",
             "/swagger-ui/**",
             "/v3/api-docs/**",

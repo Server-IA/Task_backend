@@ -1,5 +1,7 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.entity.enums.Permission;
+import com.taskflow.api.security.AccessControl;
 import com.taskflow.api.dto.request.CreateIssueRequest;
 import com.taskflow.api.dto.request.MoveIssueRequest;
 import com.taskflow.api.dto.request.SplitItemRequest;
@@ -31,7 +33,6 @@ import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.ProjectRepository;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.repository.UserRepository;
-import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.service.FileService;
 import com.taskflow.api.service.IssueChecklistService;
@@ -88,7 +89,7 @@ class IssueServiceStoryTest {
     @Mock
     private UserRepository userRepository;
     @Mock
-    private WorkspaceMemberRepository workspaceMemberRepository;
+    private AccessControl accessControl;
     @Mock
     private ActivityService activityService;
     @Mock
@@ -105,6 +106,8 @@ class IssueServiceStoryTest {
     private IssueMapper issueMapper;
     @Mock
     private FileService fileService;
+    @Mock
+    private org.springframework.context.ApplicationEventPublisher events;
 
     @InjectMocks
     private IssueServiceImpl issueService;
@@ -117,6 +120,12 @@ class IssueServiceStoryTest {
     private State cancelled;
     private User pm;
     private User member;
+
+    /** El rol de una persona como lo vería AccessControl: el project manager puede todo; un miembro, lo de fábrica. */
+    private void role(UUID userId, WorkspaceRole role) {
+        lenient().when(accessControl.can(eq(SLUG), eq(userId), any())).thenAnswer(invocation ->
+                role.isManager() || Permission.MEMBER_DEFAULTS.contains(invocation.<Permission>getArgument(2)));
+    }
 
     @BeforeEach
     void setUp() {
@@ -137,9 +146,8 @@ class IssueServiceStoryTest {
         when(lookup.project(SLUG, project.getId())).thenReturn(project);
         lenient().when(lookup.user(pm.getId())).thenReturn(pm);
         lenient().when(lookup.user(member.getId())).thenReturn(member);
-        lenient().when(workspaceMemberRepository.findRole(SLUG, pm.getId())).thenReturn(Optional.of(WorkspaceRole.OWNER));
-        lenient().when(workspaceMemberRepository.findRole(SLUG, member.getId()))
-                .thenReturn(Optional.of(WorkspaceRole.MEMBER));
+        role(pm.getId(), WorkspaceRole.OWNER);
+        role(member.getId(), WorkspaceRole.MEMBER);
         lenient().when(issueRepository.saveAndFlush(any(Issue.class))).thenAnswer(invocation -> invocation.getArgument(0));
         for (State state : List.of(backlog, todo, inProgress, done, cancelled)) {
             lenient().when(stateRepository.findForShare(state.getId(), project.getId()))
@@ -220,7 +228,7 @@ class IssueServiceStoryTest {
             assertThatThrownBy(() -> issueService.update(SLUG, project.getId(), story.getId(), member.getId(),
                     updateState(done.getId())))
                     .isInstanceOf(ForbiddenException.class)
-                    .hasMessage("Solo el project manager cierra la historia");
+                    .hasMessage("Tu rol no permite cerrar historias");
             assertThatThrownBy(() -> issueService.update(SLUG, project.getId(), story.getId(), member.getId(),
                     updateState(cancelled.getId())))
                     .isInstanceOf(ForbiddenException.class);
@@ -234,7 +242,7 @@ class IssueServiceStoryTest {
             assertThatThrownBy(() -> issueService.move(SLUG, project.getId(), story.getId(), member.getId(),
                     new MoveIssueRequest(done.getId(), null, null)))
                     .isInstanceOf(ForbiddenException.class)
-                    .hasMessage("Solo el project manager cierra la historia");
+                    .hasMessage("Tu rol no permite cerrar historias");
             assertThat(story.getState()).isSameAs(inProgress);
         }
 
@@ -245,7 +253,7 @@ class IssueServiceStoryTest {
             assertThatThrownBy(() -> issueService.update(SLUG, project.getId(), story.getId(), member.getId(),
                     updateState(inProgress.getId())))
                     .isInstanceOf(ForbiddenException.class)
-                    .hasMessage("Solo el project manager reabre la historia");
+                    .hasMessage("Tu rol no permite reabrir historias");
             assertThatThrownBy(() -> issueService.move(SLUG, project.getId(), story.getId(), member.getId(),
                     new MoveIssueRequest(todo.getId(), null, null)))
                     .isInstanceOf(ForbiddenException.class);
@@ -352,7 +360,7 @@ class IssueServiceStoryTest {
             assertThatThrownBy(() -> issueService.create(SLUG, project.getId(), member.getId(),
                     create("Mostrar la fecha de alta", IssueType.TASK, story.getId(), true)))
                     .isInstanceOf(ForbiddenException.class)
-                    .hasMessage("Solo el project manager reabre la historia");
+                    .hasMessage("Tu rol no permite reabrir historias");
             assertThat(story.getState()).isSameAs(done);
         }
 
@@ -424,7 +432,7 @@ class IssueServiceStoryTest {
             assertThatThrownBy(() -> issueService.create(SLUG, project.getId(), member.getId(),
                     create("Pantalla de perfil", IssueType.STORY, null, null)))
                     .isInstanceOf(ForbiddenException.class)
-                    .hasMessage("Solo el project manager crea historias");
+                    .hasMessage("Tu rol no permite crear historias");
         }
 
         @Test
@@ -657,7 +665,7 @@ class IssueServiceStoryTest {
             assertThatThrownBy(() -> issueService.move(SLUG, project.getId(), task.getId(), member.getId(),
                     moveTo(todo.getId(), true)))
                     .isInstanceOf(ForbiddenException.class)
-                    .hasMessage("Solo el project manager reabre la historia");
+                    .hasMessage("Tu rol no permite reabrir historias");
             assertThat(story.getState()).isSameAs(done);
         }
 

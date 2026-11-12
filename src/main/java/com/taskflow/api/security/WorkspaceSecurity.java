@@ -1,9 +1,8 @@
 package com.taskflow.api.security;
 
-import com.taskflow.api.entity.enums.WorkspaceRole;
+import com.taskflow.api.entity.enums.Permission;
 import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.ProjectRepository;
-import com.taskflow.api.repository.WorkspaceMemberRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -12,57 +11,69 @@ import java.util.UUID;
 
 /**
  * Reglas de acceso por workspace, usadas desde {@code @PreAuthorize}, por ejemplo
- * {@code @PreAuthorize("@workspaceSecurity.isManager(#slug)")}. El rol se consulta en la base de datos.
+ * {@code @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'CYCLE_CREATE')")}. El rol y sus permisos
+ * se consultan en la base de datos ({@link AccessControl}).
  * <ul>
- *   <li>Project manager ({@code OWNER}): todo, en todos los proyectos del workspace.</li>
- *   <li>Miembro ({@code MEMBER}): solo los proyectos de los que es miembro, y dentro de ellos trabaja
- *       con las tareas, pero no configura el proyecto (estados, etiquetas, miembros, ciclos, módulos).</li>
+ *   <li>{@link #isMember}: cualquier persona del workspace.</li>
+ *   <li>{@link #isManager}: solo el project manager (eliminar el workspace).</li>
+ *   <li>{@link #can}: un permiso del workspace (invitar, gestionar roles, crear proyectos…).</li>
+ *   <li>{@link #canAccessProject}: ver un proyecto: ser miembro de él o tener «ver todos los proyectos».</li>
+ *   <li>{@link #canInProject}: un permiso dentro de un proyecto que además se puede ver.</li>
  * </ul>
  */
 @Component("workspaceSecurity")
 @RequiredArgsConstructor
 public class WorkspaceSecurity {
 
-    private final WorkspaceMemberRepository memberRepository;
+    private final AccessControl accessControl;
     private final ProjectMemberRepository projectMemberRepository;
     private final ProjectRepository projectRepository;
 
     public boolean isMember(String slug) {
-        return currentRole(slug).isPresent();
+        return currentAccess(slug).isPresent();
     }
 
     /** Project manager del workspace (rol {@code OWNER}). */
     public boolean isManager(String slug) {
-        return currentRole(slug).map(WorkspaceRole::isManager).orElse(false);
+        return currentAccess(slug).map(AccessControl.Access::isManager).orElse(false);
+    }
+
+    /** La persona tiene ese permiso (nombre de {@link Permission}) en el workspace. */
+    public boolean can(String slug, String permission) {
+        Permission required = Permission.valueOf(permission);
+        return currentAccess(slug).map(access -> access.can(required)).orElse(false);
     }
 
     /**
-     * Un proyecto es accesible para los project managers del workspace y para sus miembros. Un proyecto de otro
-     * workspace nunca lo es (aunque el usuario sea miembro de él o project manager del de la URL); si el proyecto no
-     * existe, el servicio responde 404.
+     * Un proyecto es accesible para sus miembros y para quien tiene «ver todos los proyectos» (el project manager
+     * siempre). Un proyecto de otro workspace nunca lo es (aunque el usuario sea miembro de él o project manager del de
+     * la URL); si el proyecto no existe, el servicio responde 404.
      */
     public boolean canAccessProject(String slug, UUID projectId) {
-        Optional<UUID> userId = SecurityUtils.currentUserId();
-        Optional<WorkspaceRole> role = currentRole(slug);
-        if (userId.isEmpty() || role.isEmpty()) {
-            return false;
-        }
-        if (role.get().isManager()) {
-            return !projectRepository.existsInOtherWorkspace(projectId, slug);
-        }
-        return projectMemberRepository.existsMemberInWorkspace(projectId, slug, userId.get());
+        return currentAccess(slug).map(access -> canAccess(access, slug, projectId)).orElse(false);
     }
 
     /**
-     * Configurar un proyecto (editarlo, borrarlo, sus miembros, estados, etiquetas, ciclos y módulos) es solo del
-     * project manager del workspace al que pertenece el proyecto.
+     * Hacer algo dentro de un proyecto (configurarlo, crear un ciclo, editar una tarea…): tener el permiso y poder ver
+     * el proyecto.
      */
-    public boolean canManageProject(String slug, UUID projectId) {
-        return isManager(slug) && !projectRepository.existsInOtherWorkspace(projectId, slug);
+    public boolean canInProject(String slug, UUID projectId, String permission) {
+        Permission required = Permission.valueOf(permission);
+        return currentAccess(slug)
+                .map(access -> access.can(required) && canAccess(access, slug, projectId))
+                .orElse(false);
     }
 
-    private Optional<WorkspaceRole> currentRole(String slug) {
+    private boolean canAccess(AccessControl.Access access, String slug, UUID projectId) {
+        if (access.can(Permission.PROJECT_VIEW_ALL)) {
+            return !projectRepository.existsInOtherWorkspace(projectId, slug);
+        }
         return SecurityUtils.currentUserId()
-                .flatMap(userId -> memberRepository.findRole(slug, userId));
+                .map(userId -> projectMemberRepository.existsMemberInWorkspace(projectId, slug, userId))
+                .orElse(false);
+    }
+
+    private Optional<AccessControl.Access> currentAccess(String slug) {
+        return SecurityUtils.currentUserId().flatMap(userId -> accessControl.find(slug, userId));
     }
 }

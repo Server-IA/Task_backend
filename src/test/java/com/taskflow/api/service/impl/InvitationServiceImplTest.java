@@ -1,5 +1,8 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.imports.ImportPendingAssignments;
+import com.taskflow.api.repository.CustomRoleRepository;
+import com.taskflow.api.security.AccessControl;
 import com.taskflow.api.config.AppProperties;
 import com.taskflow.api.dto.request.InviteMemberRequest;
 import com.taskflow.api.email.EmailNotifier;
@@ -24,6 +27,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -44,6 +48,10 @@ class InvitationServiceImplTest {
     private WorkspaceMapper workspaceMapper;
     @Mock
     private EmailNotifier emailNotifier;
+    @Mock
+    private CustomRoleRepository customRoleRepository;
+    @Mock
+    private AccessControl accessControl;
 
     private InvitationServiceImpl invitationService;
     private final User pm = new User();
@@ -53,7 +61,8 @@ class InvitationServiceImplTest {
         AppProperties properties = new AppProperties(null, null, "http://localhost:5173", "America/Bogota",
                 new AppProperties.Tokens(24, 60, 7, 30));
         invitationService = new InvitationServiceImpl(invitationRepository, memberRepository,
-                lookup, workspaceMapper, emailNotifier, properties, new RateLimitService());
+                lookup, workspaceMapper, emailNotifier, properties, new RateLimitService(), customRoleRepository,
+                accessControl, mock(ImportPendingAssignments.class));
         Workspace workspace = new Workspace();
         workspace.setId(UUID.randomUUID());
         workspace.setName("Mi equipo");
@@ -73,7 +82,7 @@ class InvitationServiceImplTest {
                 new InviteMemberRequest("Victima@Test.com")))
                 .isInstanceOf(TooManyRequestsException.class);
         verify(emailNotifier, times(RateLimitRule.INVITE_RECIPIENT.getCapacity()))
-                .sendWorkspaceInvitation(any(), any(), any(), any());
+                .sendWorkspaceInvitation(any(), any(), any(), any(), any());
     }
 
     @Test

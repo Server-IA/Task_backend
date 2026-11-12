@@ -45,7 +45,7 @@
             <td class="tf-line tf-muted" style="padding-top:20px;border-top:1px solid #E6E2DA;font-size:13px;line-height:1.6;color:#67615A;">
                 <p style="margin:0;" th:text="${text}">Si no pediste este correo, ignóralo.</p>
                 <th:block th:if="${link != null}">
-                    <p style="margin:12px 0 6px;">¿El botón no funciona? Copia este enlace en tu navegador:</p>
+                    <p style="margin:12px 0 6px;" th:text="#{parts.linkFallback}">¿El botón no funciona? Copia este enlace en tu navegador:</p>
                     <div class="tf-dash"
                          style="padding:10px 12px;background-color:#F8F7F4;border:1px dashed #C4BDB0;border-radius:10px;font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.5;word-break:break-all;">
                         <a class="tf-link" th:href="${link}" th:text="${link}" href="#"
@@ -63,10 +63,10 @@
         <tr>
             <td class="tf-panel tf-muted"
                 style="padding:14px 16px;background-color:#F8F7F4;border:1px solid #E6E2DA;border-radius:12px;font-size:14px;line-height:1.55;color:#67615A;">
-                <strong class="tf-ink" style="color:#23201B;">¿No fuiste tú?</strong>
+                <strong class="tf-ink" style="color:#23201B;" th:text="#{parts.notYou}">¿No fuiste tú?</strong>
                 <a class="tf-link" th:href="${link}" th:text="${action}" href="#"
                    style="color:#7A5C1E;font-weight:600;text-decoration:underline;">Cambia tu contraseña</a>
-                cuanto antes.
+                <th:block th:text="#{parts.asap}">cuanto antes.</th:block>
             </td>
         </tr>
     </table>

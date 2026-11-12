@@ -2,6 +2,7 @@ package com.taskflow.api.controller;
 
 import com.taskflow.api.dto.request.AvatarUploadRequest;
 import com.taskflow.api.dto.request.ChangePasswordRequest;
+import com.taskflow.api.dto.request.UpdateLanguageRequest;
 import com.taskflow.api.dto.request.UpdateProfileRequest;
 import com.taskflow.api.dto.response.AuthResponse;
 import com.taskflow.api.dto.response.UploadTicketResponse;
@@ -49,6 +50,15 @@ public class UserController {
     public UserResponse updateProfile(@AuthenticationPrincipal UserPrincipal me,
                                       @Valid @RequestBody UpdateProfileRequest request) {
         return userService.updateProfile(me.getId(), request);
+    }
+
+    @Operation(summary = "Elegir mi idioma",
+            description = "language: es o en (400 con otro valor). Es el idioma de la aplicación y el de los correos "
+                    + "que recibo. Mientras no lo elijo (language = null), vale el de cada petición (Accept-Language).")
+    @PatchMapping("/language")
+    public UserResponse updateLanguage(@AuthenticationPrincipal UserPrincipal me,
+                                       @Valid @RequestBody UpdateLanguageRequest request) {
+        return userService.updateLanguage(me.getId(), request.language());
     }
 
     @Operation(summary = "Pedir la subida de mi foto de perfil (URL firmada)",

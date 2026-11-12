@@ -1,5 +1,6 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.entity.enums.Permission;
 import com.taskflow.api.dto.request.CreateIssueRequest;
 import com.taskflow.api.dto.request.RetroNoteRequest;
 import com.taskflow.api.dto.request.UpdateRetroNoteRequest;
@@ -127,7 +128,7 @@ class RetroServiceImplTest {
         user.setId(UUID.randomUUID());
         user.setFullName(name);
         lenient().when(lookup.user(user.getId())).thenReturn(user);
-        lenient().when(projectAccess.isManager(workspace, user.getId())).thenReturn(manager);
+        lenient().when(projectAccess.can(workspace, user.getId(), Permission.RETRO_MANAGE)).thenReturn(manager);
         return user;
     }
 
@@ -367,11 +368,11 @@ class RetroServiceImplTest {
             assertThatThrownBy(() -> retroService.updateNote(SLUG, project.getId(), cycle.getId(), mine.getId(),
                     otherMember.getId(), new UpdateRetroNoteRequest("Otra cosa", null, null)))
                     .isInstanceOf(ForbiddenException.class)
-                    .hasMessage("Solo el autor de la nota o el project manager pueden editarla");
+                    .hasMessage("Solo el autor de la nota o quien dirige la retrospectiva pueden editarla");
             assertThatThrownBy(() -> retroService.deleteNote(SLUG, project.getId(), cycle.getId(), mine.getId(),
                     otherMember.getId()))
                     .isInstanceOf(ForbiddenException.class)
-                    .hasMessage("Solo el autor de la nota o el project manager pueden eliminarla");
+                    .hasMessage("Solo el autor de la nota o quien dirige la retrospectiva pueden eliminarla");
             assertThat(mine.getText()).isEqualTo("Nota WENT_WELL");
             verify(noteRepository, never()).delete(any());
         }
@@ -513,7 +514,7 @@ class RetroServiceImplTest {
             return new IssueResponse(issueId, "WEB-42", 42, project.getId(), null, null, "Automatizar el deploy", null, 0,
                     null,
                     null, null, null, null, null, null, 0, List.of(), List.of(), null, List.of(), 0, 0, 0, List.of(), List.of(), 0, 0,
-                    0, 0, null, null, null, null, null, null, 0, 0, 0, 0, 0, false, null, null, 0);
+                    0, 0, null, null, null, null, null, null, 0, 0, 0, 0, 0, false, null, null, 0, null, null, null);
         }
 
         @Test

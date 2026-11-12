@@ -33,7 +33,7 @@ public class ProjectStatsController {
                     + "varios) limita todas las métricas a las tareas asignadas a esas personas, y la carga a esas "
                     + "personas.")
     @GetMapping
-    @PreAuthorize("@workspaceSecurity.canAccessProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'STATS_VIEW')")
     public ProjectStatsResponse getStats(
             @PathVariable String slug, @PathVariable UUID projectId,
             @Parameter(description = "Semanas del periodo: 4, 8 o 12 (otro valor responde 400)")

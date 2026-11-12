@@ -71,6 +71,12 @@ public interface NotificationService {
     void notifyUnblocked(Issue blocked, Issue blocker, User actor);
 
     /**
+     * El pull request de una tarea se fusionó y la automatización del proyecto la habría completado, pero le faltan
+     * criterios de aceptación: se le avisa a quienes la tienen asignada ({@code PR_MERGED_PENDING}), que deciden.
+     */
+    void notifyMergedWithPendingCriteria(Issue issue, int pullRequestNumber);
+
+    /**
      * Avisa a los miembros del proyecto del ciclo (menos a quien la abrió) de que se abrió la retrospectiva
      * ({@code RETRO_STARTED}). Solo en la app: no envía correo.
      */
@@ -87,4 +93,14 @@ public interface NotificationService {
      * ({@code STORAGE_WARNING}). Lo manda TaskFlow (sin autor), como mucho una vez por semana por workspace.
      */
     void notifyStorageWarning(Workspace workspace, Collection<User> managers, int percent, String quota);
+
+    /**
+     * Una importación terminó (o no pudo terminar): se le avisa a quien la lanzó, que pudo cerrar la página mientras
+     * corría.
+     *
+     * @param sourceName de dónde se importaba, como se lee en una frase («Jira», «un archivo CSV»)
+     * @param completed  si terminó bien; si no, falló a la mitad
+     */
+    void notifyImportFinished(Workspace workspace, User recipient, String sourceName, boolean completed, int issues,
+                              int projects);
 }

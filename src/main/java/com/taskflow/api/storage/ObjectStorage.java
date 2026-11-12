@@ -29,6 +29,12 @@ public interface ObjectStorage {
     /** Tamaño y tipo del objeto, o vacío si no existe. */
     Optional<ObjectInfo> head(String key);
 
+    /**
+     * Guarda un objeto desde el servidor (los adjuntos que trae una importación: no los sube un navegador). Lo normal
+     * sigue siendo la subida directa con {@link #presignUpload}.
+     */
+    void put(String key, String contentType, byte[] content);
+
     /** Los primeros {@code bytes} bytes del objeto (o menos, si es más corto). */
     byte[] readPrefix(String key, int bytes);
 

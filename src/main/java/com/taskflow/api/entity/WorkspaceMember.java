@@ -32,6 +32,14 @@ public class WorkspaceMember extends BaseEntity {
     @Column(nullable = false, length = 20)
     private WorkspaceRole role;
 
+    /**
+     * Rol creado por el workspace que tiene esta persona. {@code null}: el de fábrica que diga {@link #role} (project
+     * manager o «Miembro»). Solo un {@code MEMBER} puede tener uno.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "custom_role_id")
+    private CustomRole customRole;
+
     public WorkspaceMember(Workspace workspace, User user, WorkspaceRole role) {
         this.workspace = workspace;
         this.user = user;

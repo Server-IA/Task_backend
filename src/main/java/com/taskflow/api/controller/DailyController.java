@@ -1,10 +1,13 @@
 package com.taskflow.api.controller;
 
 import com.taskflow.api.dto.request.DailyNoteRequest;
+import com.taskflow.api.dto.request.DailySettingsRequest;
 import com.taskflow.api.dto.response.DailyNoteResponse;
 import com.taskflow.api.dto.response.DailyResponse;
+import com.taskflow.api.dto.response.DailySettingsResponse;
 import com.taskflow.api.security.UserPrincipal;
 import com.taskflow.api.service.DailyService;
+import com.taskflow.api.service.DailySettingsService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -34,6 +37,7 @@ import java.util.UUID;
 public class DailyController {
 
     private final DailyService dailyService;
+    private final DailySettingsService settingsService;
 
     @Operation(summary = "Daily del proyecto",
             description = "previousDate = «ayer»: el último día antes de date con actividad en el proyecto "
@@ -63,6 +67,7 @@ public class DailyController {
     @ApiResponse(responseCode = "200", description = "Nota guardada")
     @ApiResponse(responseCode = "204", description = "Nota borrada (texto vacío)")
     @PutMapping("/note")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'DAILY_NOTE')")
     public ResponseEntity<DailyNoteResponse> saveNote(
             @PathVariable String slug, @PathVariable UUID projectId, @AuthenticationPrincipal UserPrincipal me,
             @Parameter(description = "Día de la reunión (YYYY-MM-DD); por defecto, hoy en America/Bogota")
@@ -71,5 +76,26 @@ public class DailyController {
         return dailyService.saveNote(slug, projectId, me.getId(), date, request)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
+    @Operation(summary = "Ajustes de la daily",
+            description = "sections = qué bloques se exponen (resumen, ayer, hoy, bloqueos y nota del día); "
+                    + "agenda = puntos fijos a tratar, en orden. Un proyecto que nunca los cambió devuelve los "
+                    + "valores por defecto (todo visible, sin puntos).")
+    @GetMapping("/settings")
+    public DailySettingsResponse getSettings(@PathVariable String slug, @PathVariable UUID projectId) {
+        return settingsService.get(slug, projectId);
+    }
+
+    @Operation(summary = "Guardar los ajustes de la daily",
+            description = "Pide el permiso de configurar la daily. Reemplaza todo lo guardado. Debe quedar visible "
+                    + "al menos uno de los bloques Ayer, Hoy o Bloqueos. agenda: hasta 12 puntos de hasta 120 "
+                    + "caracteres.")
+    @PutMapping("/settings")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'DAILY_SETTINGS')")
+    public DailySettingsResponse saveSettings(
+            @PathVariable String slug, @PathVariable UUID projectId, @AuthenticationPrincipal UserPrincipal me,
+            @Valid @RequestBody DailySettingsRequest request) {
+        return settingsService.save(slug, projectId, me.getId(), request);
     }
 }

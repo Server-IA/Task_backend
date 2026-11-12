@@ -24,7 +24,7 @@ import java.util.UUID;
 @Tag(name = "Actividad", description = "Feed de actividad del workspace")
 @RestController
 @RequestMapping("/api/v1/workspaces/{slug}/activity")
-@PreAuthorize("@workspaceSecurity.isMember(#slug)")
+@PreAuthorize("@workspaceSecurity.can(#slug, 'ACTIVITY_VIEW')")
 @RequiredArgsConstructor
 public class WorkspaceActivityController {
 

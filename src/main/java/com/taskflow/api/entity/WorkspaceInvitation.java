@@ -36,6 +36,11 @@ public class WorkspaceInvitation extends BaseEntity {
     @Column(nullable = false, length = 20)
     private WorkspaceRole role;
 
+    /** Rol del workspace con el que entra la persona; {@code null}: «Miembro». Si el rol se elimina, queda en null. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "custom_role_id")
+    private CustomRole customRole;
+
     @Column(name = "token_hash", nullable = false, unique = true, length = 64)
     private String tokenHash;
 

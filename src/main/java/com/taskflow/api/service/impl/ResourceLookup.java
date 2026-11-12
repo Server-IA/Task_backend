@@ -10,6 +10,7 @@ import com.taskflow.api.repository.WorkspaceRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -26,6 +27,11 @@ class ResourceLookup {
     User user(UUID userId) {
         return userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
+    }
+
+    /** La cuenta con ese correo (ya en minúsculas), si existe. */
+    Optional<User> findUserByEmail(String email) {
+        return userRepository.findByEmail(email);
     }
 
     Workspace workspace(String slug) {

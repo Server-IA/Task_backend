@@ -18,7 +18,7 @@ public enum ActivityFeedType {
      * Cambios de estado (incluye completar una tarea, que es pasarla a un estado completado, y los que TaskFlow hace
      * solo en una historia).
      */
-    STATE(EnumSet.of(ActivityField.STATE, ActivityField.STORY_AUTO_STATE)),
+    STATE(EnumSet.of(ActivityField.STATE, ActivityField.STORY_AUTO_STATE, ActivityField.GITHUB_STATE)),
     COMMENTS(EnumSet.of(ActivityField.COMMENT)),
     ASSIGNMENTS(EnumSet.of(ActivityField.ASSIGNEES));
 

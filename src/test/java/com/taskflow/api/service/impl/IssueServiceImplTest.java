@@ -1,5 +1,7 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.entity.enums.Permission;
+import com.taskflow.api.security.AccessControl;
 import com.taskflow.api.dto.request.ChecklistItemRequest;
 import com.taskflow.api.dto.request.CreateIssueRequest;
 import com.taskflow.api.dto.request.IssueFilter;
@@ -27,7 +29,6 @@ import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.ProjectRepository;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.repository.UserRepository;
-import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.service.FileService;
 import com.taskflow.api.service.IssueChecklistService;
@@ -89,7 +90,7 @@ class IssueServiceImplTest {
     @Mock
     private UserRepository userRepository;
     @Mock
-    private WorkspaceMemberRepository workspaceMemberRepository;
+    private AccessControl accessControl;
     @Mock
     private ActivityService activityService;
     @Mock
@@ -106,6 +107,8 @@ class IssueServiceImplTest {
     private IssueMapper issueMapper;
     @Mock
     private FileService fileService;
+    @Mock
+    private org.springframework.context.ApplicationEventPublisher events;
 
     @InjectMocks
     private IssueServiceImpl issueService;
@@ -125,6 +128,14 @@ class IssueServiceImplTest {
         author = new User();
         author.setId(UUID.randomUUID());
         when(lookup.project(SLUG, project.getId())).thenReturn(project);
+        // Salvo que la prueba diga otra cosa, quien actúa tiene todos los permisos
+        lenient().when(accessControl.can(any(), any(), any())).thenReturn(true);
+    }
+
+    /** El rol de una persona como lo vería AccessControl: el project manager puede todo; un miembro, lo de fábrica. */
+    private void role(UUID userId, WorkspaceRole role) {
+        lenient().when(accessControl.can(eq(SLUG), eq(userId), any())).thenAnswer(invocation ->
+                role.isManager() || Permission.MEMBER_DEFAULTS.contains(invocation.<Permission>getArgument(2)));
     }
 
     private State state(String name, StateGroup group) {
@@ -581,7 +592,6 @@ class IssueServiceImplTest {
             issueService.delete(SLUG, project.getId(), issue.getId(), creator.getId());
 
             verify(issueRepository).delete(issue);
-            verifyNoInteractions(workspaceMemberRepository);
         }
 
         @Test
@@ -597,7 +607,7 @@ class IssueServiceImplTest {
         @Test
         void elProjectManagerPuedeEliminarCualquierTarea() {
             UUID pmId = UUID.randomUUID();
-            when(workspaceMemberRepository.findRole(SLUG, pmId)).thenReturn(Optional.of(WorkspaceRole.OWNER));
+            role(pmId, WorkspaceRole.OWNER);
 
             issueService.delete(SLUG, project.getId(), issue.getId(), pmId);
 
@@ -607,11 +617,11 @@ class IssueServiceImplTest {
         @Test
         void otroMiembroRecibe403() {
             UUID memberId = UUID.randomUUID();
-            when(workspaceMemberRepository.findRole(SLUG, memberId)).thenReturn(Optional.of(WorkspaceRole.MEMBER));
+            role(memberId, WorkspaceRole.MEMBER);
 
             assertThatThrownBy(() -> issueService.delete(SLUG, project.getId(), issue.getId(), memberId))
                     .isInstanceOf(ForbiddenException.class)
-                    .hasMessage("Solo el project manager o quien creó la tarea puede eliminarla");
+                    .hasMessage(IssueServiceImpl.DELETE_FORBIDDEN_MESSAGE);
             verify(issueRepository, never()).delete(any(Issue.class));
         }
 
@@ -619,7 +629,7 @@ class IssueServiceImplTest {
         void unaTareaSinCreadorSoloLaEliminaElProjectManager() {
             issue.setCreatedBy(null);
             UUID memberId = UUID.randomUUID();
-            when(workspaceMemberRepository.findRole(SLUG, memberId)).thenReturn(Optional.of(WorkspaceRole.MEMBER));
+            role(memberId, WorkspaceRole.MEMBER);
 
             assertThatThrownBy(() -> issueService.delete(SLUG, project.getId(), issue.getId(), memberId))
                     .isInstanceOf(ForbiddenException.class);

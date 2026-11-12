@@ -23,6 +23,7 @@ import com.taskflow.api.util.HumanNames;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.taskflow.api.entity.enums.Permission;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -39,7 +40,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class SavedViewServiceImpl implements SavedViewService {
 
-    static final String REORDER_SHARED_FORBIDDEN = "Solo el project manager puede ordenar las vistas compartidas";
+    static final String REORDER_SHARED_FORBIDDEN = "Tu rol no permite ordenar las vistas compartidas";
     static final String REORDER_EMPTY = "Indica el nuevo orden de las vistas compartidas o de tus vistas personales";
     static final String DUPLICATE_SHARED = "Ya hay una vista compartida llamada «%s» en este proyecto";
     static final String DUPLICATE_PERSONAL = "Ya tienes una vista personal llamada «%s» en este proyecto";
@@ -64,8 +65,8 @@ public class SavedViewServiceImpl implements SavedViewService {
     public SavedViewResponse create(String slug, UUID projectId, UUID userId, CreateSavedViewRequest request) {
         Project project = lookup.project(slug, projectId);
         boolean shared = Boolean.TRUE.equals(request.shared());
-        if (shared && !projectAccess.isManager(project.getWorkspace(), userId)) {
-            throw new ForbiddenException("Solo el project manager puede crear vistas compartidas");
+        if (shared && !canShare(project, userId)) {
+            throw new ForbiddenException("Tu rol no permite crear vistas compartidas");
         }
         User owner = lookup.user(userId);
         lookup.lockProject(project);
@@ -91,8 +92,8 @@ public class SavedViewServiceImpl implements SavedViewService {
         SavedView view = findVisibleView(project, viewId, userId);
         ensureCanManage(project, view, userId, "editar");
         boolean share = Boolean.TRUE.equals(request.shared()) && !view.isShared();
-        if (share && !projectAccess.isManager(project.getWorkspace(), userId)) {
-            throw new ForbiddenException("Solo el project manager puede compartir vistas");
+        if (share && !canShare(project, userId)) {
+            throw new ForbiddenException("Tu rol no permite compartir vistas");
         }
 
         String name = request.name() == null ? view.getName() : HumanNames.required(request.name(), "name");
@@ -144,7 +145,7 @@ public class SavedViewServiceImpl implements SavedViewService {
             throw new BadRequestException(REORDER_EMPTY);
         }
         if (request.shared() != null) {
-            if (!projectAccess.isManager(project.getWorkspace(), userId)) {
+            if (!canShare(project, userId)) {
                 throw new ForbiddenException(REORDER_SHARED_FORBIDDEN);
             }
             applyOrder(viewRepository.findAllByProjectIdAndSharedTrueOrderByPositionAscCreatedAtAsc(project.getId()),
@@ -200,11 +201,18 @@ public class SavedViewServiceImpl implements SavedViewService {
                 .orElseThrow(() -> new ResourceNotFoundException("Vista no encontrada"));
     }
 
-    /** Las compartidas solo las gestiona el project manager; las personales, su dueño (ya filtrado al buscarla). */
+    /**
+     * Las compartidas las gestiona quien tiene el permiso de vistas compartidas; las personales, su dueño (ya filtrado
+     * al buscarla).
+     */
     private void ensureCanManage(Project project, SavedView view, UUID userId, String action) {
-        if (view.isShared() && !projectAccess.isManager(project.getWorkspace(), userId)) {
-            throw new ForbiddenException("Solo el project manager puede " + action + " las vistas compartidas");
+        if (view.isShared() && !canShare(project, userId)) {
+            throw new ForbiddenException("Tu rol no permite " + action + " las vistas compartidas");
         }
+    }
+
+    private boolean canShare(Project project, UUID userId) {
+        return projectAccess.can(project.getWorkspace(), userId, Permission.VIEW_SHARED);
     }
 
     /** Las vistas compartidas del proyecto o las personales del dueño, en orden. */

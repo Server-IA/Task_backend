@@ -2,9 +2,11 @@ package com.taskflow.api.email;
 
 import com.taskflow.api.config.AppProperties;
 import com.taskflow.api.entity.User;
+import com.taskflow.api.i18n.Language;
 import com.taskflow.api.util.ClientInfo;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.MessageSource;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -26,6 +28,9 @@ import java.util.Map;
  *       el registro ni la invitación.</li>
  *   <li>Los enlaces solo se escriben en el log si los correos no salen y {@code app.mail.log-links} lo permite
  *       (desarrollo local): son secretos.</li>
+ *   <li>Cada correo va en el idioma de quien lo recibe: el de su cuenta ({@code user.language}) o, si nunca lo eligió,
+ *       el de la petición que lo dispara. Hay una sola plantilla por correo; sus textos y el asunto salen de
+ *       {@code i18n/email*.properties}.</li>
  * </ul>
  */
 @Slf4j
@@ -33,20 +38,22 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class EmailNotifier {
 
+    /** Español de Colombia: las fechas salen «26 de octubre de 2026, 11:42 p. m.». */
     private static final Locale ES = Locale.forLanguageTag("es-CO");
-    private static final DateTimeFormatter DATE_FORMAT =
+    private static final DateTimeFormatter DATE_FORMAT_ES =
             DateTimeFormatter.ofPattern("d 'de' MMMM 'de' yyyy, h:mm a", ES);
-
-    /** Asunto de la invitación: sin el nombre de quien invita ni del workspace (los escribe el usuario). */
-    static final String INVITATION_SUBJECT = "Te invitaron a un workspace en TaskFlow";
+    private static final DateTimeFormatter DATE_FORMAT_EN =
+            DateTimeFormatter.ofPattern("MMMM d, yyyy, h:mm a", Language.EN.locale());
 
     private final EmailService emailService;
     private final TemplateEngine templateEngine;
     private final AppProperties properties;
+    /** Textos de los correos ({@code i18n/email*.properties}): de aquí sale el asunto. */
+    private final MessageSource messages;
 
     public void sendEmailVerification(User user, String token) {
         String link = properties.frontendUrl() + "/verify-email?token=" + token;
-        send(user.getEmail(), "Verifica tu cuenta de TaskFlow", "verify-email", link, Map.of(
+        send(user.getEmail(), languageOf(user), "verify.subject", "verify-email", link, Map.of(
                 "name", user.getFullName(),
                 "link", link,
                 "hours", properties.tokens().emailVerificationHours()));
@@ -54,17 +61,19 @@ public class EmailNotifier {
 
     public void sendLoginAlert(User user, ClientInfo client, Instant when) {
         String link = properties.frontendUrl() + "/forgot-password";
-        send(user.getEmail(), "Nuevo inicio de sesión en TaskFlow", "login-alert", null, Map.of(
+        Language language = languageOf(user);
+        send(user.getEmail(), language, "login.subject", "login-alert", null, Map.of(
                 "name", user.getFullName(),
-                "date", DATE_FORMAT.format(when.atZone(ZoneId.of(properties.timezone()))),
+                "date", date(when, language),
                 "ip", client.ip(),
-                "device", client.device(),
+                // «Chrome en Windows» / «Chrome on Windows»
+                "device", language.t(client.device()),
                 "link", link));
     }
 
     public void sendPasswordReset(User user, String token) {
         String link = properties.frontendUrl() + "/reset-password?token=" + token;
-        send(user.getEmail(), "Restablece tu contraseña de TaskFlow", "reset-password", link, Map.of(
+        send(user.getEmail(), languageOf(user), "reset.subject", "reset-password", link, Map.of(
                 "name", user.getFullName(),
                 "link", link,
                 "minutes", properties.tokens().passwordResetMinutes()));
@@ -72,29 +81,51 @@ public class EmailNotifier {
 
     public void sendPasswordChanged(User user) {
         String link = properties.frontendUrl() + "/forgot-password";
-        send(user.getEmail(), "Tu contraseña de TaskFlow cambió", "password-changed", null, Map.of(
+        Language language = languageOf(user);
+        send(user.getEmail(), language, "changed.subject", "password-changed", null, Map.of(
                 "name", user.getFullName(),
-                "date", DATE_FORMAT.format(Instant.now().atZone(ZoneId.of(properties.timezone()))),
+                "date", date(Instant.now(), language),
                 "link", link));
     }
 
-    public void sendWorkspaceInvitation(String email, String inviterName, String workspaceName, String token) {
+    /**
+     * @param language idioma de quien recibe la invitación: el de su cuenta si la tiene y lo eligió; {@code null} si
+     *                 no (sale en el de la petición de quien invita). El asunto no lleva el nombre de quien invita ni
+     *                 el del workspace (los escribe el usuario)
+     */
+    public void sendWorkspaceInvitation(String email, String inviterName, String workspaceName, String token,
+                                        Language language) {
         String link = properties.frontendUrl() + "/invitations/" + token;
-        send(email, INVITATION_SUBJECT, "invitation", link, Map.of(
+        send(email, language != null ? language : Language.current(), "invitation.subject", "invitation", link, Map.of(
                 "inviter", inviterName,
                 "workspace", workspaceName,
                 "link", link,
                 "days", properties.tokens().invitationDays()));
     }
 
-    private void send(String to, String subject, String template, String actionLink, Map<String, Object> variables) {
+    /** El idioma que eligió la persona o, si nunca eligió uno, el de la petición en curso (español fuera de una). */
+    static Language languageOf(User user) {
+        Language chosen = Language.fromCode(user.getLanguage());
+        return chosen != null ? chosen : Language.current();
+    }
+
+    private String date(Instant when, Language language) {
+        DateTimeFormatter format = language == Language.EN ? DATE_FORMAT_EN : DATE_FORMAT_ES;
+        return format.format(when.atZone(ZoneId.of(properties.timezone())));
+    }
+
+    private void send(String to, Language language, String subjectKey, String template, String actionLink,
+                      Map<String, Object> variables) {
+        // Con este locale las plantillas resuelven sus textos (#{…}) en el idioma del correo
+        Locale locale = language == Language.EN ? Language.EN.locale() : ES;
+        String subject = messages.getMessage(subjectKey, null, locale);
         boolean logLink = properties.logMailLinksAlways() || (!properties.mail().enabled() && properties.logMailLinks());
         if (actionLink != null && logLink) {
             // Solo en desarrollo: sin proveedor de correo (o con MAIL_LOG_LINKS=true, por si el SMTP falla), el
             // enlace se muestra en el log para probar el flujo.
             log.info("[Desarrollo] Enlace del correo '{}': {}", subject, actionLink);
         }
-        Context context = new Context(ES);
+        Context context = new Context(locale);
         context.setVariables(variables);
         // La plantilla base enlaza al front y toma de ahí el logo (public/email/logo.png)
         context.setVariable("appUrl", properties.frontendUrl());

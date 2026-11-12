@@ -179,8 +179,19 @@ public class NotificationServiceImpl implements NotificationService {
     @Transactional
     public void notifyUnblocked(Issue blocked, Issue blocker, User actor) {
         String message = blocked.getCode() + " ya no está bloqueada: " + blocker.getCode() + " se completó";
-        withAccess(blocked, distinctExcept(blocked.getAssignees(), actor))
+        // Sin autor (la completó una automatización) el aviso le llega a todos los asignados
+        Collection<User> assignees = actor == null ? distinct(blocked.getAssignees()) : distinctExcept(blocked.getAssignees(), actor);
+        withAccess(blocked, assignees)
                 .forEach(user -> save(user, actor, NotificationType.ISSUE_UNBLOCKED, message, blocked, null));
+    }
+
+    @Override
+    @Transactional
+    public void notifyMergedWithPendingCriteria(Issue issue, int pullRequestNumber) {
+        String message = "Se fusionó el pull request #" + pullRequestNumber + " de " + issue.getCode()
+                + ", pero la tarea no se completó sola: le faltan criterios de aceptación";
+        withAccess(issue, distinct(issue.getAssignees()))
+                .forEach(user -> save(user, null, NotificationType.PR_MERGED_PENDING, message, issue, null));
     }
 
     @Override
@@ -227,6 +238,20 @@ public class NotificationServiceImpl implements NotificationService {
             notification.setWorkspace(workspace);
             notificationRepository.save(notification);
         });
+    }
+
+    @Override
+    @Transactional
+    public void notifyImportFinished(Workspace workspace, User recipient, String sourceName, boolean completed, int issues,
+                                     int projects) {
+        String message = completed
+                ? "La importación desde " + sourceName + " terminó. Tareas: " + issues + " · proyectos: " + projects
+                + ". El informe está en Ajustes › Importar."
+                : "La importación desde " + sourceName + " no terminó. Lo que alcanzó a entrar se puede revisar o deshacer en "
+                + "Ajustes › Importar.";
+        Notification notification = notification(recipient, null, NotificationType.IMPORT_FINISHED, message);
+        notification.setWorkspace(workspace);
+        notificationRepository.save(notification);
     }
 
     /**

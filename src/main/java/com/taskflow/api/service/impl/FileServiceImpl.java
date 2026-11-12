@@ -52,6 +52,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.taskflow.api.entity.enums.Permission;
 
 import java.time.Instant;
 import java.util.Collection;
@@ -113,6 +114,7 @@ public class FileServiceImpl implements FileService {
         requireStorage();
         Project project = lookup.project(slug, projectId);
         boolean inline = request.purpose() == UploadPurpose.INLINE_IMAGE;
+        ensureMayUpload(project, userId, inline);
         Issue issue = null;
         if (request.issueId() != null) {
             issue = issueRepository.findByIdAndProjectId(request.issueId(), project.getId())
@@ -176,7 +178,7 @@ public class FileServiceImpl implements FileService {
         Project project = lookup.project(slug, projectId);
         StoredFile file = fileRepository.lockInProject(fileId, project.getId())
                 .orElseThrow(() -> new ResourceNotFoundException(NOT_FOUND));
-        if (!isUploader(file, userId) && !projectAccess.isManager(project.getWorkspace(), userId)) {
+        if (!isUploader(file, userId) && !projectAccess.can(project.getWorkspace(), userId, Permission.FILE_DELETE_ANY)) {
             throw new ForbiddenException(DELETE_FORBIDDEN);
         }
         if (file.isReady() && file.getKind() == FileKind.ATTACHMENT && file.getIssue() != null) {
@@ -447,6 +449,23 @@ public class FileServiceImpl implements FileService {
         }
         return new ConflictException("Este archivo no cabe: quedan " + FileTypes.formatSize(quota - reserved)
                 + " de los " + limit + " del workspace.", STORAGE_FULL);
+    }
+
+    /**
+     * Un adjunto exige el permiso de subir adjuntos. Una imagen pegada va en una descripción o en un comentario, y al
+     * subirla todavía no se sabe en cuál: basta con poder escribir alguno de los dos (el comentario comprueba su
+     * propio permiso al guardarse).
+     */
+    private void ensureMayUpload(Project project, UUID userId, boolean inline) {
+        Workspace workspace = project.getWorkspace();
+        boolean allowed = inline
+                ? projectAccess.can(workspace, userId, Permission.ISSUE_EDIT)
+                        || projectAccess.can(workspace, userId, Permission.ISSUE_CREATE)
+                        || projectAccess.can(workspace, userId, Permission.COMMENT_IMAGES)
+                : projectAccess.can(workspace, userId, Permission.ISSUE_ATTACH);
+        if (!allowed) {
+            throw new ForbiddenException(inline ? "Tu rol no permite subir imágenes" : "Tu rol no permite subir adjuntos");
+        }
     }
 
     private static boolean isUploader(StoredFile file, UUID userId) {

@@ -1,7 +1,9 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.security.AccessControl;
 import com.taskflow.api.dto.request.CommentRequest;
 import com.taskflow.api.entity.Comment;
+import com.taskflow.api.entity.enums.Permission;
 import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.Project;
 import com.taskflow.api.entity.User;
@@ -11,7 +13,6 @@ import com.taskflow.api.mapper.CollaborationMapper;
 import com.taskflow.api.repository.CommentRepository;
 import com.taskflow.api.repository.IssueRepository;
 import com.taskflow.api.repository.UserRepository;
-import com.taskflow.api.repository.WorkspaceMemberRepository;
 import com.taskflow.api.service.ActivityService;
 import com.taskflow.api.service.FileService;
 import com.taskflow.api.service.NotificationService;
@@ -54,7 +55,7 @@ class CommentServiceImplTest {
     @Mock
     private UserRepository userRepository;
     @Mock
-    private WorkspaceMemberRepository workspaceMemberRepository;
+    private AccessControl accessControl;
     @Mock
     private ActivityService activityService;
     @Mock
@@ -92,6 +93,8 @@ class CommentServiceImplTest {
         when(lookup.project(SLUG, project.getId())).thenReturn(project);
         when(issueRepository.findByIdAndProjectId(issue.getId(), project.getId())).thenReturn(Optional.of(issue));
         lenient().when(lookup.user(author.getId())).thenReturn(author);
+        // Salvo que la prueba diga otra cosa, quien actúa tiene todos los permisos
+        lenient().when(accessControl.can(any(), any(), any())).thenReturn(true);
     }
 
     private static User user(String name) {
@@ -196,6 +199,32 @@ class CommentServiceImplTest {
                     ana.getId(), new CommentRequest("Hola " + mention(luis))))
                     .isInstanceOf(ForbiddenException.class);
             verify(notificationService, never()).notifyMentioned(any(), any(), any(), any());
+        }
+    }
+
+    @Nested
+    class ImagenesEnComentarios {
+
+        private static final String IMAGE = "![captura](/files/3f2b8a1e-0c4d-4e5f-9a6b-7c8d9e0f1a2b)";
+
+        @Test
+        void sinElPermisoNoSeGuardaUnComentarioConImagen() {
+            when(accessControl.can(SLUG, author.getId(), Permission.COMMENT_IMAGES)).thenReturn(false);
+
+            assertThatThrownBy(() -> commentService.create(SLUG, project.getId(), issue.getId(), author.getId(),
+                    new CommentRequest("Mira esto " + IMAGE)))
+                    .isInstanceOf(ForbiddenException.class)
+                    .hasMessage(CommentServiceImpl.IMAGES_FORBIDDEN);
+            verify(commentRepository, never()).save(any());
+        }
+
+        @Test
+        void sinElPermisoSiSePuedeComentarSoloConTexto() {
+            lenient().when(accessControl.can(SLUG, author.getId(), Permission.COMMENT_IMAGES)).thenReturn(false);
+
+            commentService.create(SLUG, project.getId(), issue.getId(), author.getId(), new CommentRequest("Solo texto"));
+
+            verify(commentRepository).save(any(Comment.class));
         }
     }
 }

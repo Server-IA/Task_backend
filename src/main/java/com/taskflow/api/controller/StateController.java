@@ -44,7 +44,7 @@ public class StateController {
 
     @Operation(summary = "Crear estado (project manager)")
     @PostMapping
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'PROJECT_STATES')")
     @ResponseStatus(HttpStatus.CREATED)
     public StateResponse create(@PathVariable String slug, @PathVariable UUID projectId,
                                 @Valid @RequestBody CreateStateRequest request) {
@@ -56,7 +56,7 @@ public class StateController {
                     + "cerradas o reabiertas (cerradas por quien cambia el grupo), historias listas para revisar y "
                     + "avisos de desbloqueo, como si cada tarea se moviera a un estado de ese grupo.")
     @PatchMapping("/{stateId}")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'PROJECT_STATES')")
     public StateResponse update(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID stateId,
                                 @AuthenticationPrincipal UserPrincipal me,
                                 @Valid @RequestBody UpdateStateRequest request) {
@@ -68,7 +68,7 @@ public class StateController {
                     + "queda con position = su índice). Si falta o sobra alguno, o se repite, responde 400 y no cambia "
                     + "nada. Devuelve los estados en el orden nuevo.")
     @PutMapping("/order")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'PROJECT_STATES')")
     public List<StateResponse> reorder(@PathVariable String slug, @PathVariable UUID projectId,
                                        @Valid @RequestBody ReorderStatesRequest request) {
         return stateService.reorder(slug, projectId, request);
@@ -77,7 +77,7 @@ public class StateController {
     @Operation(summary = "Eliminar estado (project manager)",
             description = "No se puede si tiene tareas o si es el único estado.")
     @DeleteMapping("/{stateId}")
-    @PreAuthorize("@workspaceSecurity.canManageProject(#slug, #projectId)")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'PROJECT_STATES')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID stateId) {
         stateService.delete(slug, projectId, stateId);

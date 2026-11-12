@@ -72,7 +72,13 @@ public record DailyResponse(
     ) {
     }
 
+    /** Qué clase de cambio es una entrada de «ayer»: lo que el frontend usa para decidir (no el texto). */
+    public enum DailyChangeKind {
+        COMPLETED, MOVED, CREATED, COMMENTED, UPDATED
+    }
+
     /**
+     * @param kind      clase de cambio, estable en cualquier idioma
      * @param change    «completó», «movió a {estado}», «creó», «comentó» o «actualizó» (cualquier otro cambio)
      * @param fromState en «completó» y «movió a», el nombre del estado de origen tal como quedó en el historial
      *                  ({@code null} en los demás cambios)
@@ -80,6 +86,7 @@ public record DailyResponse(
      */
     public record DailyChange(
             RelatedIssueResponse issue,
+            DailyChangeKind kind,
             String change,
             String fromState,
             String toState

@@ -89,6 +89,13 @@ public record IssueResponse(
         Instant closedAt,
         UserSummaryResponse closedBy,
         /** Adjuntos de la tarea (el clip de las tarjetas y las filas); las imágenes de los textos no cuentan. */
-        int attachmentCount
+        int attachmentCount,
+        /**
+         * Tarea importada: de qué herramienta vino ({@code JIRA}, {@code TRELLO}, {@code LINEAR}, {@code ASANA} o
+         * {@code CSV}), su código allá y el enlace para abrirla; {@code null} si nació en TaskFlow.
+         */
+        String importSource,
+        String importKey,
+        String importUrl
 ) {
 }

@@ -10,4 +10,7 @@ public interface UserService {
     UserResponse getProfile(UUID userId);
 
     UserResponse updateProfile(UUID userId, UpdateProfileRequest request);
+
+    /** Guarda el idioma de la cuenta ({@code es} o {@code en}): el de la aplicación y el de sus correos. */
+    UserResponse updateLanguage(UUID userId, String language);
 }

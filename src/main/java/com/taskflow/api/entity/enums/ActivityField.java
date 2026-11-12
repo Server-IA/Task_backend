@@ -34,5 +34,9 @@ public enum ActivityField {
      * Se adjuntó ({@code newValue} = nombre del archivo) o se eliminó ({@code oldValue} = nombre) un archivo de la
      * sección «Adjuntos». Las imágenes pegadas en un texto no se registran.
      */
-    ATTACHMENT
+    ATTACHMENT,
+    /** Algo que pasó en GitHub con la tarea: se creó su rama, se abrió, fusionó o cerró su pull request. */
+    GITHUB,
+    /** La tarea cambió de estado sola (sin autor) porque avanzó su rama o su pull request en GitHub. */
+    GITHUB_STATE
 }

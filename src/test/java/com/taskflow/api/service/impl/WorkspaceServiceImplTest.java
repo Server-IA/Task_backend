@@ -1,5 +1,6 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.repository.CustomRoleRepository;
 import com.taskflow.api.dto.request.CreateWorkspaceRequest;
 import com.taskflow.api.dto.request.UpdateMemberRoleRequest;
 import com.taskflow.api.dto.request.UpdateWorkspaceRequest;
@@ -50,6 +51,8 @@ class WorkspaceServiceImplTest {
     private IssueTemplateRepository templateRepository;
     @Mock
     private IssueRepository issueRepository;
+    @Mock
+    private CustomRoleRepository customRoleRepository;
     @Mock
     private ResourceLookup lookup;
     @Mock
@@ -118,9 +121,10 @@ class WorkspaceServiceImplTest {
 
         @Test
         void promueveAUnMiembroAProjectManager() {
+            member(creator, WorkspaceRole.OWNER);
             WorkspaceMember dev = member(user("Beto"), WorkspaceRole.MEMBER);
 
-            workspaceService.updateMemberRole(SLUG, dev.getUser().getId(),
+            workspaceService.updateMemberRole(SLUG, creator.getId(), dev.getUser().getId(),
                     new UpdateMemberRoleRequest(WorkspaceRole.OWNER));
 
             assertThat(dev.getRole()).isEqualTo(WorkspaceRole.OWNER);
@@ -131,7 +135,7 @@ class WorkspaceServiceImplTest {
             WorkspaceMember pm = member(creator, WorkspaceRole.OWNER);
             otherManagers(creator);
 
-            assertThatThrownBy(() -> workspaceService.updateMemberRole(SLUG, creator.getId(),
+            assertThatThrownBy(() -> workspaceService.updateMemberRole(SLUG, creator.getId(), creator.getId(),
                     new UpdateMemberRoleRequest(WorkspaceRole.MEMBER)))
                     .isInstanceOf(ConflictException.class)
                     .hasMessageContaining("al menos un project manager");
@@ -144,7 +148,8 @@ class WorkspaceServiceImplTest {
             WorkspaceMember pm = member(creator, WorkspaceRole.OWNER);
             otherManagers(creator, new WorkspaceMember(workspace, second, WorkspaceRole.OWNER));
 
-            workspaceService.updateMemberRole(SLUG, creator.getId(), new UpdateMemberRoleRequest(WorkspaceRole.MEMBER));
+            workspaceService.updateMemberRole(SLUG, creator.getId(), creator.getId(),
+                    new UpdateMemberRoleRequest(WorkspaceRole.MEMBER));
 
             assertThat(pm.getRole()).isEqualTo(WorkspaceRole.MEMBER);
             // El dueño registrado del workspace siempre es un project manager
@@ -155,7 +160,8 @@ class WorkspaceServiceImplTest {
         void mismoRolNoCambiaNada() {
             WorkspaceMember pm = member(creator, WorkspaceRole.OWNER);
 
-            workspaceService.updateMemberRole(SLUG, creator.getId(), new UpdateMemberRoleRequest(WorkspaceRole.OWNER));
+            workspaceService.updateMemberRole(SLUG, creator.getId(), creator.getId(),
+                    new UpdateMemberRoleRequest(WorkspaceRole.OWNER));
 
             assertThat(pm.getRole()).isEqualTo(WorkspaceRole.OWNER);
             verify(memberRepository, never()).findOthersWithRole(any(), any(), any());
@@ -188,7 +194,7 @@ class WorkspaceServiceImplTest {
 
             assertThatThrownBy(() -> workspaceService.removeMember(SLUG, dev.getId(), other.getId()))
                     .isInstanceOf(ForbiddenException.class)
-                    .hasMessageContaining("project manager");
+                    .hasMessage(WorkspaceServiceImpl.REMOVE_FORBIDDEN);
             verify(memberRepository, never()).delete(any());
         }
 

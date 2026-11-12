@@ -59,7 +59,7 @@ public class WorkspaceController {
 
     @Operation(summary = "Editar workspace (project manager)")
     @PatchMapping("/{slug}")
-    @PreAuthorize("@workspaceSecurity.isManager(#slug)")
+    @PreAuthorize("@workspaceSecurity.can(#slug, 'WORKSPACE_EDIT')")
     public WorkspaceResponse update(@PathVariable String slug, @AuthenticationPrincipal UserPrincipal me,
                                     @Valid @RequestBody UpdateWorkspaceRequest request) {
         return workspaceService.update(slug, me.getId(), request);
@@ -84,10 +84,11 @@ public class WorkspaceController {
             description = "Roles: OWNER (project manager) o MEMBER. Puede haber varios project managers, pero "
                     + "nunca menos de uno: degradar al último responde 409.")
     @PatchMapping("/{slug}/members/{userId}")
-    @PreAuthorize("@workspaceSecurity.isManager(#slug)")
+    @PreAuthorize("@workspaceSecurity.can(#slug, 'MEMBER_ROLE')")
     public WorkspaceMemberResponse updateMemberRole(@PathVariable String slug, @PathVariable UUID userId,
+                                                    @AuthenticationPrincipal UserPrincipal me,
                                                     @Valid @RequestBody UpdateMemberRoleRequest request) {
-        return workspaceService.updateMemberRole(slug, userId, request);
+        return workspaceService.updateMemberRole(slug, me.getId(), userId, request);
     }
 
     @Operation(summary = "Quitar miembro o salir del workspace",
