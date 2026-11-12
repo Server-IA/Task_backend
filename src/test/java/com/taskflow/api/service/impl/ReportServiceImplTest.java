@@ -14,6 +14,7 @@ import com.taskflow.api.entity.enums.IssuePriority;
 import com.taskflow.api.entity.enums.IssueType;
 import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.exception.BadRequestException;
+import com.taskflow.api.github.GithubStore;
 import com.taskflow.api.i18n.Language;
 import com.taskflow.api.report.IssuesReport;
 import com.taskflow.api.report.IssuesReport.Count;
@@ -25,6 +26,7 @@ import com.taskflow.api.repository.LabelRepository;
 import com.taskflow.api.repository.ProjectModuleRepository;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.repository.UserRepository;
+import com.taskflow.api.service.DevelopmentStatsService;
 import com.taskflow.api.service.ReportService.ReportFile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,7 +62,7 @@ class ReportServiceImplTest {
     private static final String SLUG = "equipo";
     private static final ZoneId ZONE = ZoneId.of("America/Bogota");
     private static final IssueFilter NO_FILTER = new IssueFilter(null, null, null, null, null, null, null, null, null);
-    private static final ReportOptions DEFAULTS = new ReportOptions(null, null, null, null, null, null, null, null);
+    private static final ReportOptions DEFAULTS = new ReportOptions(null, null, null, null, null, null, null, null, null, null);
 
     @Mock
     private IssueRepository issueRepository;
@@ -76,6 +78,10 @@ class ReportServiceImplTest {
     private UserRepository userRepository;
     @Mock
     private ResourceLookup lookup;
+    @Mock
+    private GithubStore githubStore;
+    @Mock
+    private DevelopmentStatsService developmentStatsService;
 
     private ReportServiceImpl service;
     private Project project;
@@ -91,7 +97,8 @@ class ReportServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new ReportServiceImpl(issueRepository, stateRepository, labelRepository, cycleRepository,
-                moduleRepository, userRepository, lookup, new AppProperties(null, null, null, "America/Bogota", null));
+                moduleRepository, userRepository, lookup, new AppProperties(null, null, null, "America/Bogota", null),
+                githubStore, developmentStatsService);
         Workspace workspace = new Workspace();
         workspace.setId(UUID.randomUUID());
         workspace.setName("Equipo Producto");
@@ -192,7 +199,7 @@ class ReportServiceImplTest {
         issue("Suelta", todo, IssuePriority.NONE, null);
 
         List<Group> groups = build(NO_FILTER,
-                new ReportOptions(null, null, null, null, ReportOptions.GroupBy.ASSIGNEE, null, null, null)).groups();
+                new ReportOptions(null, null, null, null, ReportOptions.GroupBy.ASSIGNEE, null, null, null, null, null)).groups();
 
         assertThat(groups).extracting(Group::title).containsExactly("Ana Ruiz", "Luis Muñoz", "Sin asignar");
         assertThat(groups.get(0).rows().get(0).assignees()).containsExactly("Ana Ruiz", "Luis Muñoz");
@@ -207,7 +214,7 @@ class ReportServiceImplTest {
         bug.getLabels().add(label);
 
         List<Group> groups = build(NO_FILTER,
-                new ReportOptions(null, null, null, null, ReportOptions.GroupBy.NONE, null, null, null)).groups();
+                new ReportOptions(null, null, null, null, ReportOptions.GroupBy.NONE, null, null, null, null, null)).groups();
 
         assertThat(groups).hasSize(1);
         assertThat(groups.get(0).title()).isNull();
@@ -229,7 +236,7 @@ class ReportServiceImplTest {
                 new IssueFilter(List.of(doing.getId(), todo.getId(), goneState), List.of(IssuePriority.LOW, IssuePriority.URGENT),
                         List.of(luis.getId()), null, "  login ", UUID.randomUUID(), null, true, List.of(IssueType.BUG)),
                 new ReportOptions(LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 10), null, LocalDate.of(2026, 12, 1),
-                        null, null, null, null)).filters();
+                        null, null, null, null, null, null)).filters();
 
         assertThat(filters).containsExactly(
                 new FilterLine("Estado", "Sin empezar, En curso (ya no existe)"),
@@ -269,11 +276,11 @@ class ReportServiceImplTest {
     @Test
     void rechazaUnRangoAlRevesOUnAnioExtremo() {
         assertThatThrownBy(() -> build(NO_FILTER,
-                new ReportOptions(LocalDate.of(2026, 11, 10), LocalDate.of(2026, 11, 1), null, null, null, null, null, null)))
+                new ReportOptions(LocalDate.of(2026, 11, 10), LocalDate.of(2026, 11, 1), null, null, null, null, null, null, null, null)))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("«desde» no puede ser posterior");
         assertThatThrownBy(() -> build(NO_FILTER,
-                new ReportOptions(null, null, LocalDate.of(-5, 1, 1), null, null, null, null, null)))
+                new ReportOptions(null, null, LocalDate.of(-5, 1, 1), null, null, null, null, null, null, null)))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("1900 y 2999");
         verifyNoInteractions(issueRepository);
@@ -288,8 +295,8 @@ class ReportServiceImplTest {
         assertThat(file.fileName()).isEqualTo("reporte-tareas-PORT-" + LocalDate.now(ZONE) + ".pdf");
         assertThat(file.content()).isNotEmpty();
         assertThatThrownBy(() -> service.issuesPdf(SLUG, project.getId(), ana.getId(), NO_FILTER,
-                new ReportOptions(null, null, null, null, null, null, false, false)))
+                new ReportOptions(null, null, null, null, null, null, false, false, null, null)))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessageContaining("resumen, el listado o ambos");
+                .hasMessageContaining("al menos una sección");
     }
 }

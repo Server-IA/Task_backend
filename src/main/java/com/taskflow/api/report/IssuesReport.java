@@ -1,6 +1,7 @@
 package com.taskflow.api.report;
 
 import com.taskflow.api.dto.request.ReportOptions;
+import com.taskflow.api.dto.response.DevelopmentStatsResponse;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -28,6 +29,8 @@ import java.util.List;
  * @param totalMatching tareas que cumplen los filtros (puede ser más que las que trae el reporte)
  * @param truncated     si el reporte solo trae las primeras {@link #MAX_ISSUES}
  * @param options       agrupación, orden y secciones pedidas
+ * @param development   la sección de desarrollo (GitHub); {@code null} si no se pidió o el proyecto no tiene
+ *                      repositorios enlazados
  */
 public record IssuesReport(
         String projectName,
@@ -45,7 +48,8 @@ public record IssuesReport(
         List<Group> groups,
         long totalMatching,
         boolean truncated,
-        ReportOptions options
+        ReportOptions options,
+        DevelopmentStatsResponse development
 ) {
 
     /** Máximo de tareas en un reporte: con más, el reporte trae las primeras y lo avisa. */

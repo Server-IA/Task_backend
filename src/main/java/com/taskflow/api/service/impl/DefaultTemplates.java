@@ -10,11 +10,8 @@ import com.taskflow.api.entity.enums.IssueType;
 import java.util.List;
 
 /**
- * Plantillas con las que nace cada proyecto. Son los mismos textos que la migración
- * {@code V11__issue_templates.sql} insertó en los proyectos que ya existían; los esqueletos de la descripción son
- * los de {@code V22__template_skeletons.sql}, que actualizó los que nadie había cambiado. Cada una fija el tipo de la
- * tarea que crea ({@code V24__issue_types.sql}): «Reporte de bug» un bug, «Historia de usuario» una historia y «Tarea
- * técnica» una tarea (sin plantilla, también tarea).
+ * Plantillas con las que nace cada proyecto. Cada una fija el tipo de la tarea que crea: «Reporte de bug» un bug,
+ * «Historia de usuario» una historia y «Tarea técnica» una tarea (sin plantilla, también tarea).
  */
 final class DefaultTemplates {
 

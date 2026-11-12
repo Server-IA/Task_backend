@@ -7,7 +7,7 @@ import java.time.LocalDate;
 
 /**
  * Opciones de un reporte de tareas, además de los filtros del listado ({@link IssueFilter}): rangos de fechas, cómo
- * se agrupan y ordenan las tareas y qué secciones lleva.
+ * se agrupan y ordenan las tareas y qué secciones lleva (resumen, listado y desarrollo).
  */
 public record ReportOptions(
         @Parameter(description = "Creadas desde este día (YYYY-MM-DD), inclusive")
@@ -38,8 +38,18 @@ public record ReportOptions(
         Boolean summary,
 
         @Parameter(description = "Incluir el listado de tareas; por defecto true")
-        Boolean issues
+        Boolean issues,
+
+        @Parameter(description = "Incluir la sección de desarrollo (pull requests y GitHub Actions de los repositorios "
+                + "enlazados al proyecto); por defecto false. Sin repositorios enlazados no sale")
+        Boolean development,
+
+        @Parameter(description = "Semanas que cubre la sección de desarrollo: 4, 8 (por defecto) o 12")
+        Integer developmentWeeks
 ) {
+
+    /** Semanas que cubre la sección de desarrollo si no se dice. */
+    public static final int DEFAULT_DEVELOPMENT_WEEKS = 8;
 
     /** Agrupación del listado. */
     public enum GroupBy {
@@ -65,5 +75,13 @@ public record ReportOptions(
 
     public boolean includeIssues() {
         return issues == null || issues;
+    }
+
+    public boolean includeDevelopment() {
+        return development != null && development;
+    }
+
+    public int developmentWeeksOrDefault() {
+        return developmentWeeks != null ? developmentWeeks : DEFAULT_DEVELOPMENT_WEEKS;
     }
 }

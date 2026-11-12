@@ -95,8 +95,10 @@ app:
     app-id: ${GITHUB_APP_ID:}
     # El nombre de la app en su dirección pública: github.com/apps/<slug>
     app-slug: ${GITHUB_APP_SLUG:}
-    # Ruta al archivo .pem con la clave privada que genera GitHub para la app
+    # La clave privada que genera GitHub para la app: la ruta a su archivo .pem, o (en un contenedor) su contenido en
+    # GITHUB_PRIVATE_KEY, con los saltos de línea como \n. Con las dos, gana el contenido
     private-key-path: ${GITHUB_PRIVATE_KEY_PATH:}
+    private-key: ${GITHUB_PRIVATE_KEY:}
     webhook-secret: ${GITHUB_WEBHOOK_SECRET:}
     # Con estos dos cada persona enlaza su cuenta de GitHub (OAuth de la misma app)
     client-id: ${GITHUB_CLIENT_ID:}

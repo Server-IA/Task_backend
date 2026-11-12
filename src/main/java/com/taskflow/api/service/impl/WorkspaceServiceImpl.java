@@ -22,6 +22,7 @@ import com.taskflow.api.repository.WorkspaceRepository;
 import com.taskflow.api.service.WorkspaceService;
 import com.taskflow.api.util.HumanNames;
 import com.taskflow.api.util.SlugUtils;
+import com.taskflow.api.github.GithubService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -58,6 +59,7 @@ public class WorkspaceServiceImpl implements WorkspaceService {
     private final CustomRoleRepository customRoleRepository;
     private final ResourceLookup lookup;
     private final WorkspaceMapper workspaceMapper;
+    private final GithubService githubService;
 
     @Override
     @Transactional(readOnly = true)
@@ -120,7 +122,9 @@ public class WorkspaceServiceImpl implements WorkspaceService {
     @Override
     @Transactional
     public void delete(String slug) {
-        workspaceRepository.delete(lookup.workspace(slug));
+        Workspace workspace = lookup.workspace(slug);
+        githubService.forgetWorkspace(workspace.getId());
+        workspaceRepository.delete(workspace);
     }
 
     @Override

@@ -89,8 +89,10 @@ public class GithubStore {
      * @param lastRunAt     cuándo se ejecutó por última vez ({@code null} si nunca)
      * @param lastRunStatus cómo va esa ejecución ({@code requested}, {@code queued}, {@code in_progress}, {@code completed})
      */
+    /** @param createdById quien creó la regla: el workflow se ejecuta con su cuenta de GitHub */
     public record Rule(UUID id, UUID projectId, String firesOn, UUID repositoryId, String repository, long workflowId,
-                       String workflowName, String ref, Instant lastRunAt, String lastRunStatus, String lastRunConclusion) {
+                       String workflowName, String ref, Instant lastRunAt, String lastRunStatus, String lastRunConclusion,
+                       UUID createdById) {
     }
 
     /** Una tarea encontrada por su código, con lo que hace falta para decidir si se mueve. */
@@ -114,9 +116,12 @@ public class GithubStore {
         return jdbc.query(INSTALLATION + " WHERE g.installation_id = ?", INSTALLATION_ROW, installationId).stream().findFirst();
     }
 
-    /** Guarda dónde quedó instalada la app para el workspace (si ya tenía otra instalación, la reemplaza). */
+    /**
+     * Guarda dónde quedó instalada la app para el workspace (si ya tenía otra instalación, la reemplaza). Una instalación
+     * que ya es de otro workspace no se le quita: el índice único lo impide.
+     */
     public void saveInstallation(UUID workspaceId, long installationId, String accountLogin, String accountType, UUID installedById) {
-        jdbc.update("DELETE FROM github_installations WHERE workspace_id = ? OR installation_id = ?", workspaceId, installationId);
+        jdbc.update("DELETE FROM github_installations WHERE workspace_id = ?", workspaceId);
         jdbc.update("""
                 INSERT INTO github_installations (id, workspace_id, installation_id, account_login, account_type, installed_by_id)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -274,6 +279,13 @@ public class GithubStore {
                 INSERT INTO github_branches (id, repository_id, issue_id, name) VALUES (?, ?, ?, ?)
                 ON CONFLICT (repository_id, name, issue_id) DO NOTHING
                 """, UUID.randomUUID(), repositoryId, issueId, name) == 1;
+    }
+
+    /** Quita una rama de una tarea (la rama sigue en GitHub). @return si estaba enlazada a ella */
+    public Optional<Branch> unlinkBranch(UUID issueId, UUID branchId) {
+        Optional<Branch> branch = jdbc.query(BRANCH + " WHERE b.id = ? AND b.issue_id = ?", BRANCH_ROW, branchId, issueId).stream().findFirst();
+        branch.ifPresent(found -> jdbc.update("DELETE FROM github_branches WHERE id = ?", found.id()));
+        return branch;
     }
 
     public void deleteBranch(UUID repositoryId, String name) {
@@ -501,14 +513,15 @@ public class GithubStore {
 
     private static final String RULE = """
             SELECT g.id, g.project_id, g.fires_on, g.repository_id, r.full_name, g.workflow_id, g.workflow_name, g.ref,
-                   coalesce(last.started_at, last.requested_at, last.changed_at), last.status, last.conclusion
+                   coalesce(last.started_at, last.requested_at, last.changed_at), last.status, last.conclusion, g.created_by_id
             FROM github_rules g JOIN github_repositories r ON r.id = g.repository_id
                  LEFT JOIN LATERAL (
                      SELECT w.started_at, w.requested_at, w.changed_at, w.status, w.conclusion FROM github_workflow_runs w
                      WHERE w.rule_id = g.id AND NOT (w.run_id IS NULL AND w.requested_at < now() - interval '1 hour') ORDER BY coalesce(w.started_at, w.requested_at, w.changed_at) DESC LIMIT 1) last ON TRUE
             """;
     private static final RowMapper<Rule> RULE_ROW = (row, index) -> new Rule(uuid(row, 1), uuid(row, 2), row.getString(3), uuid(row, 4),
-            row.getString(5), row.getLong(6), row.getString(7), row.getString(8), instant(row, 9), row.getString(10), row.getString(11));
+            row.getString(5), row.getLong(6), row.getString(7), row.getString(8), instant(row, 9), row.getString(10), row.getString(11),
+            uuid(row, 12));
 
     public List<Rule> rules(UUID projectId) {
         return jdbc.query(RULE + " WHERE g.project_id = ? ORDER BY g.created_at", RULE_ROW, projectId);
@@ -566,6 +579,100 @@ public class GithubStore {
                 WHERE s.state_group NOT IN ('COMPLETED', 'CANCELLED') OR coalesce(i.completed_at, i.updated_at) > now() - interval '30 days'
                 """, (row, index) -> new IssueSummary(uuid(row, 1), row.getString(2), row.getInt(3), intOrNull(row, 4), row.getString(5),
                 row.getString(6), row.getString(7), row.getBoolean(8)), projectId, projectId);
+    }
+
+    // ----- Estadísticas de desarrollo del proyecto (solo lectura)
+
+    /** Un pull request fusionado: cuándo se abrió (puede faltar) y cuándo se fusionó. */
+    public record MergedPull(Instant openedAt, Instant mergedAt) {
+    }
+
+    /**
+     * Un workflow en el periodo: ejecuciones terminadas sin contar las canceladas ni las omitidas, cuántas fueron
+     * correctas, su duración media en segundos ({@code null} si ninguna trae su inicio) y la última.
+     */
+    public record WorkflowSummary(String repository, String name, long runs, long succeeded, Double averageSeconds,
+                                  Instant lastRunAt, String lastConclusion) {
+    }
+
+    /** Un pull request abierto (o en borrador), con su tarea solo si es del proyecto que se mira. */
+    public record OpenPull(UUID id, String repository, int number, String title, String url, String state, Instant openedAt,
+                           UUID issueId, String issueCode, String issueTitle) {
+    }
+
+    public int repositoryCount(UUID projectId) {
+        Integer count = jdbc.queryForObject("SELECT count(*) FROM project_repositories WHERE project_id = ?", Integer.class, projectId);
+        return count == null ? 0 : count;
+    }
+
+    /** Pull requests abiertos ahora en los repositorios del proyecto: {abiertos (con borradores), borradores}. */
+    public long[] openPullCounts(UUID projectId) {
+        return jdbc.queryForObject("""
+                SELECT count(*), count(*) FILTER (WHERE pr.state = 'DRAFT')
+                FROM github_pull_requests pr JOIN project_repositories link ON link.repository_id = pr.repository_id
+                WHERE link.project_id = ? AND pr.state IN ('OPEN', 'DRAFT')
+                """, (row, index) -> new long[]{row.getLong(1), row.getLong(2)}, projectId);
+    }
+
+    /** Los pull requests de los repositorios del proyecto fusionados desde {@code since}. */
+    public List<MergedPull> mergedPullsSince(UUID projectId, Instant since) {
+        return jdbc.query("""
+                SELECT pr.opened_at, pr.merged_at
+                FROM github_pull_requests pr JOIN project_repositories link ON link.repository_id = pr.repository_id
+                WHERE link.project_id = ? AND pr.state = 'MERGED' AND pr.merged_at >= ?
+                """, (row, index) -> new MergedPull(instant(row, 1), instant(row, 2)), projectId, timestamp(since));
+    }
+
+    /**
+     * Cada workflow de los repositorios del proyecto con ejecuciones terminadas desde {@code since} (sin contar las
+     * canceladas ni las omitidas), del que más tiene al que menos.
+     */
+    public List<WorkflowSummary> workflowsSince(UUID projectId, Instant since) {
+        return jdbc.query("""
+                SELECT r.full_name,
+                       (array_agg(w.workflow_name ORDER BY coalesce(w.started_at, w.changed_at) DESC))[1],
+                       count(*), count(*) FILTER (WHERE w.conclusion = 'success'),
+                       avg(extract(epoch FROM w.changed_at - w.started_at)) FILTER (WHERE w.started_at IS NOT NULL AND w.changed_at >= w.started_at),
+                       max(coalesce(w.started_at, w.changed_at)),
+                       (array_agg(w.conclusion ORDER BY coalesce(w.started_at, w.changed_at) DESC))[1]
+                FROM github_workflow_runs w JOIN github_repositories r ON r.id = w.repository_id
+                     JOIN project_repositories link ON link.repository_id = w.repository_id
+                WHERE link.project_id = ? AND w.status = 'completed' AND w.changed_at >= ?
+                  -- Las canceladas y las omitidas no cuentan: nadie dijo si el workflow funciona o no
+                  AND coalesce(w.conclusion, '') NOT IN ('cancelled', 'skipped')
+                GROUP BY w.repository_id, r.full_name, coalesce(w.workflow_id::text, w.workflow_name)
+                ORDER BY count(*) DESC, 2, r.full_name
+                """, (row, index) -> new WorkflowSummary(row.getString(1), row.getString(2), row.getLong(3), row.getLong(4),
+                doubleOrNull(row, 5), instant(row, 6), row.getString(7)), projectId, timestamp(since));
+    }
+
+    /** Pull requests abiertos (o en borrador) que se abrieron antes de {@code before}: el más antiguo primero. */
+    public List<OpenPull> openPullsOpenedBefore(UUID projectId, Instant before, int limit) {
+        return jdbc.query("""
+                SELECT pr.id, r.full_name, pr.number, pr.title, pr.url, pr.state, pr.opened_at,
+                       i.id, CASE WHEN i.id IS NULL THEN NULL ELSE p.identifier || '-' || i.sequence_id END, i.title
+                FROM github_pull_requests pr JOIN github_repositories r ON r.id = pr.repository_id
+                     JOIN project_repositories link ON link.repository_id = pr.repository_id
+                     -- La tarea solo si es de este proyecto (un repositorio puede estar en varios)
+                     LEFT JOIN issues i ON i.id = pr.issue_id AND i.project_id = link.project_id
+                     LEFT JOIN projects p ON p.id = i.project_id
+                WHERE link.project_id = ? AND pr.state IN ('OPEN', 'DRAFT') AND pr.opened_at < ?
+                ORDER BY pr.opened_at, pr.number LIMIT ?
+                """, (row, index) -> new OpenPull(uuid(row, 1), row.getString(2), row.getInt(3), row.getString(4), row.getString(5),
+                row.getString(6), instant(row, 7), uuid(row, 8), row.getString(9), row.getString(10)), projectId, timestamp(before), limit);
+    }
+
+    /**
+     * Tareas del proyecto (sin las historias) completadas desde {@code since}: {completadas, con un pull request
+     * fusionado}.
+     */
+    public long[] completedIssuesWithMergedPull(UUID projectId, Instant since) {
+        return jdbc.queryForObject("""
+                SELECT count(*),
+                       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM github_pull_requests pr WHERE pr.issue_id = i.id AND pr.state = 'MERGED'))
+                FROM issues i JOIN states s ON s.id = i.state_id
+                WHERE i.project_id = ? AND i.issue_type <> 'STORY' AND s.state_group = 'COMPLETED' AND i.completed_at >= ?
+                """, (row, index) -> new long[]{row.getLong(1), row.getLong(2)}, projectId, timestamp(since));
     }
 
     // ----- La cuenta de GitHub de cada persona
@@ -637,8 +744,12 @@ public class GithubStore {
     }
 
     /** La persona del workspace de ese repositorio que tiene enlazado ese usuario de GitHub. */
-    public Optional<UUID> memberByLogin(UUID repositoryId, String login) {
-        if (login == null || login.isBlank()) {
+    /**
+     * La persona del workspace del repositorio que tiene enlazada esa cuenta de GitHub. Se busca por su número, que no
+     * cambia: el usuario (login) se puede cambiar y otra persona puede quedarse con el anterior.
+     */
+    public Optional<UUID> memberByGithubId(UUID repositoryId, long githubId) {
+        if (githubId <= 0) {
             return Optional.empty();
         }
         return jdbc.query("""
@@ -646,8 +757,13 @@ public class GithubStore {
                 FROM github_accounts ga JOIN workspace_members wm ON wm.user_id = ga.user_id
                      JOIN github_installations gi ON gi.workspace_id = wm.workspace_id
                      JOIN github_repositories r ON r.installation_id = gi.id
-                WHERE r.id = ? AND lower(ga.login) = lower(?)
-                """, (row, index) -> uuid(row, 1), repositoryId, login).stream().findFirst();
+                WHERE r.id = ? AND ga.github_id = ?
+                """, (row, index) -> uuid(row, 1), repositoryId, githubId).stream().findFirst();
+    }
+
+    public boolean isWorkspaceMember(UUID workspaceId, UUID userId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject(
+                "SELECT EXISTS (SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?)", Boolean.class, workspaceId, userId));
     }
 
     // ----- Utilidades
@@ -663,6 +779,11 @@ public class GithubStore {
 
     private static Long longOrNull(ResultSet row, int column) throws SQLException {
         long value = row.getLong(column);
+        return row.wasNull() ? null : value;
+    }
+
+    private static Double doubleOrNull(ResultSet row, int column) throws SQLException {
+        double value = row.getDouble(column);
         return row.wasNull() ? null : value;
     }
 

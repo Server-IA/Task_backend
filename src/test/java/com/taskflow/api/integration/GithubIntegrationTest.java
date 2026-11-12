@@ -236,6 +236,119 @@ class GithubIntegrationTest {
     }
 
     @Test
+    void unMiembroQueNoAdministraLaOrganizacionNoSeQuedaConSuInstalacion() {
+        // Ve la instalación (puede leer un repositorio de la organización), pero no es dueño de ella
+        GITHUB.plainMember(pmLogin);
+
+        assertThat(githubService.completeSetup(installationId, state(githubService.installUrl(slug, pm.getId())))).endsWith("github=foreign");
+        assertThat(githubService.workspace(slug).connected()).isFalse();
+    }
+
+    @Test
+    void unaInstalacionEnUnaCuentaPersonalSoloLaConectaSuDueno() {
+        GITHUB.personalAccount("alguien-mas-" + suffix);
+        assertThat(githubService.completeSetup(installationId, state(githubService.installUrl(slug, pm.getId())))).endsWith("github=foreign");
+
+        GITHUB.personalAccount(pmLogin);
+        assertThat(githubService.completeSetup(installationId, state(githubService.installUrl(slug, pm.getId())))).endsWith("github=connected");
+        assertThat(githubService.workspace(slug).accountType()).isEqualTo("User");
+    }
+
+    @Test
+    void unAvisoSinNumeroDeEntregaNoSeAtiende() {
+        connect();
+        IssueResponse task = task("Sin número");
+        byte[] body = json(branchEvent("create", branch(task)));
+
+        assertThat(webhookController.webhook(body, signature(body), "create", null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(githubService.issue(slug, projectId, task.id()).branches()).isEmpty();
+    }
+
+    @Test
+    void unPullRequestDesdeUnForkDeAlguienDeFueraNoMueveLaTarea() {
+        connect();
+        githubService.saveSettings(slug, projectId, new Settings(null, started, done, null));
+        IssueResponse task = task("Desde un fork");
+        Map<String, Object> event = pullEvent("opened", 31, identifier + "-" + task.sequenceId() + " arreglo", "parche", "open", false, false, "extrano");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> pull = new java.util.LinkedHashMap<>((Map<String, Object>) event.get("pull_request"));
+        pull.put("head", Map.of("ref", "parche", "sha", "sha-del-fork", "repo", Map.of("id", 999L)));
+        pull.put("base", Map.of("ref", "main", "repo", Map.of("id", repositoryGithubId)));
+        pull.put("author_association", "NONE");
+        Map<String, Object> fork = new java.util.LinkedHashMap<>(event);
+        fork.put("pull_request", pull);
+
+        send("pull_request", fork);
+
+        assertThat(group(task)).isEqualTo("UNSTARTED");
+        assertThat(githubService.issue(slug, projectId, task.id()).pullRequests()).isEmpty();
+        assertThat(githubService.issue(slug, projectId, task.id()).branches()).isEmpty();
+
+        // El mismo PR de un colaborador del repositorio sí se enlaza solo
+        pull.put("author_association", "COLLABORATOR");
+        pull.put("updated_at", "2026-11-10T11:00:00Z");
+        send("pull_request", fork);
+        assertThat(githubService.issue(slug, projectId, task.id()).pullRequests()).hasSize(1);
+        // Su rama es del fork: no se muestra como rama del repositorio
+        assertThat(githubService.issue(slug, projectId, task.id()).branches()).isEmpty();
+    }
+
+    @Test
+    void quitarUnaRamaOUnPullRequestDeLaTarea() {
+        connect();
+        IssueResponse task = task("Con rama");
+        send("create", branchEvent("create", branch(task)));
+        send("pull_request", pullEvent("opened", 41, "Trabajo", branch(task), "open", false, false));
+        GithubService.IssueDev dev = githubService.issue(slug, projectId, task.id());
+        assertThat(dev.branches()).hasSize(1);
+        UUID pullId = dev.pullRequests().getFirst().id();
+
+        // Quitar el PR también le quita su rama a la tarea
+        githubService.linkPullRequest(slug, projectId, pm.getId(), pullId, null);
+        assertThat(githubService.issue(slug, projectId, task.id()).pullRequests()).isEmpty();
+        assertThat(githubService.issue(slug, projectId, task.id()).branches()).isEmpty();
+
+        // Un nuevo aviso del mismo PR no la vuelve a enlazar
+        Map<String, Object> again = pullEvent("synchronize", 41, "Trabajo", branch(task), "open", false, false);
+        send("pull_request", again);
+        assertThat(githubService.issue(slug, projectId, task.id()).branches()).isEmpty();
+
+        // Una rama enlazada a mano se quita sola, sin tocarla en GitHub
+        githubService.linkBranch(slug, projectId, pm.getId(), task.id(), dev.repositories().getFirst().id(), "main");
+        UUID branchId = githubService.issue(slug, projectId, task.id()).branches().getFirst().id();
+        GITHUB.requests().clear();
+        assertThat(githubService.unlinkBranch(slug, projectId, pm.getId(), task.id(), branchId).branches()).isEmpty();
+        assertThat(GITHUB.requests()).noneMatch(request -> request.startsWith("DELETE"));
+        assertThatThrownBy(() -> githubService.unlinkBranch(slug, projectId, pm.getId(), task.id(), branchId))
+                .isInstanceOf(com.taskflow.api.exception.ResourceNotFoundException.class);
+    }
+
+    @Test
+    void enlazarOQuitarRamasYPullRequestsPideLaCuentaDeGithub() {
+        UUID repositoryId = connect();
+        IssueResponse task = task("Modo estricto");
+        send("pull_request", pullEvent("opened", 51, "Sin tarea", "suelta", "open", false, false));
+        UUID pullId = githubService.pullRequests(slug, projectId, "open").getFirst().id();
+        User mateo = user("mateo-" + suffix + "@test.com", "Mateo Sin Cuenta");
+
+        assertThatThrownBy(() -> githubService.linkPullRequest(slug, projectId, mateo.getId(), pullId, task.id()))
+                .isInstanceOf(ConflictException.class).hasMessageContaining("Conecta tu cuenta de GitHub");
+        assertThatThrownBy(() -> githubService.linkBranch(slug, projectId, mateo.getId(), task.id(), repositoryId, "main"))
+                .isInstanceOf(ConflictException.class);
+        assertThat(githubService.issue(slug, projectId, task.id()).pullRequests()).isEmpty();
+    }
+
+    @Test
+    void unaReglaSoloLaCreaQuienPuedeEscribirEnElRepositorio() {
+        UUID repositoryId = connect();
+        GITHUB.readOnly(pmLogin);
+
+        assertThatThrownBy(() -> githubService.addRule(slug, projectId, pm.getId(), GithubService.FIRES_ON_MERGE, repositoryId, 77, "Deploy", "main"))
+                .isInstanceOf(com.taskflow.api.exception.ForbiddenException.class);
+        assertThat(githubService.project(slug, projectId).rules()).isEmpty();
+    }
+
+    @Test
     void paraConectarElWorkspaceHayQueTenerLaCuentaEnlazada() {
         String state = state(githubService.installUrl(slug, pm.getId()));
         accounts.unlink(pm.getId());
@@ -386,7 +499,8 @@ class GithubIntegrationTest {
 
         assertThat(GITHUB.bodies("POST /repos/" + repositoryName + "/actions/workflows/77/dispatches")).singleElement()
                 .satisfies(body -> assertThat(body.path("ref").asString()).isEqualTo("main"));
-        assertThat(GITHUB.asUser()).noneMatch(request -> request.contains("/dispatches"));
+        // Con la cuenta de quien creó la regla (a su nombre), no como la app
+        assertThat(GITHUB.asUser()).contains("POST /repos/" + repositoryName + "/actions/workflows/77/dispatches como " + pmLogin);
         Run requested = githubService.runs(slug, projectId).getFirst();
         assertThat(requested.runId()).isNull();
         assertThat(requested.workflowName()).isEqualTo("Deploy");
@@ -675,7 +789,7 @@ class GithubIntegrationTest {
         UUID pullId = githubService.pullRequests(slug, projectId, "merged").getFirst().id();
 
         // Alguien lo deja sin tarea; después llega otro aviso del mismo pull request (una etiqueta, una edición)
-        githubService.linkPullRequest(slug, projectId, pullId, null);
+        githubService.linkPullRequest(slug, projectId, pm.getId(), pullId, null);
         send("pull_request", pullEvent("edited", 70, "Algo retocado", branch(task), "closed", true, false));
 
         assertThat(githubService.pullRequests(slug, projectId, "merged")).singleElement()
@@ -744,7 +858,7 @@ class GithubIntegrationTest {
                 .satisfies(pull -> assertThat(pull.issueId()).isEqualTo(task.id()));
         // Y no puede quitárselo ni enlazarlo a una tarea suya
         UUID pullId = githubService.pullRequests(slug, otherProject, "open").getFirst().id();
-        assertThatThrownBy(() -> githubService.linkPullRequest(slug, otherProject, pullId, null)).isInstanceOf(ConflictException.class);
+        assertThatThrownBy(() -> githubService.linkPullRequest(slug, otherProject, pm.getId(), pullId, null)).isInstanceOf(ConflictException.class);
         // Quien no configura GitHub no ve los demás repositorios del workspace ni los otros proyectos de cada uno
         ProjectStatus limited = githubService.project(slug, projectId, false);
         assertThat(limited.available()).isEmpty();
@@ -801,17 +915,28 @@ class GithubIntegrationTest {
     }
 
     @Test
-    void unAvisoDemasiadoGrandeOSinTamanoSeRechazaSinLeerlo() {
+    void unAvisoDemasiadoGrandeSeRechazaYUnoSinTamanoDeclaradoSeLee() {
         org.springframework.mock.web.MockHttpServletRequest huge = new org.springframework.mock.web.MockHttpServletRequest() {
             @Override
             public long getContentLengthLong() {
                 return 26L * 1024 * 1024;
             }
         };
-        org.springframework.mock.web.MockHttpServletRequest unknown = new org.springframework.mock.web.MockHttpServletRequest();
-
         assertThat(webhookController.webhook(huge, "sha256=x", "push", "d1").getStatusCode().value()).isEqualTo(413);
-        assertThat(webhookController.webhook(unknown, "sha256=x", "push", "d2").getStatusCode().value()).isEqualTo(413);
+
+        // Un aviso reenviado por partes (sin tamaño declarado) se lee y se atiende si la firma es buena
+        connect();
+        IssueResponse task = task("Por partes");
+        byte[] body = json(branchEvent("create", branch(task)));
+        org.springframework.mock.web.MockHttpServletRequest chunked = new org.springframework.mock.web.MockHttpServletRequest() {
+            @Override
+            public long getContentLengthLong() {
+                return -1;
+            }
+        };
+        chunked.setContent(body);
+        assertThat(webhookController.webhook(chunked, signature(body), "create", "d-" + suffix).getStatusCode().value()).isEqualTo(204);
+        assertThat(githubService.issue(slug, projectId, task.id()).branches()).hasSize(1);
     }
 
     // ----- La cuenta de GitHub de cada persona
@@ -923,7 +1048,7 @@ class GithubIntegrationTest {
         accounts.unlink(pm.getId());
 
         assertThat(accounts.status(pm.getId()).linked()).isFalse();
-        assertThat(GITHUB.requests()).contains("DELETE /applications/Iv1.pruebas/token");
+        assertThat(GITHUB.requests()).contains("DELETE /applications/Iv1.pruebas/grant");
     }
 
     @Test
@@ -1015,7 +1140,7 @@ class GithubIntegrationTest {
             pull.put("merged_at", "2026-11-10T10:00:00Z");
         }
         pull.put("html_url", "https://github.test/" + repositoryName + "/pull/" + number);
-        pull.put("user", Map.of("login", author));
+        pull.put("user", Map.of("login", author, "id", GITHUB.idOf(author)));
         pull.put("head", Map.of("ref", head, "sha", "sha-del-pr"));
         pull.put("base", Map.of("ref", "main"));
         pull.put("requested_reviewers", List.of(Map.of("login", "marta")));
@@ -1118,6 +1243,10 @@ class GithubIntegrationTest {
         private final java.util.Set<String> outsiders = java.util.concurrent.ConcurrentHashMap.newKeySet();
         private final java.util.Set<String> readOnly = java.util.concurrent.ConcurrentHashMap.newKeySet();
         private final java.util.Set<String> revoked = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        /** Personas que son de la organización pero no la administran. */
+        private final java.util.Set<String> plainMembers = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        /** Si la instalación está en una cuenta personal: su usuario (si no, en la organización «acme»). */
+        private volatile String personalAccount;
         private final Map<String, Long> userIds = new java.util.concurrent.ConcurrentHashMap<>();
         private final AtomicLong tokens = new AtomicLong();
 
@@ -1160,6 +1289,21 @@ class GithubIntegrationTest {
             outsiders.clear();
             readOnly.clear();
             revoked.clear();
+            plainMembers.clear();
+            personalAccount = null;
+        }
+
+        void plainMember(String login) {
+            plainMembers.add(login);
+        }
+
+        void personalAccount(String login) {
+            personalAccount = login;
+        }
+
+        /** El número de GitHub de una persona (el mismo que devuelve «GET /user» con su token). */
+        long idOf(String login) {
+            return userIds.computeIfAbsent(login, key -> IDS.incrementAndGet());
         }
 
         List<String> asUser() {
@@ -1239,6 +1383,15 @@ class GithubIntegrationTest {
             } else if (login != null && request.equals("GET /user")) {
                 response = Map.of("id", userIds.computeIfAbsent(login, key -> IDS.incrementAndGet()), "login", login,
                         "avatar_url", "https://avatars.test/" + login);
+            } else if (login != null && request.equals("GET /user/memberships/orgs/acme")) {
+                if (outsiders.contains(login)) {
+                    status = 404;
+                    response = Map.of("message", "Not Found");
+                } else {
+                    response = Map.of("state", "active", "role", plainMembers.contains(login) ? "member" : "admin");
+                }
+            } else if (login != null && request.equals("GET /repos/" + repository)) {
+                response = Map.of("full_name", repository, "permissions", Map.of("pull", true, "push", !readOnly.contains(login)));
             } else if (login != null && request.equals("GET /user/installations")) {
                 response = Map.of("total_count", 1, "installations", outsiders.contains(login) ? List.of() : List.of(Map.of("id", installationId)));
             } else if (login != null && readOnly.contains(login) && !exchange.getRequestMethod().equals("GET")) {
@@ -1253,7 +1406,10 @@ class GithubIntegrationTest {
                 }
                 String repo = "/repos/" + repository;
                 if (request.equals("GET /app/installations/" + installationId)) {
-                    response = Map.of("id", installationId, "account", Map.of("login", "acme", "type", "Organization"),
+                    String owner = personalAccount;
+                    response = Map.of("id", installationId, "account", owner == null
+                                    ? Map.of("id", 1L, "login", "acme", "type", "Organization")
+                                    : Map.of("id", idOf(owner), "login", owner, "type", "User"),
                             "created_at", installedAt.toString(), "updated_at", installedAt.toString());
                 } else if (request.equals("POST /app/installations/" + installationId + "/access_tokens")) {
                     status = 201;

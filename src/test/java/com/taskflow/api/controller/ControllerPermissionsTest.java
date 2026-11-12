@@ -114,12 +114,14 @@ class ControllerPermissionsTest {
             // Lo que llama GitHub: avisos firmados con el secreto de la app y la vuelta de instalarla (enlace firmado)
             "GithubWebhookController.webhook",
             "GithubWebhookController.setup",
+            // Docker y Dokploy preguntan si la API está viva (solo responde «ok»)
+            "HealthController.health",
             // /error: el formato común de los errores que no pasan por un controlador (público en SecurityConfig)
             "ApiErrorController.error");
 
     /** Rutas públicas de {@code SecurityConfig} (permitAll). */
     private static final List<String> PUBLIC_PATTERNS = List.of("/api/v1/auth/**", "GET /api/v1/invitations/*",
-            "/api/v1/github/webhook", "/api/v1/github/setup");
+            "/api/v1/github/webhook", "/api/v1/github/setup", "/api/v1/health");
 
     private static void rule(Class<?> controller, String method, String expected) {
         RULES.put(controller.getSimpleName() + "." + method, expected);
@@ -230,6 +232,7 @@ class ControllerPermissionsTest {
         rule(DailyController.class, "saveSettings", inProject(Permission.DAILY_SETTINGS));
         // Estadísticas, reportes y actividad
         rule(ProjectStatsController.class, "getStats", inProject(Permission.STATS_VIEW));
+        rule(ProjectStatsController.class, "getDevelopmentStats", inProject(Permission.STATS_VIEW));
         rule(ReportController.class, "previewIssues", inProject(Permission.REPORT_GENERATE));
         rule(ReportController.class, "issuesPdf", inProject(Permission.REPORT_GENERATE));
         rule(WorkspaceActivityController.class, "getFeed", can(Permission.ACTIVITY_VIEW));
@@ -276,6 +279,7 @@ class ControllerPermissionsTest {
         rule(ProjectGithubController.class, "linkPullRequest", inProject(Permission.ISSUE_EDIT));
         rule(ProjectGithubController.class, "createBranch", inProject(Permission.ISSUE_EDIT));
         rule(ProjectGithubController.class, "linkBranch", inProject(Permission.ISSUE_EDIT));
+        rule(ProjectGithubController.class, "unlinkBranch", inProject(Permission.ISSUE_EDIT));
     }
 
     /** Un endpoint: su controlador y su método. */

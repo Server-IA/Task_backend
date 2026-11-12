@@ -19,6 +19,8 @@ import com.lowagie.text.pdf.PdfPageEventHelper;
 import com.lowagie.text.pdf.PdfTemplate;
 import com.lowagie.text.pdf.PdfWriter;
 import com.taskflow.api.dto.request.ReportOptions;
+import com.taskflow.api.dto.response.DevelopmentStatsResponse;
+import com.taskflow.api.dto.response.DevelopmentStatsResponse.WorkflowStats;
 import com.taskflow.api.i18n.Language;
 import com.taskflow.api.report.IssuesReport.Count;
 import com.taskflow.api.report.IssuesReport.FilterLine;
@@ -28,12 +30,15 @@ import com.taskflow.api.report.IssuesReport.Totals;
 
 import java.awt.Color;
 import java.io.ByteArrayOutputStream;
+import java.text.NumberFormat;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 /**
  * Dibuja el reporte de tareas en un PDF A4 horizontal: encabezado con el logo de TaskFlow, los filtros aplicados, el
- * resumen (totales y repartos con cantidad y porcentaje) y el listado en una tabla cuyo encabezado se repite en cada página. Todo
+ * resumen (totales y repartos con cantidad y porcentaje), el listado en una tabla cuyo encabezado se repite en cada página
+ * y, si se pide y hay repositorios de GitHub, el desarrollo (pull requests y ejecuciones de Actions por workflow). Todo
  * el texto va en celdas que ajustan su alto al contenido, así nada se monta sobre lo de al lado, y cada página lleva
  * su pie con «Página N de M».
  * <p>
@@ -78,6 +83,11 @@ public final class IssuesReportPdf {
     private static final float[] ISSUE_COLUMNS = {58, 46, 246, 86, 64, 122, 90, 58};
     private static final String[] ISSUE_HEADERS =
             {"Código", "Tipo", "Título", "Estado", "Prioridad", "Asignados", "Etiquetas", "Vence"};
+
+    /** Anchos de las columnas de la tabla por workflow (suman el ancho útil de la página). */
+    private static final float[] WORKFLOW_COLUMNS = {210, 160, 75, 75, 90, 160};
+    private static final String[] WORKFLOW_HEADERS =
+            {"Workflow", "Repositorio", "Ejecuciones", "Correctas", "Duración media", "Última ejecución"};
 
     // «10 nov 2026, 21:09» en español y «Nov 10, 2026, 9:09 PM» en inglés
     private static final DateTimeFormatter DAY_ES = DateTimeFormatter.ofPattern("d MMM yyyy", Language.ES.locale());
@@ -137,6 +147,17 @@ public final class IssuesReportPdf {
                     document.add(note(lang.t("No hay tareas que cumplan estos filtros.")));
                 } else {
                     document.add(issues(report.groups(), lang));
+                }
+            }
+            if (report.development() != null) {
+                DevelopmentStatsResponse development = report.development();
+                document.add(sectionTitle(lang.t("Desarrollo (GitHub)") + " · "
+                        + lang.t("últimas " + development.weeks() + " semanas"), lang));
+                document.add(developmentTiles(development, lang));
+                if (development.workflows().isEmpty()) {
+                    document.add(note(lang.t("No hubo ejecuciones de Actions terminadas en el periodo.")));
+                } else {
+                    document.add(workflows(development.workflows(), report.zone(), lang));
                 }
             }
             document.close();
@@ -273,6 +294,11 @@ public final class IssuesReportPdf {
     }
 
     private static PdfPCell tile(String label, int value, Font numberFont, Language lang) {
+        return tile(label, String.valueOf(value), numberFont, null, lang);
+    }
+
+    /** Un recuadro con su nombre, la cifra y, si se pasa, una línea que la explica. */
+    private static PdfPCell tile(String label, String value, Font numberFont, String detail, Language lang) {
         PdfPCell cell = plainCell();
         cell.setCellEvent(new RoundedBox());
         cell.setPadding(0);
@@ -281,9 +307,14 @@ public final class IssuesReportPdf {
         cell.setPaddingBottom(11);
         Paragraph name = new Paragraph(label.toUpperCase(lang.locale()), LABEL);
         cell.addElement(name);
-        Paragraph number = new Paragraph(String.valueOf(value), numberFont);
+        Paragraph number = new Paragraph(PdfText.clean(value), numberFont);
         number.setLeading(22);
         cell.addElement(number);
+        if (detail != null) {
+            Paragraph line = new Paragraph(PdfText.clean(detail), BODY_MUTED);
+            line.setSpacingBefore(2);
+            cell.addElement(line);
+        }
         return cell;
     }
 
@@ -348,6 +379,127 @@ public final class IssuesReportPdf {
         }
         panel.addElement(rows);
         return panel;
+    }
+
+    // ---------------------------------------------------------------- desarrollo (GitHub)
+
+    /**
+     * Las cifras del desarrollo: pull requests abiertos ahora y fusionados en el periodo, tiempo medio de apertura a
+     * fusión, ejecuciones de Actions correctas y tareas completadas con un pull request fusionado.
+     */
+    private static PdfPTable developmentTiles(DevelopmentStatsResponse development, Language lang) {
+        PdfPTable table = new PdfPTable(5);
+        table.setWidthPercentage(100);
+        table.addCell(tile(lang.t("PR abiertos"), String.valueOf(development.openPullRequests()), NUMBER,
+                development.draftPullRequests() > 0
+                        ? lang.t(development.draftPullRequests() + " en borrador")
+                        : lang.t("ahora mismo"), lang));
+        table.addCell(tile(lang.t("PR fusionados"), String.valueOf(development.mergedPullRequests()), NUMBER,
+                lang.t("en el periodo"), lang));
+        table.addCell(tile(lang.t("Tiempo medio a fusión"), hoursText(development.averageHoursToMerge(), lang), NUMBER,
+                lang.t("de apertura a fusión"), lang));
+        long finished = development.runsFinished();
+        table.addCell(tile(lang.t("Actions correctas"),
+                finished == 0 ? "—" : percent(development.runsSucceeded(), finished) + " %",
+                finished > 0 && development.runsSucceeded() == finished ? NUMBER_OK : NUMBER,
+                lang.t(development.runsSucceeded() + " de " + finished + " ejecuciones"), lang));
+        long completed = development.completedIssues();
+        table.addCell(tile(lang.t("Tareas con PR fusionado"),
+                completed == 0 ? "—" : percent(development.completedWithMergedPullRequest(), completed) + " %", NUMBER,
+                lang.t(development.completedWithMergedPullRequest() + " de " + completed + " completadas"), lang));
+        return table;
+    }
+
+    /** Cada workflow con sus ejecuciones, el porcentaje de correctas, la duración media y la última. Sin barras. */
+    private static PdfPTable workflows(List<WorkflowStats> workflows, ZoneId zone, Language lang) {
+        PdfPTable table = new PdfPTable(WORKFLOW_COLUMNS);
+        table.setWidthPercentage(100);
+        table.setSpacingBefore(6);
+        table.setHeaderRows(1);
+        table.setSplitLate(true);
+        for (int i = 0; i < WORKFLOW_HEADERS.length; i++) {
+            PdfPCell cell = new PdfPCell(new Phrase(lang.t(WORKFLOW_HEADERS[i]).toUpperCase(lang.locale()), LABEL));
+            cell.setBackgroundColor(COLUMN);
+            cell.setBorder(Rectangle.NO_BORDER);
+            cell.setPadding(6);
+            cell.setPaddingTop(5);
+            if (i >= 2 && i <= 4) {
+                cell.setHorizontalAlignment(Element.ALIGN_RIGHT);
+            }
+            table.addCell(cell);
+        }
+        for (WorkflowStats workflow : workflows) {
+            table.addCell(issueCell(new Phrase(PdfText.clean(workflow.name() == null ? "—" : workflow.name()), BODY_BOLD)));
+            table.addCell(issueCell(new Phrase(PdfText.clean(workflow.repository()), CODE)));
+            table.addCell(numberCell(String.valueOf(workflow.runs())));
+            table.addCell(numberCell(workflow.runs() == 0 ? "—" : percent(workflow.succeeded(), workflow.runs()) + " %"));
+            table.addCell(numberCell(durationText(workflow.averageSeconds())));
+            Phrase last = new Phrase();
+            if (workflow.lastRunAt() != null) {
+                last.add(new Chunk(momentFormat(lang).format(workflow.lastRunAt().atZone(zone)), BODY));
+            }
+            String conclusion = conclusionText(workflow.lastConclusion());
+            if (conclusion != null) {
+                last.add(new Chunk(" · " + lang.t(conclusion), FAILED.equals(conclusion) ? BODY_LATE : BODY_MUTED));
+            }
+            table.addCell(issueCell(last));
+        }
+        return table;
+    }
+
+    private static final String FAILED = "fallida";
+
+    private static PdfPCell numberCell(String text) {
+        PdfPCell cell = issueCell(new Phrase(PdfText.clean(text), CODE_INK));
+        cell.setHorizontalAlignment(Element.ALIGN_RIGHT);
+        return cell;
+    }
+
+    /** Cómo terminó una ejecución, en palabras; {@code null} si no se sabe. */
+    static String conclusionText(String conclusion) {
+        if (conclusion == null) {
+            return null;
+        }
+        return switch (conclusion) {
+            case "success" -> "correcta";
+            case "failure", "timed_out", "startup_failure", "action_required" -> FAILED;
+            default -> conclusion;
+        };
+    }
+
+    /** «12 min» por debajo de una hora, «5,3 h» hasta dos días y, desde ahí, «3,1 días»; «—» si no hay dato. */
+    static String hoursText(Double hours, Language lang) {
+        if (hours == null) {
+            return "—";
+        }
+        if (hours < 1) {
+            return Math.max(1, Math.round(hours * 60)) + " min";
+        }
+        NumberFormat decimal = NumberFormat.getNumberInstance(lang.locale());
+        decimal.setMaximumFractionDigits(1);
+        if (hours < 48) {
+            return decimal.format(hours) + " h";
+        }
+        return decimal.format(hours / 24) + " " + lang.t("días");
+    }
+
+    /** «45 s», «3 min 20 s» o «1 h 05 min»; «—» si no hay dato. */
+    static String durationText(Long seconds) {
+        if (seconds == null) {
+            return "—";
+        }
+        if (seconds < 60) {
+            return seconds + " s";
+        }
+        if (seconds < 3600) {
+            long rest = seconds % 60;
+            return seconds / 60 + " min" + (rest == 0 ? "" : " " + rest + " s");
+        }
+        return seconds / 3600 + " h " + String.format("%02d", seconds % 3600 / 60) + " min";
+    }
+
+    private static long percent(long part, long total) {
+        return total == 0 ? 0 : Math.round(part * 100.0 / total);
     }
 
     // ---------------------------------------------------------------- listado

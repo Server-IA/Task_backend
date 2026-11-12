@@ -35,6 +35,8 @@ public class SecurityConfig {
             // GitHub llama aquí sin sesión: los avisos van firmados y la vuelta de instalar la app trae un enlace firmado
             "/api/v1/github/webhook",
             "/api/v1/github/setup",
+            // Docker y Dokploy preguntan si la API está viva
+            "/api/v1/health",
             "/swagger-ui.html",
             "/swagger-ui/**",
             "/v3/api-docs/**",

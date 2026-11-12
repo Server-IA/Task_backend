@@ -38,7 +38,8 @@ public class ReportController {
             description = "Mismos filtros del listado de tareas (state, priority, assignee, label, type, cycle, module, "
                     + "blocked, search) más createdFrom/createdTo y dueFrom/dueTo (YYYY-MM-DD, inclusive). Devuelve los "
                     + "totales y los repartos que llevará el PDF. Un reporte trae como mucho maxIssues tareas "
-                    + "(truncated = hay más).")
+                    + "(truncated = hay más). githubRepositories dice si el proyecto tiene repositorios de GitHub y, si "
+                    + "tiene, development trae la sección de desarrollo de las últimas developmentWeeks semanas.")
     @GetMapping("/issues")
     @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'REPORT_GENERATE')")
     public IssuesReportPreview previewIssues(
@@ -49,8 +50,9 @@ public class ReportController {
 
     @Operation(summary = "Reporte de tareas en PDF",
             description = "PDF A4 horizontal con el logo, los filtros aplicados, el resumen (summary=false lo quita) y "
-                    + "el listado (issues=false lo quita) agrupado por groupBy y ordenado por sort. 400 si se quitan las "
-                    + "dos secciones o un rango de fechas está al revés.")
+                    + "el listado (issues=false lo quita) agrupado por groupBy y ordenado por sort, y con development=true "
+                    + "el desarrollo (GitHub) de las últimas developmentWeeks semanas si el proyecto tiene repositorios. "
+                    + "400 si no queda ninguna sección o un rango de fechas está al revés.")
     @GetMapping(value = "/issues/pdf", produces = MediaType.APPLICATION_PDF_VALUE)
     @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'REPORT_GENERATE')")
     public ResponseEntity<byte[]> issuesPdf(

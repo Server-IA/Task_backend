@@ -18,7 +18,7 @@ import java.util.Map;
  *   <li>{@code ORANGE} #F6A35C / #3A1E05</li>
  *   <li>{@code GREEN} #9BE7B4 / #0E3A1E</li>
  * </ul>
- * El orden importa: es el de la paleta que usaba el frontend (ver {@code V21__project_color.sql}).
+ * El orden importa: es el de la paleta del frontend.
  */
 public enum ProjectColor {
     TEAL,
