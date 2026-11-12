@@ -3,6 +3,9 @@ package com.taskflow.api.report;
 import com.lowagie.text.pdf.PdfReader;
 import com.lowagie.text.pdf.parser.PdfTextExtractor;
 import com.taskflow.api.dto.request.ReportOptions;
+import com.taskflow.api.dto.response.DevelopmentStatsResponse;
+import com.taskflow.api.dto.response.DevelopmentStatsResponse.MergedWeek;
+import com.taskflow.api.dto.response.DevelopmentStatsResponse.WorkflowStats;
 import com.taskflow.api.i18n.Language;
 import com.taskflow.api.report.IssuesReport.Count;
 import com.taskflow.api.report.IssuesReport.FilterLine;
@@ -25,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class IssuesReportPdfTest {
 
-    private static final ReportOptions DEFAULTS = new ReportOptions(null, null, null, null, null, null, null, null);
+    private static final ReportOptions DEFAULTS = new ReportOptions(null, null, null, null, null, null, null, null, null, null);
 
     private static Row row(int number, String title, boolean overdue) {
         return new Row("PORT-" + number, "Tarea", title, "In Progress", "Alta", List.of("Valentina Ríos", "Mateo Herrera"),
@@ -33,6 +36,11 @@ class IssuesReportPdfTest {
     }
 
     private static IssuesReport report(List<FilterLine> filters, List<Group> groups, ReportOptions options, boolean truncated) {
+        return report(filters, groups, options, truncated, null);
+    }
+
+    private static IssuesReport report(List<FilterLine> filters, List<Group> groups, ReportOptions options, boolean truncated,
+                                       DevelopmentStatsResponse development) {
         int total = groups.stream().mapToInt(group -> group.rows().size()).sum();
         return new IssuesReport("Portal de Clientes", "PORT", "Equipo Producto", "Valentina Ríos",
                 Instant.parse("2026-11-10T18:15:00Z"), ZoneId.of("America/Bogota"), filters,
@@ -41,7 +49,7 @@ class IssuesReportPdfTest {
                 total == 0 ? List.of() : List.of(new Count("Alta", total)),
                 total == 0 ? List.of() : List.of(new Count("Valentina Ríos", total), new Count("Sin asignar", 1)),
                 total == 0 ? List.of() : List.of(new Count("Tarea", total)),
-                groups, truncated ? 1500 : total, truncated, options);
+                groups, truncated ? 1500 : total, truncated, options, development);
     }
 
     private static String text(byte[] pdf) throws IOException {
@@ -136,11 +144,11 @@ class IssuesReportPdfTest {
         List<Group> groups = List.of(new Group(null, List.of(row(1, "Única", false))));
 
         String onlyIssues = text(IssuesReportPdf.render(report(List.of(), groups,
-                new ReportOptions(null, null, null, null, ReportOptions.GroupBy.NONE, ReportOptions.Sort.TITLE, false, true), false)));
+                new ReportOptions(null, null, null, null, ReportOptions.GroupBy.NONE, ReportOptions.Sort.TITLE, false, true, null, null), false)));
         assertThat(onlyIssues).doesNotContain("// RESUMEN").contains("SIN AGRUPAR, ORDEN: TÍTULO").contains("PORT-1");
 
         String onlySummary = text(IssuesReportPdf.render(report(List.of(), groups,
-                new ReportOptions(null, null, null, null, null, null, true, false), false)));
+                new ReportOptions(null, null, null, null, null, null, true, false, null, null), false)));
         assertThat(onlySummary).contains("// RESUMEN").doesNotContain("PORT-1");
     }
 
@@ -174,5 +182,47 @@ class IssuesReportPdfTest {
                 DEFAULTS, false)));
 
         assertThat(text).contains("PORT-7").contains("PORT-8").contains("-> login");
+    }
+
+    @Test
+    void laSeccionDeDesarrolloTraeLasCifrasYLaTablaPorWorkflow() throws IOException {
+        DevelopmentStatsResponse development = new DevelopmentStatsResponse(1, 4, LocalDate.of(2026, 10, 19), 3, 1, 6, 30.5,
+                8, 6, 10, 4, List.of(new MergedWeek(LocalDate.of(2026, 10, 19), 6)),
+                List.of(new WorkflowStats("acme/portal", "CI", 7, 5, 200L, Instant.parse("2026-11-10T15:00:00Z"), "failure"),
+                        new WorkflowStats("acme/portal", "Deploy", 1, 1, 45L, Instant.parse("2026-11-09T15:00:00Z"), "success")),
+                List.of());
+        List<Group> groups = List.of(new Group(null, List.of(row(1, "Única", false))));
+
+        String text = text(IssuesReportPdf.render(report(List.of(), groups, DEFAULTS, false, development)));
+
+        assertThat(text)
+                .contains("// DESARROLLO (GITHUB) · ÚLTIMAS 4 SEMANAS")
+                .contains("1 en borrador")
+                // 30,5 horas de apertura a fusión
+                .contains("30,5 h")
+                // 6 de 8 ejecuciones correctas y 4 de 10 tareas completadas con su PR fusionado
+                .contains("75 %").contains("6 de 8 ejecuciones")
+                .contains("40 %").contains("4 de 10 completadas")
+                .contains("CI").contains("acme/portal").contains("3 min 20 s").contains("fallida")
+                .contains("Deploy").contains("45 s").contains("correcta");
+
+        String english = text(IssuesReportPdf.render(report(List.of(), groups, DEFAULTS, false, development), Language.EN));
+        assertThat(english).contains("// DEVELOPMENT (GITHUB) · LAST 4 WEEKS").contains("6 of 8 runs").contains("failed");
+
+        // Sin la sección (no se pidió o no hay repositorios) no aparece
+        assertThat(text(IssuesReportPdf.render(report(List.of(), groups, DEFAULTS, false)))).doesNotContain("DESARROLLO");
+    }
+
+    @Test
+    void lasDuracionesYLosTiemposSeLeenFacil() {
+        assertThat(IssuesReportPdf.durationText(null)).isEqualTo("—");
+        assertThat(IssuesReportPdf.durationText(45L)).isEqualTo("45 s");
+        assertThat(IssuesReportPdf.durationText(120L)).isEqualTo("2 min");
+        assertThat(IssuesReportPdf.durationText(3900L)).isEqualTo("1 h 05 min");
+        assertThat(IssuesReportPdf.hoursText(null, Language.ES)).isEqualTo("—");
+        assertThat(IssuesReportPdf.hoursText(0.2, Language.ES)).isEqualTo("12 min");
+        assertThat(IssuesReportPdf.hoursText(5.0, Language.ES)).isEqualTo("5 h");
+        assertThat(IssuesReportPdf.hoursText(72.0, Language.ES)).isEqualTo("3 días");
+        assertThat(IssuesReportPdf.hoursText(84.0, Language.EN)).isEqualTo("3.5 days");
     }
 }

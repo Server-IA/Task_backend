@@ -525,9 +525,46 @@
     "El archivo pesa más de 14 MB. Expórtalo por partes (por proyecto, por ejemplo).": "The file is larger than 14 MB. Export it in parts (by project, for example).",
     "Ese pull request está enlazado a una tarea de otro proyecto": "That pull request is linked to a task from another project",
     "Rama no encontrada": "Branch not found",
-    "Tu cuenta de GitHub no puede escribir en ese repositorio, y la regla ejecutaría el workflow a tu nombre": "Your GitHub account can't write to that repository, and the rule would run the workflow on your behalf"
+    "Tu cuenta de GitHub no puede escribir en ese repositorio, y la regla ejecutaría el workflow a tu nombre": "Your GitHub account can't write to that repository, and the rule would run the workflow on your behalf",
+    "El reporte debe incluir al menos una sección: el resumen, el listado o el desarrollo": "The report must include at least one section: the summary, the list or development",
+    "El parámetro developmentWeeks debe ser 4, 8 o 12": "The developmentWeeks parameter must be 4, 8 or 12",
+    "Desarrollo (GitHub)": "Development (GitHub)",
+    "No hubo ejecuciones de Actions terminadas en el periodo.": "No Actions runs finished in the period.",
+    "PR abiertos": "Open PRs",
+    "PR fusionados": "Merged PRs",
+    "Tiempo medio a fusión": "Average time to merge",
+    "Actions correctas": "Successful Actions",
+    "Tareas con PR fusionado": "Tasks with a merged PR",
+    "ahora mismo": "right now",
+    "en el periodo": "in the period",
+    "de apertura a fusión": "from opening to merge",
+    "Workflow": "Workflow",
+    "Repositorio": "Repository",
+    "Ejecuciones": "Runs",
+    "Correctas": "Successful",
+    "Duración media": "Average duration",
+    "Última ejecución": "Last run",
+    "correcta": "succeeded",
+    "fallida": "failed",
+    "días": "days"
   },
   "patterns": [
+    {
+      "es": "últimas\\ (.+?)\\ semanas",
+      "en": "last {1} weeks"
+    },
+    {
+      "es": "(.+?)\\ en\\ borrador",
+      "en": "{1} in draft"
+    },
+    {
+      "es": "(.+?)\\ de\\ (.+?)\\ ejecuciones",
+      "en": "{1} of {2} runs"
+    },
+    {
+      "es": "(.+?)\\ de\\ (.+?)\\ completadas",
+      "en": "{1} of {2} completed"
+    },
     {
       "es": "Tu\\ cuenta\\ de\\ GitHub\\ no\\ tiene\\ permiso\\ de\\ escritura\\ en\\ (.+?)\\.\\ Pídeselo\\ a\\ quien\\ administra\\ el\\ repositorio\\ en\\ GitHub\\.",
       "en": "Your GitHub account does not have write access to {1}. Ask whoever manages the repository on GitHub."

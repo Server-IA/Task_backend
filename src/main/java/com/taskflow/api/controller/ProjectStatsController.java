@@ -1,6 +1,8 @@
 package com.taskflow.api.controller;
 
+import com.taskflow.api.dto.response.DevelopmentStatsResponse;
 import com.taskflow.api.dto.response.ProjectStatsResponse;
+import com.taskflow.api.service.DevelopmentStatsService;
 import com.taskflow.api.service.ProjectStatsService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -23,6 +25,7 @@ import java.util.UUID;
 public class ProjectStatsController {
 
     private final ProjectStatsService statsService;
+    private final DevelopmentStatsService developmentStatsService;
 
     @Operation(summary = "Estadísticas del proyecto",
             description = "Tareas abiertas, creadas y completadas por semana (desde el lunes, hora de Bogotá), "
@@ -41,5 +44,21 @@ public class ProjectStatsController {
             @Parameter(description = "Id(s) de usuario asignado")
             @RequestParam(required = false) List<UUID> assignee) {
         return statsService.getStats(slug, projectId, weeks, assignee);
+    }
+
+    @Operation(summary = "Estadísticas de desarrollo (GitHub)",
+            description = "De los repositorios de GitHub enlazados al proyecto: pull requests abiertos ahora (y cuántos "
+                    + "son borradores), fusionados en el periodo y por semana, horas promedio de apertura a fusión, "
+                    + "ejecuciones de Actions terminadas y correctas (sin contar las canceladas ni las omitidas), cada "
+                    + "workflow con sus ejecuciones, duración media y la última, tareas completadas en el periodo con un "
+                    + "pull request fusionado y los pull requests abiertos hace más de 7 días. weeks fija el periodo, "
+                    + "como en las demás estadísticas. Sin repositorios enlazados, repositories es 0 y lo demás va vacío.")
+    @GetMapping("/development")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'STATS_VIEW')")
+    public DevelopmentStatsResponse getDevelopmentStats(
+            @PathVariable String slug, @PathVariable UUID projectId,
+            @Parameter(description = "Semanas del periodo: 4, 8 o 12 (otro valor responde 400)")
+            @RequestParam(defaultValue = "8") int weeks) {
+        return developmentStatsService.getStats(slug, projectId, weeks);
     }
 }

@@ -16,6 +16,10 @@ import java.util.List;
  * @param byPriority    reparto por prioridad, de urgente a sin prioridad
  * @param byAssignee    reparto por persona («Sin asignar» al final)
  * @param byType        reparto por tipo
+ * @param githubRepositories repositorios de GitHub enlazados al proyecto (sin ninguno no se ofrece la sección de
+ *                      desarrollo)
+ * @param development   la sección de desarrollo (con {@code developmentWeeks}), esté encendida o no, si hay
+ *                      repositorios; {@code null} si no hay ninguno
  */
 public record IssuesReportPreview(
         long totalMatching,
@@ -25,6 +29,8 @@ public record IssuesReportPreview(
         List<Count> byState,
         List<Count> byPriority,
         List<Count> byAssignee,
-        List<Count> byType
+        List<Count> byType,
+        int githubRepositories,
+        DevelopmentStatsResponse development
 ) {
 }

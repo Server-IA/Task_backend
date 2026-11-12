@@ -581,6 +581,100 @@ public class GithubStore {
                 row.getString(6), row.getString(7), row.getBoolean(8)), projectId, projectId);
     }
 
+    // ----- Estadísticas de desarrollo del proyecto (solo lectura)
+
+    /** Un pull request fusionado: cuándo se abrió (puede faltar) y cuándo se fusionó. */
+    public record MergedPull(Instant openedAt, Instant mergedAt) {
+    }
+
+    /**
+     * Un workflow en el periodo: ejecuciones terminadas sin contar las canceladas ni las omitidas, cuántas fueron
+     * correctas, su duración media en segundos ({@code null} si ninguna trae su inicio) y la última.
+     */
+    public record WorkflowSummary(String repository, String name, long runs, long succeeded, Double averageSeconds,
+                                  Instant lastRunAt, String lastConclusion) {
+    }
+
+    /** Un pull request abierto (o en borrador), con su tarea solo si es del proyecto que se mira. */
+    public record OpenPull(UUID id, String repository, int number, String title, String url, String state, Instant openedAt,
+                           UUID issueId, String issueCode, String issueTitle) {
+    }
+
+    public int repositoryCount(UUID projectId) {
+        Integer count = jdbc.queryForObject("SELECT count(*) FROM project_repositories WHERE project_id = ?", Integer.class, projectId);
+        return count == null ? 0 : count;
+    }
+
+    /** Pull requests abiertos ahora en los repositorios del proyecto: {abiertos (con borradores), borradores}. */
+    public long[] openPullCounts(UUID projectId) {
+        return jdbc.queryForObject("""
+                SELECT count(*), count(*) FILTER (WHERE pr.state = 'DRAFT')
+                FROM github_pull_requests pr JOIN project_repositories link ON link.repository_id = pr.repository_id
+                WHERE link.project_id = ? AND pr.state IN ('OPEN', 'DRAFT')
+                """, (row, index) -> new long[]{row.getLong(1), row.getLong(2)}, projectId);
+    }
+
+    /** Los pull requests de los repositorios del proyecto fusionados desde {@code since}. */
+    public List<MergedPull> mergedPullsSince(UUID projectId, Instant since) {
+        return jdbc.query("""
+                SELECT pr.opened_at, pr.merged_at
+                FROM github_pull_requests pr JOIN project_repositories link ON link.repository_id = pr.repository_id
+                WHERE link.project_id = ? AND pr.state = 'MERGED' AND pr.merged_at >= ?
+                """, (row, index) -> new MergedPull(instant(row, 1), instant(row, 2)), projectId, timestamp(since));
+    }
+
+    /**
+     * Cada workflow de los repositorios del proyecto con ejecuciones terminadas desde {@code since} (sin contar las
+     * canceladas ni las omitidas), del que más tiene al que menos.
+     */
+    public List<WorkflowSummary> workflowsSince(UUID projectId, Instant since) {
+        return jdbc.query("""
+                SELECT r.full_name,
+                       (array_agg(w.workflow_name ORDER BY coalesce(w.started_at, w.changed_at) DESC))[1],
+                       count(*), count(*) FILTER (WHERE w.conclusion = 'success'),
+                       avg(extract(epoch FROM w.changed_at - w.started_at)) FILTER (WHERE w.started_at IS NOT NULL AND w.changed_at >= w.started_at),
+                       max(coalesce(w.started_at, w.changed_at)),
+                       (array_agg(w.conclusion ORDER BY coalesce(w.started_at, w.changed_at) DESC))[1]
+                FROM github_workflow_runs w JOIN github_repositories r ON r.id = w.repository_id
+                     JOIN project_repositories link ON link.repository_id = w.repository_id
+                WHERE link.project_id = ? AND w.status = 'completed' AND w.changed_at >= ?
+                  -- Las canceladas y las omitidas no cuentan: nadie dijo si el workflow funciona o no
+                  AND coalesce(w.conclusion, '') NOT IN ('cancelled', 'skipped')
+                GROUP BY w.repository_id, r.full_name, coalesce(w.workflow_id::text, w.workflow_name)
+                ORDER BY count(*) DESC, 2, r.full_name
+                """, (row, index) -> new WorkflowSummary(row.getString(1), row.getString(2), row.getLong(3), row.getLong(4),
+                doubleOrNull(row, 5), instant(row, 6), row.getString(7)), projectId, timestamp(since));
+    }
+
+    /** Pull requests abiertos (o en borrador) que se abrieron antes de {@code before}: el más antiguo primero. */
+    public List<OpenPull> openPullsOpenedBefore(UUID projectId, Instant before, int limit) {
+        return jdbc.query("""
+                SELECT pr.id, r.full_name, pr.number, pr.title, pr.url, pr.state, pr.opened_at,
+                       i.id, CASE WHEN i.id IS NULL THEN NULL ELSE p.identifier || '-' || i.sequence_id END, i.title
+                FROM github_pull_requests pr JOIN github_repositories r ON r.id = pr.repository_id
+                     JOIN project_repositories link ON link.repository_id = pr.repository_id
+                     -- La tarea solo si es de este proyecto (un repositorio puede estar en varios)
+                     LEFT JOIN issues i ON i.id = pr.issue_id AND i.project_id = link.project_id
+                     LEFT JOIN projects p ON p.id = i.project_id
+                WHERE link.project_id = ? AND pr.state IN ('OPEN', 'DRAFT') AND pr.opened_at < ?
+                ORDER BY pr.opened_at, pr.number LIMIT ?
+                """, (row, index) -> new OpenPull(uuid(row, 1), row.getString(2), row.getInt(3), row.getString(4), row.getString(5),
+                row.getString(6), instant(row, 7), uuid(row, 8), row.getString(9), row.getString(10)), projectId, timestamp(before), limit);
+    }
+
+    /**
+     * Tareas del proyecto (sin las historias) completadas desde {@code since}: {completadas, con un pull request
+     * fusionado}.
+     */
+    public long[] completedIssuesWithMergedPull(UUID projectId, Instant since) {
+        return jdbc.queryForObject("""
+                SELECT count(*),
+                       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM github_pull_requests pr WHERE pr.issue_id = i.id AND pr.state = 'MERGED'))
+                FROM issues i JOIN states s ON s.id = i.state_id
+                WHERE i.project_id = ? AND i.issue_type <> 'STORY' AND s.state_group = 'COMPLETED' AND i.completed_at >= ?
+                """, (row, index) -> new long[]{row.getLong(1), row.getLong(2)}, projectId, timestamp(since));
+    }
+
     // ----- La cuenta de GitHub de cada persona
 
     /** Los tokens vienen cifrados, como se guardan. */
@@ -685,6 +779,11 @@ public class GithubStore {
 
     private static Long longOrNull(ResultSet row, int column) throws SQLException {
         long value = row.getLong(column);
+        return row.wasNull() ? null : value;
+    }
+
+    private static Double doubleOrNull(ResultSet row, int column) throws SQLException {
+        double value = row.getDouble(column);
         return row.wasNull() ? null : value;
     }
 

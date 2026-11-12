@@ -230,6 +230,7 @@ class ControllerPermissionsTest {
         rule(DailyController.class, "saveSettings", inProject(Permission.DAILY_SETTINGS));
         // Estadísticas, reportes y actividad
         rule(ProjectStatsController.class, "getStats", inProject(Permission.STATS_VIEW));
+        rule(ProjectStatsController.class, "getDevelopmentStats", inProject(Permission.STATS_VIEW));
         rule(ReportController.class, "previewIssues", inProject(Permission.REPORT_GENERATE));
         rule(ReportController.class, "issuesPdf", inProject(Permission.REPORT_GENERATE));
         rule(WorkspaceActivityController.class, "getFeed", can(Permission.ACTIVITY_VIEW));

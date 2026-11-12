@@ -3,6 +3,7 @@ package com.taskflow.api.service.impl;
 import com.taskflow.api.config.AppProperties;
 import com.taskflow.api.dto.request.IssueFilter;
 import com.taskflow.api.dto.request.ReportOptions;
+import com.taskflow.api.dto.response.DevelopmentStatsResponse;
 import com.taskflow.api.dto.response.IssuesReportPreview;
 import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.Label;
@@ -13,6 +14,7 @@ import com.taskflow.api.entity.enums.IssuePriority;
 import com.taskflow.api.entity.enums.IssueType;
 import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.exception.BadRequestException;
+import com.taskflow.api.github.GithubStore;
 import com.taskflow.api.i18n.Language;
 import com.taskflow.api.i18n.StateNames;
 import com.taskflow.api.report.IssuesReport;
@@ -29,6 +31,7 @@ import com.taskflow.api.repository.LabelRepository;
 import com.taskflow.api.repository.ProjectModuleRepository;
 import com.taskflow.api.repository.StateRepository;
 import com.taskflow.api.repository.UserRepository;
+import com.taskflow.api.service.DevelopmentStatsService;
 import com.taskflow.api.service.ReportService;
 import com.taskflow.api.util.IssueListSort;
 import lombok.RequiredArgsConstructor;
@@ -86,21 +89,29 @@ public class ReportServiceImpl implements ReportService {
     private final UserRepository userRepository;
     private final ResourceLookup lookup;
     private final AppProperties properties;
+    private final GithubStore githubStore;
+    private final DevelopmentStatsService developmentStatsService;
 
     @Override
     @Transactional(readOnly = true)
     public IssuesReportPreview previewIssues(String slug, UUID projectId, UUID userId, IssueFilter filter,
                                              ReportOptions options) {
-        IssuesReport report = build(slug, projectId, userId, filter, options, Language.current());
+        // La vista previa trae el desarrollo siempre que haya repositorios: así encender o apagar la sección no la
+        // vuelve a pedir
+        IssuesReport report = build(slug, projectId, userId, filter, options, Language.current(), true);
+        int repositories = report.development() != null
+                ? report.development().repositories()
+                : githubStore.repositoryCount(projectId);
         return new IssuesReportPreview(report.totalMatching(), report.truncated(), IssuesReport.MAX_ISSUES,
-                report.totals(), report.byState(), report.byPriority(), report.byAssignee(), report.byType());
+                report.totals(), report.byState(), report.byPriority(), report.byAssignee(), report.byType(),
+                repositories, report.development());
     }
 
     @Override
     @Transactional(readOnly = true)
     public ReportFile issuesPdf(String slug, UUID projectId, UUID userId, IssueFilter filter, ReportOptions options) {
-        if (!options.includeSummary() && !options.includeIssues()) {
-            throw new BadRequestException("El reporte debe incluir el resumen, el listado o ambos");
+        if (!options.includeSummary() && !options.includeIssues() && !options.includeDevelopment()) {
+            throw new BadRequestException("El reporte debe incluir al menos una sección: el resumen, el listado o el desarrollo");
         }
         Language language = Language.current();
         IssuesReport report = build(slug, projectId, userId, filter, options, language);
@@ -112,10 +123,19 @@ public class ReportServiceImpl implements ReportService {
 
     IssuesReport build(String slug, UUID projectId, UUID userId, IssueFilter filter, ReportOptions options,
                        Language language) {
+        return build(slug, projectId, userId, filter, options, language, options.includeDevelopment());
+    }
+
+    /** @param withDevelopment si trae la sección de desarrollo (cuando el proyecto tiene repositorios enlazados) */
+    IssuesReport build(String slug, UUID projectId, UUID userId, IssueFilter filter, ReportOptions options,
+                       Language language, boolean withDevelopment) {
         Project project = lookup.project(slug, projectId);
         ZoneId zone = ZoneId.of(properties.timezone());
         checkRange(options.createdFrom(), options.createdTo(), "creación");
         checkRange(options.dueFrom(), options.dueTo(), "fecha límite");
+        if (!ProjectStatsServiceImpl.ALLOWED_WEEKS.contains(options.developmentWeeksOrDefault())) {
+            throw new BadRequestException("El parámetro developmentWeeks debe ser 4, 8 o 12");
+        }
 
         Specification<Issue> spec = IssueSpecifications.matching(project.getId(), filter)
                 .and(IssueSpecifications.createdBetween(
@@ -144,7 +164,16 @@ public class ReportServiceImpl implements ReportService {
                 groups(issues, states, options.groupByOrDefault(), today, language),
                 page.getTotalElements(),
                 page.getTotalElements() > issues.size(),
-                options);
+                options,
+                withDevelopment ? development(slug, projectId, options) : null);
+    }
+
+    /** La sección de desarrollo; {@code null} si el proyecto no tiene repositorios de GitHub enlazados. */
+    private DevelopmentStatsResponse development(String slug, UUID projectId, ReportOptions options) {
+        if (githubStore.repositoryCount(projectId) == 0) {
+            return null;
+        }
+        return developmentStatsService.getStats(slug, projectId, options.developmentWeeksOrDefault());
     }
 
     // ---------------------------------------------------------------- orden y validación
