@@ -113,8 +113,9 @@ class GithubKeysTest {
         assertThatThrownBy(() -> GithubKeys.open("otro-secreto", sealed)).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> GithubKeys.open("secreto-de-cliente", "no es base64 !")).isInstanceOf(IllegalStateException.class);
         // Un cifrado retocado no se abre
-        char last = sealed.charAt(sealed.length() - 3);
-        String tampered = sealed.substring(0, sealed.length() - 3) + (last == 'A' ? 'B' : 'A') + sealed.substring(sealed.length() - 2);
+        // (un carácter del medio: los últimos de un Base64 pueden llevar bits de relleno que no cambian nada)
+        char middle = sealed.charAt(20);
+        String tampered = sealed.substring(0, 20) + (middle == 'A' ? 'B' : 'A') + sealed.substring(21);
         assertThatThrownBy(() -> GithubKeys.open("secreto-de-cliente", tampered)).isInstanceOf(IllegalStateException.class);
     }
 

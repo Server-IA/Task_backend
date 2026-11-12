@@ -101,6 +101,9 @@ class GithubIntegrationTest {
         registry.add("app.github.private-key-path", () -> GITHUB.keyFile().toString());
         registry.add("app.github.webhook-secret", () -> SECRET);
         registry.add("app.github.api-url", GITHUB::url);
+        // Lo que la integración hace después de confirmar (contar checks, ejecutar reglas) va en el mismo hilo: así las
+        // pruebas ven el resultado al volver de la llamada
+        registry.add("app.github.inline", () -> "true");
         registry.add("app.github.client-id", () -> "Iv1.pruebas");
         registry.add("app.github.client-secret", () -> "secreto-de-cliente");
         registry.add("app.github.web-url", GITHUB::url);
@@ -657,6 +660,158 @@ class GithubIntegrationTest {
                 .isEqualTo("http://localhost:5173/" + slug + "/settings?tab=integrations&github=connected");
         // Sin enlace firmado (un cambio hecho desde GitHub) no hay nada que guardar
         assertThat(webhookController.setup(installationId, null).getHeaders().getFirst(HttpHeaders.LOCATION)).isEqualTo("http://localhost:5173/");
+    }
+
+    // ----- Correcciones de la revisión
+
+    @Test
+    void unPullRequestQueAlguienDejoSinTareaNoSeVuelveAEnlazarNiRepiteLasReglas() {
+        UUID repositoryId = connect();
+        githubService.saveSettings(slug, projectId, new Settings(null, null, done, null));
+        githubService.addRule(slug, projectId, pm.getId(), GithubService.FIRES_ON_MERGE, repositoryId, 77, "Deploy", "main");
+        IssueResponse task = task("Enlazada por error");
+        send("pull_request", pullEvent("closed", 70, "Algo", branch(task), "closed", true, false));
+        assertThat(GITHUB.bodies("POST /repos/" + repositoryName + "/actions/workflows/77/dispatches")).hasSize(1);
+        UUID pullId = githubService.pullRequests(slug, projectId, "merged").getFirst().id();
+
+        // Alguien lo deja sin tarea; después llega otro aviso del mismo pull request (una etiqueta, una edición)
+        githubService.linkPullRequest(slug, projectId, pullId, null);
+        send("pull_request", pullEvent("edited", 70, "Algo retocado", branch(task), "closed", true, false));
+
+        assertThat(githubService.pullRequests(slug, projectId, "merged")).singleElement()
+                .satisfies(pull -> assertThat(pull.issueId()).isNull());
+        assertThat(GITHUB.bodies("POST /repos/" + repositoryName + "/actions/workflows/77/dispatches")).hasSize(1);
+        assertThat(values("SELECT a.new_value FROM issue_activities a WHERE a.issue_id = '" + task.id()
+                + "' AND a.field = 'GITHUB' AND a.new_value LIKE 'PR_MERGED%'")).hasSize(1);
+    }
+
+    @Test
+    void ponerElCodigoDeLaTareaEnUnPullRequestYaFusionadoNoLaCompletaNiEjecutaReglas() {
+        UUID repositoryId = connect();
+        githubService.saveSettings(slug, projectId, new Settings(null, started, done, null));
+        githubService.addRule(slug, projectId, pm.getId(), GithubService.FIRES_ON_MERGE, repositoryId, 77, "Deploy", "main");
+        IssueResponse merged = task("Nombrada después de fusionar");
+        IssueResponse open = task("Nombrada con el PR abierto");
+        send("pull_request", pullEvent("closed", 71, "Sin código", "rama-suelta-1", "closed", true, false));
+        send("pull_request", pullEvent("opened", 72, "Sin código", "rama-suelta-2", "open", false, false));
+
+        send("pull_request", pullEvent("edited", 71, identifier + "-" + merged.sequenceId() + " ya fusionado", "rama-suelta-1", "closed", true, false));
+        send("pull_request", pullEvent("edited", 72, identifier + "-" + open.sequenceId() + " en revisión", "rama-suelta-2", "open", false, false));
+
+        // El fusionado queda enlazado, pero no mueve la tarea ni despliega; el abierto sí cuenta como abrirlo
+        assertThat(githubService.issue(slug, projectId, merged.id()).pullRequests()).hasSize(1);
+        assertThat(group(merged)).isEqualTo("UNSTARTED");
+        assertThat(GITHUB.bodies("POST /repos/" + repositoryName + "/actions/workflows/77/dispatches")).isEmpty();
+        assertThat(group(open)).isEqualTo("STARTED");
+    }
+
+    @Test
+    void unAvisoViejoQueLlegaTardeNoPisaLoMasNuevo() {
+        connect();
+        IssueResponse task = task("Desordenado");
+        Map<String, Object> merged = pullEvent("closed", 73, "Desordenado", branch(task), "closed", true, false);
+        Map<String, Object> opened = pullEvent("opened", 73, "Desordenado", branch(task), "open", false, false);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> older = (Map<String, Object>) opened.get("pull_request");
+        older.put("updated_at", "2026-11-01T08:00:00Z");
+
+        send("pull_request", merged);
+        send("pull_request", opened);
+
+        assertThat(githubService.issue(slug, projectId, task.id()).pullRequests()).singleElement()
+                .satisfies(pull -> assertThat(pull.state()).isEqualTo("MERGED"));
+    }
+
+    @Test
+    void conUnRepositorioCompartidoUnProyectoNoVeNiTocaLasTareasDelOtro() {
+        UUID repositoryId = connect();
+        String otherIdentifier = "H" + suffix.substring(0, 4).toUpperCase().replaceAll("[0-9]", "X");
+        UUID otherProject = projectService.create(slug, pm.getId(), new CreateProjectRequest("Otro", otherIdentifier, null, null)).id();
+        githubService.setRepositories(slug, otherProject, List.of(repositoryId));
+        IssueResponse task = task("Solo de este proyecto");
+        send("pull_request", pullEvent("opened", 80, "Privada", branch(task), "open", false, false));
+        send("workflow_run", runEvent("completed", 9500, 78, "CI", branch(task), "push", "completed", "success"));
+
+        // El otro proyecto ve el pull request y la ejecución (el repositorio también es suyo), sin la tarea
+        assertThat(githubService.pullRequests(slug, otherProject, "open")).singleElement().satisfies(pull -> {
+            assertThat(pull.number()).isEqualTo(80);
+            assertThat(pull.issueId()).isNull();
+            assertThat(pull.issueCode()).isNull();
+            assertThat(pull.issueTitle()).isNull();
+        });
+        assertThat(githubService.runs(slug, otherProject)).singleElement().satisfies(run -> assertThat(run.issueCode()).isNull());
+        assertThat(githubService.pullRequests(slug, projectId, "open")).singleElement()
+                .satisfies(pull -> assertThat(pull.issueId()).isEqualTo(task.id()));
+        // Y no puede quitárselo ni enlazarlo a una tarea suya
+        UUID pullId = githubService.pullRequests(slug, otherProject, "open").getFirst().id();
+        assertThatThrownBy(() -> githubService.linkPullRequest(slug, otherProject, pullId, null)).isInstanceOf(ConflictException.class);
+        // Quien no configura GitHub no ve los demás repositorios del workspace ni los otros proyectos de cada uno
+        ProjectStatus limited = githubService.project(slug, projectId, false);
+        assertThat(limited.available()).isEmpty();
+        assertThat(limited.repositories()).singleElement()
+                .satisfies(repository -> assertThat(repository.projects()).extracting("projectId").containsExactly(projectId));
+        assertThat(githubService.project(slug, projectId, true).repositories()).singleElement()
+                .satisfies(repository -> assertThat(repository.projects()).hasSize(2));
+        assertThat(githubService.workspace(slug, false).repositories()).isEmpty();
+        assertThat(githubService.workspace(slug, false).connected()).isTrue();
+    }
+
+    @Test
+    void alQuitarUnRepositorioDelProyectoSeVanSusReglas() {
+        UUID repositoryId = connect();
+        githubService.addRule(slug, projectId, pm.getId(), GithubService.FIRES_ON_COMPLETED, repositoryId, 88, "Notificar", "main");
+
+        githubService.setRepositories(slug, projectId, List.of());
+        issueService.move(slug, projectId, task("Ya sin repositorio").id(), pm.getId(), new MoveIssueRequest(done, null, null));
+
+        assertThat(githubService.project(slug, projectId).rules()).isEmpty();
+        assertThat(GITHUB.requests()).noneMatch(request -> request.endsWith("/dispatches"));
+    }
+
+    @Test
+    void lasEjecucionesDeUnRepositorioSinProyectoNoSeGuardanNiSePreguntanSusChecks() {
+        connect();
+        githubService.setRepositories(slug, projectId, List.of());
+        GITHUB.requests().clear();
+
+        send("workflow_run", runEvent("completed", 9600, 78, "CI", "main", "push", "completed", "success"));
+        send("check_suite", suiteEvent("completed"));
+
+        assertThat(values("SELECT count(*)::text FROM github_workflow_runs WHERE run_id = 9600")).containsExactly("0");
+        assertThat(GITHUB.requests()).noneMatch(request -> request.contains("/check-runs"));
+    }
+
+    @Test
+    void elTokenRenovadoSeGuardaAunqueLaAccionFalle() {
+        UUID repositoryId = connect();
+        IssueResponse task = task("Con token vencido");
+        sql("UPDATE github_accounts SET access_expires_at = now() - interval '1 minute' WHERE user_id = '" + pm.getId() + "'");
+        GITHUB.fail("POST /repos/" + repositoryName + "/git/refs", 422);
+
+        // La acción falla después de renovar (la rama ya existe): la renovación no se puede perder con ella
+        assertThatThrownBy(() -> githubService.createBranch(slug, projectId, pm.getId(), task.id(), repositoryId, "main", "repetida", true))
+                .isInstanceOf(ConflictException.class);
+
+        assertThat(values("SELECT (access_expires_at > now())::text FROM github_accounts WHERE user_id = '" + pm.getId() + "'")).containsExactly("true");
+        assertThat(accounts.status(pm.getId()).linked()).isTrue();
+        // Y la siguiente acción ya no necesita renovar otra vez
+        int refreshes = GITHUB.bodies("POST /login/oauth/access_token").size();
+        githubService.dispatch(slug, projectId, pm.getId(), repositoryId, 77, "Deploy", "main", Map.of(), null);
+        assertThat(GITHUB.bodies("POST /login/oauth/access_token")).hasSize(refreshes);
+    }
+
+    @Test
+    void unAvisoDemasiadoGrandeOSinTamanoSeRechazaSinLeerlo() {
+        org.springframework.mock.web.MockHttpServletRequest huge = new org.springframework.mock.web.MockHttpServletRequest() {
+            @Override
+            public long getContentLengthLong() {
+                return 26L * 1024 * 1024;
+            }
+        };
+        org.springframework.mock.web.MockHttpServletRequest unknown = new org.springframework.mock.web.MockHttpServletRequest();
+
+        assertThat(webhookController.webhook(huge, "sha256=x", "push", "d1").getStatusCode().value()).isEqualTo(413);
+        assertThat(webhookController.webhook(unknown, "sha256=x", "push", "d2").getStatusCode().value()).isEqualTo(413);
     }
 
     // ----- La cuenta de GitHub de cada persona

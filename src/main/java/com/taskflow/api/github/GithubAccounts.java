@@ -37,6 +37,8 @@ public class GithubAccounts {
     private static final String REJECTED = "GitHub no aceptó la autorización. Vuelve a intentarlo desde tu perfil.";
     /** Para qué es la firma del enlace: no sirve como firma del enlace de instalación ni de un aviso. */
     private static final String PURPOSE = "link";
+    /** Marca interna: GitHub no respondió al renovar (no es un token; un token nunca tiene esta forma). */
+    private static final String UNAVAILABLE = "::github-no-disponible::";
     /** Cuánto vale el enlace para autorizar (segundos). */
     private static final long STATE_SECONDS = 900;
     /** Con este margen antes de que caduque, el token se renueva. */
@@ -161,23 +163,43 @@ public class GithubAccounts {
         if (account.accessExpiresAt() == null || account.accessExpiresAt().isAfter(now.plusSeconds(RENEW_SECONDS))) {
             return open(account.accessToken());
         }
-        if (account.refreshToken() == null || (account.refreshExpiresAt() != null && account.refreshExpiresAt().isBefore(now))) {
-            forget(userId);
-            throw new ConflictException(EXPIRED);
-        }
-        UserToken fresh;
-        try {
-            fresh = client.refresh(open(account.refreshToken()));
-        } catch (GithubException ex) {
-            if (ex.status() == 0 || ex.status() >= 500) {
-                throw new ConflictException("GitHub no respondió. Inténtalo de nuevo en un momento.");
+        // Renovar gasta el token de refresco: lo nuevo se guarda en una transacción propia, así no se pierde si lo que la
+        // persona estaba haciendo falla después (se quedaría con un refresco ya gastado y habría que reconectar). La fila
+        // se bloquea para que dos acciones a la vez no renueven con el mismo token.
+        String renewed = ownTransaction.execute(status -> {
+            Account locked = store.accountForUpdate(userId).orElse(null);
+            if (locked == null) {
+                return null;
             }
-            forget(userId);
+            if (locked.accessExpiresAt() == null || locked.accessExpiresAt().isAfter(Instant.now().plusSeconds(RENEW_SECONDS))) {
+                // Otra petición lo renovó mientras esta esperaba
+                return open(locked.accessToken());
+            }
+            if (locked.refreshToken() == null || (locked.refreshExpiresAt() != null && locked.refreshExpiresAt().isBefore(Instant.now()))) {
+                store.deleteAccount(userId);
+                return null;
+            }
+            UserToken fresh;
+            try {
+                fresh = client.refresh(open(locked.refreshToken()));
+            } catch (GithubException ex) {
+                if (ex.status() == 0 || ex.status() >= 500) {
+                    return UNAVAILABLE;
+                }
+                store.deleteAccount(userId);
+                return null;
+            }
+            store.saveAccountTokens(userId, seal(fresh.accessToken()), fresh.refreshToken() == null ? null : seal(fresh.refreshToken()),
+                    fresh.accessExpiresAt(), fresh.refreshExpiresAt());
+            return fresh.accessToken();
+        });
+        if (renewed == null) {
             throw new ConflictException(EXPIRED);
         }
-        store.saveAccountTokens(userId, seal(fresh.accessToken()), fresh.refreshToken() == null ? null : seal(fresh.refreshToken()),
-                fresh.accessExpiresAt(), fresh.refreshExpiresAt());
-        return fresh.accessToken();
+        if (UNAVAILABLE.equals(renewed)) {
+            throw new ConflictException("GitHub no respondió. Inténtalo de nuevo en un momento.");
+        }
+        return renewed;
     }
 
     /**
@@ -197,11 +219,6 @@ public class GithubAccounts {
             log.info("GitHub: no se pudo comprobar la instalación {} con la cuenta de {}: {}", installationId, userId, ex.getMessage());
             return false;
         }
-    }
-
-    /** Olvida la cuenta aunque lo que la persona estaba haciendo falle (y su transacción se deshaga). */
-    private void forget(UUID userId) {
-        ownTransaction.executeWithoutResult(status -> store.deleteAccount(userId));
     }
 
     private String seal(String token) {

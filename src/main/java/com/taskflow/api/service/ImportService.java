@@ -34,7 +34,7 @@ public interface ImportService {
     ImportJobResponse saveMapping(String slug, UUID jobId, UUID userId, ImportMapping mapping);
 
     /** Empieza a escribir en TaskFlow (en segundo plano). */
-    ImportJobResponse start(String slug, UUID jobId);
+    ImportJobResponse start(String slug, UUID jobId, UUID userId);
 
     /** Pide detenerla: para al terminar la tanda en curso; lo que ya entró se queda. */
     ImportJobResponse stop(String slug, UUID jobId);

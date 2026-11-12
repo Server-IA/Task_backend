@@ -6,6 +6,7 @@ import com.taskflow.api.github.GithubProperties;
 import com.taskflow.api.github.GithubService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
@@ -13,7 +14,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -22,6 +22,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.io.IOException;
 import java.net.URI;
 
 /**
@@ -36,6 +37,8 @@ import java.net.URI;
 public class GithubWebhookController {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
+    /** El tope de GitHub para un aviso. */
+    private static final long MAX_BODY = 25L * 1024 * 1024;
 
     private final GithubService githubService;
     private final GithubProperties properties;
@@ -43,10 +46,29 @@ public class GithubWebhookController {
 
     @Operation(summary = "Aviso de GitHub", description = "Solo se atiende si viene firmado con el secreto de la app.")
     @PostMapping("/webhook")
-    public ResponseEntity<Void> webhook(@RequestBody(required = false) byte[] body,
+    public ResponseEntity<Void> webhook(HttpServletRequest request,
                                         @RequestHeader(value = "X-Hub-Signature-256", required = false) String signature,
                                         @RequestHeader(value = "X-GitHub-Event", required = false) String event,
                                         @RequestHeader(value = "X-GitHub-Delivery", required = false) String delivery) {
+        if (!properties.configured()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
+        // GitHub nunca manda más de 25 MB y siempre dice cuánto: lo demás se rechaza sin leerlo
+        long length = request.getContentLengthLong();
+        if (length < 0 || length > MAX_BODY) {
+            return ResponseEntity.status(HttpStatus.CONTENT_TOO_LARGE).build();
+        }
+        byte[] body;
+        try {
+            body = request.getInputStream().readNBytes((int) length);
+        } catch (IOException ex) {
+            return ResponseEntity.badRequest().build();
+        }
+        return webhook(body, signature, event, delivery);
+    }
+
+    /** Atiende un aviso con su cuerpo ya leído. */
+    public ResponseEntity<Void> webhook(byte[] body, String signature, String event, String delivery) {
         if (!properties.configured()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }

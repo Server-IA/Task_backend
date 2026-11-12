@@ -155,6 +155,16 @@ public final class ImportDefaults {
             if (target == null || (target.action() == PersonAction.MEMBER && !memberById.containsKey(target.userId()))) {
                 target = personFor(user, members);
             }
+            // A quien se invitó en una importación anterior y ya entró al workspace no se le invita otra vez (la
+            // invitación fallaría y sus tareas quedarían esperando para siempre): es miembro, se le asignan ya
+            if (target.action() == PersonAction.INVITE) {
+                String email = target.email() != null && !target.email().isBlank() ? target.email() : user.email();
+                User already = email == null ? null : members.stream()
+                        .filter(member -> email.strip().equalsIgnoreCase(member.getEmail())).findFirst().orElse(null);
+                if (already != null) {
+                    target = new PersonTarget(PersonAction.MEMBER, already.getId(), null, null);
+                }
+            }
             User matched = target.action() == PersonAction.MEMBER ? memberById.get(target.userId()) : null;
             people.add(new PersonRow(id, user.name(), user.email(), count, target, matched == null ? null : matched.getFullName()));
         });

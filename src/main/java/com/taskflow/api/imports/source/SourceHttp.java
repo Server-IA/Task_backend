@@ -42,6 +42,14 @@ public class SourceHttp {
     private static final int MAX_REDIRECTS = 5;
     private static final Duration MAX_WAIT = Duration.ofSeconds(30);
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
+    /** Cuánto puede tardar en llegar el cuerpo de un archivo (segundos). */
+    private static final long DOWNLOAD_SECONDS = 300;
+    /** Corta las descargas que se quedan a medias. */
+    private static final java.util.concurrent.ScheduledExecutorService WATCHDOG = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(task -> {
+        Thread thread = new Thread(task, "import-download-watchdog");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private final HttpClient client = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -97,7 +105,16 @@ public class SourceHttp {
                 throw new SourceException(UNREACHABLE, ex);
             }
             int status = response.statusCode();
-            try (InputStream body = response.body()) {
+            // El plazo de la petición solo cubre hasta las cabeceras: si el cuerpo se queda a medias, se corta
+            InputStream stream = response.body();
+            java.util.concurrent.ScheduledFuture<?> watchdog = WATCHDOG.schedule(() -> {
+                try {
+                    stream.close();
+                } catch (IOException ignored) {
+                    // ya estaba cerrado
+                }
+            }, DOWNLOAD_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
+            try (InputStream body = stream) {
                 if (status >= 300 && status < 400) {
                     String location = response.headers().firstValue("Location").orElseThrow(() -> new SourceException(UNREACHABLE));
                     URI next = request.uri().resolve(location);
@@ -117,6 +134,8 @@ public class SourceHttp {
                 return content;
             } catch (IOException ex) {
                 throw new SourceException(UNREACHABLE, ex);
+            } finally {
+                watchdog.cancel(false);
             }
         }
         throw new SourceException(UNREACHABLE);
@@ -208,7 +227,8 @@ public class SourceHttp {
         try {
             for (InetAddress address : InetAddress.getAllByName(uri.getHost())) {
                 if (address.isLoopbackAddress() || address.isAnyLocalAddress() || address.isLinkLocalAddress()
-                        || address.isSiteLocalAddress() || address.isMulticastAddress() || isUniqueLocal(address)) {
+                        || address.isSiteLocalAddress() || address.isMulticastAddress() || isUniqueLocal(address)
+                        || isReservedV4(address)) {
                     throw new SourceException(BAD_ADDRESS);
                 }
             }
@@ -216,6 +236,18 @@ public class SourceHttp {
             throw new SourceException(UNREACHABLE, ex);
         }
         return uri;
+    }
+
+    /** Rangos IPv4 que no son Internet y Java no marca: 0.0.0.0/8, 100.64.0.0/10 (red del operador), 192.0.0.0/24 y 198.18.0.0/15. */
+    private static boolean isReservedV4(InetAddress address) {
+        byte[] bytes = address.getAddress();
+        if (bytes.length != 4) {
+            return false;
+        }
+        int first = bytes[0] & 0xFF;
+        int second = bytes[1] & 0xFF;
+        return first == 0 || (first == 100 && second >= 64 && second <= 127) || (first == 192 && second == 0 && (bytes[2] & 0xFF) == 0)
+                || (first == 198 && (second == 18 || second == 19));
     }
 
     /** IPv6 de red privada (fc00::/7), que {@link InetAddress#isSiteLocalAddress()} no cubre. */

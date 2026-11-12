@@ -45,6 +45,13 @@ public class GithubStore {
                               String url, String authorLogin, String headBranch, String baseBranch, String headSha, String reviewers,
                               String checksState, int checksTotal, int checksFailed, Instant mergedAt, Instant openedAt,
                               Instant changedAt, UUID authorUserId, String authorName) {
+
+        /** El mismo pull request sin los datos de su tarea (cuando la tarea es de un proyecto que no es el que se mira). */
+        public PullRequest withoutIssue() {
+            return new PullRequest(id, repositoryId, repository, null, null, null, null, null, null, number, title, state, url,
+                    authorLogin, headBranch, baseBranch, headSha, reviewers, checksState, checksTotal, checksFailed, mergedAt, openedAt,
+                    changedAt, authorUserId, authorName);
+        }
     }
 
     public record Branch(UUID id, UUID repositoryId, String repository, UUID issueId, String issueCode, String issueTitle, String name,
@@ -54,7 +61,12 @@ public class GithubStore {
     public record Run(UUID id, UUID repositoryId, String repository, Long runId, Long workflowId, String workflowName, String title,
                       String branch, String headSha, String event, String status, String conclusion, String actorLogin, String url,
                       Integer prNumber, UUID issueId, String issueCode, UUID ruleId, String triggeredByName, Instant requestedAt,
-                      Instant startedAt, Instant changedAt) {
+                      Instant startedAt, Instant changedAt, UUID issueProjectId) {
+
+        public Run withoutIssue() {
+            return new Run(id, repositoryId, repository, runId, workflowId, workflowName, title, branch, headSha, event, status,
+                    conclusion, actorLogin, url, prNumber, null, null, ruleId, triggeredByName, requestedAt, startedAt, changedAt, null);
+        }
     }
 
     /**
@@ -125,8 +137,13 @@ public class GithubStore {
         return jdbc.update("INSERT INTO github_webhook_deliveries (delivery_id) VALUES (?) ON CONFLICT DO NOTHING", deliveryId) == 1;
     }
 
-    public void forgetOldDeliveries() {
-        jdbc.update("DELETE FROM github_webhook_deliveries WHERE received_at < now() - interval '7 days'");
+    public int forgetOldDeliveries() {
+        return jdbc.update("DELETE FROM github_webhook_deliveries WHERE received_at < now() - interval '7 days'");
+    }
+
+    /** Las ejecuciones de Actions de hace más de seis meses: ya no se miran y la tabla solo crecería. */
+    public int forgetOldRuns() {
+        return jdbc.update("DELETE FROM github_workflow_runs WHERE changed_at < now() - interval '180 days'");
     }
 
     // ----- Repositorios
@@ -204,6 +221,17 @@ public class GithubStore {
         for (UUID repositoryId : repositoryIds) {
             jdbc.update("INSERT INTO project_repositories (project_id, repository_id) VALUES (?, ?)", projectId, repositoryId);
         }
+        jdbc.update("""
+                DELETE FROM github_rules g
+                WHERE g.project_id = ? AND NOT EXISTS (SELECT 1 FROM project_repositories pr
+                                                       WHERE pr.project_id = g.project_id AND pr.repository_id = g.repository_id)
+                """, projectId);
+    }
+
+    /** Si algún proyecto tiene enlazado ese repositorio. */
+    public boolean repositoryLinked(UUID repositoryId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM project_repositories WHERE repository_id = ?)",
+                Boolean.class, repositoryId));
     }
 
     public boolean projectHasRepository(UUID projectId, UUID repositoryId) {
@@ -323,14 +351,20 @@ public class GithubStore {
                     checks_state = CASE WHEN github_pull_requests.head_sha IS DISTINCT FROM EXCLUDED.head_sha THEN NULL ELSE github_pull_requests.checks_state END,
                     head_sha = EXCLUDED.head_sha, reviewers = EXCLUDED.reviewers, merged_at = EXCLUDED.merged_at,
                     opened_at = coalesce(github_pull_requests.opened_at, EXCLUDED.opened_at), changed_at = EXCLUDED.changed_at,
-                    issue_id = coalesce(github_pull_requests.issue_id, EXCLUDED.issue_id), updated_at = now()
+                    issue_id = CASE WHEN github_pull_requests.issue_unlinked THEN NULL
+                                    ELSE coalesce(github_pull_requests.issue_id, EXCLUDED.issue_id) END,
+                    updated_at = now()
+                -- Los avisos pueden llegar desordenados: uno más viejo que lo guardado no lo pisa
+                WHERE github_pull_requests.changed_at <= EXCLUDED.changed_at
                 """, UUID.randomUUID(), repositoryId, number, cut(title, 500), state, cut(url, 500), authorLogin, cut(headBranch, 255),
                 cut(baseBranch, 255), headSha, cut(reviewers, 500), timestamp(mergedAt), timestamp(openedAt),
                 timestamp(changedAt == null ? Instant.now() : changedAt), issueId);
     }
 
+    /** Enlaza el pull request con una tarea, o lo deja sin ninguna: en ese caso ya no se vuelve a enlazar solo. */
     public void setPullRequestIssue(UUID pullRequestId, UUID issueId) {
-        jdbc.update("UPDATE github_pull_requests SET issue_id = ?, updated_at = now() WHERE id = ?", issueId, pullRequestId);
+        jdbc.update("UPDATE github_pull_requests SET issue_id = ?, issue_unlinked = ?, updated_at = now() WHERE id = ?", issueId,
+                issueId == null, pullRequestId);
     }
 
     /** El resultado de los checks del commit en el que está un PR (los de otro commit ya no cuentan). */
@@ -358,14 +392,14 @@ public class GithubStore {
             SELECT w.id, w.repository_id, r.full_name, w.run_id, w.workflow_id, w.workflow_name, w.title, w.branch, w.head_sha, w.event,
                    w.status, w.conclusion, w.actor_login, w.url, w.pr_number, w.issue_id,
                    CASE WHEN i.id IS NULL THEN NULL ELSE p.identifier || '-' || i.sequence_id END, w.rule_id, u.full_name,
-                   w.requested_at, w.started_at, w.changed_at
+                   w.requested_at, w.started_at, w.changed_at, i.project_id
             FROM github_workflow_runs w JOIN github_repositories r ON r.id = w.repository_id
                  LEFT JOIN issues i ON i.id = w.issue_id LEFT JOIN projects p ON p.id = i.project_id LEFT JOIN users u ON u.id = w.triggered_by_id
             """;
     private static final RowMapper<Run> RUN_ROW = (row, index) -> new Run(uuid(row, 1), uuid(row, 2), row.getString(3), longOrNull(row, 4),
             longOrNull(row, 5), row.getString(6), row.getString(7), row.getString(8), row.getString(9), row.getString(10),
             row.getString(11), row.getString(12), row.getString(13), row.getString(14), intOrNull(row, 15), uuid(row, 16),
-            row.getString(17), uuid(row, 18), row.getString(19), instant(row, 20), instant(row, 21), instant(row, 22));
+            row.getString(17), uuid(row, 18), row.getString(19), instant(row, 20), instant(row, 21), instant(row, 22), uuid(row, 23));
 
     /**
      * Una ejecución que TaskFlow acaba de pedir: todavía no tiene número en GitHub; se completa cuando GitHub avisa de
@@ -510,6 +544,11 @@ public class GithubStore {
     /** Las tareas del proyecto que tienen rama o pull request. */
     public List<IssueSummary> summaryOfProject(UUID projectId) {
         return jdbc.query("""
+                WITH linked AS (
+                    SELECT b.issue_id FROM github_branches b JOIN issues i ON i.id = b.issue_id WHERE i.project_id = ?
+                    UNION
+                    SELECT p.issue_id FROM github_pull_requests p JOIN issues i ON i.id = p.issue_id WHERE i.project_id = ?
+                )
                 SELECT i.id,
                        (SELECT b.name FROM github_branches b WHERE b.issue_id = i.id ORDER BY b.created_at DESC LIMIT 1),
                        (SELECT count(*) FROM github_branches b WHERE b.issue_id = i.id),
@@ -517,16 +556,16 @@ public class GithubStore {
                        EXISTS (SELECT 1 FROM github_workflow_runs w WHERE w.issue_id = i.id AND w.status <> 'completed'
                                AND coalesce(w.started_at, w.requested_at, w.changed_at)
                                    > now() - CASE WHEN w.run_id IS NULL THEN interval '10 minutes' ELSE interval '2 hours' END)
-                FROM issues i
+                FROM linked l JOIN issues i ON i.id = l.issue_id JOIN states s ON s.id = i.state_id
                      LEFT JOIN LATERAL (
                          SELECT p.number, p.state, p.checks_state, p.url FROM github_pull_requests p WHERE p.issue_id = i.id
                          ORDER BY CASE p.state WHEN 'OPEN' THEN 0 WHEN 'DRAFT' THEN 1 WHEN 'MERGED' THEN 2 ELSE 3 END,
                                   p.changed_at DESC NULLS LAST
                          LIMIT 1) pr ON TRUE
-                WHERE i.project_id = ?
-                  AND (pr.number IS NOT NULL OR EXISTS (SELECT 1 FROM github_branches b WHERE b.issue_id = i.id))
+                -- Lo terminado hace más de un mes ya no está en el tablero ni hace falta en la lista
+                WHERE s.state_group NOT IN ('COMPLETED', 'CANCELLED') OR coalesce(i.completed_at, i.updated_at) > now() - interval '30 days'
                 """, (row, index) -> new IssueSummary(uuid(row, 1), row.getString(2), row.getInt(3), intOrNull(row, 4), row.getString(5),
-                row.getString(6), row.getString(7), row.getBoolean(8)), projectId);
+                row.getString(6), row.getString(7), row.getBoolean(8)), projectId, projectId);
     }
 
     // ----- La cuenta de GitHub de cada persona
@@ -544,6 +583,15 @@ public class GithubStore {
         return jdbc.query("""
                 SELECT user_id, github_id, login, avatar_url, access_token, refresh_token, access_expires_at, refresh_expires_at, created_at
                 FROM github_accounts WHERE user_id = ?
+                """, (row, index) -> new Account(uuid(row, 1), row.getLong(2), row.getString(3), row.getString(4), row.getString(5),
+                row.getString(6), instant(row, 7), instant(row, 8), instant(row, 9)), userId).stream().findFirst();
+    }
+
+    /** La cuenta con su fila bloqueada hasta el final de la transacción: dos renovaciones a la vez no gastan el mismo token. */
+    public Optional<Account> accountForUpdate(UUID userId) {
+        return jdbc.query("""
+                SELECT user_id, github_id, login, avatar_url, access_token, refresh_token, access_expires_at, refresh_expires_at, created_at
+                FROM github_accounts WHERE user_id = ? FOR UPDATE
                 """, (row, index) -> new Account(uuid(row, 1), row.getLong(2), row.getString(3), row.getString(4), row.getString(5),
                 row.getString(6), instant(row, 7), instant(row, 8), instant(row, 9)), userId).stream().findFirst();
     }

@@ -93,7 +93,7 @@ import java.util.regex.Pattern;
 public class ImportServiceImpl implements ImportService {
 
     /** Tamaño máximo del archivo que se sube para importar. */
-    private static final int MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+    private static final long MAX_UPLOAD_BYTES = 14L * 1024 * 1024;
     private static final int SAMPLE_SIZE = 5;
     /** Cuántas cosas que no entraron se muestran de cada motivo (todas van en el informe que se descarga). */
     private static final int SKIPPED_SHOWN = 20;
@@ -169,7 +169,7 @@ public class ImportServiceImpl implements ImportService {
             throw new BadRequestException("El archivo está vacío");
         }
         if (file.length > MAX_UPLOAD_BYTES) {
-            throw new BadRequestException("El archivo pesa más de 25 MB. Expórtalo por partes (por proyecto, por ejemplo).");
+            throw new BadRequestException("El archivo pesa más de 14 MB. Expórtalo por partes (por proyecto, por ejemplo).");
         }
         ImportDiscovery discovery;
         if (request.source() == ImportSourceType.TRELLO) {
@@ -218,7 +218,7 @@ public class ImportServiceImpl implements ImportService {
     @Override
     @Transactional
     public ImportJobResponse select(String slug, UUID jobId, ImportSelection selection) {
-        ImportJob job = job(slug, jobId);
+        ImportJob job = lockedJob(slug, jobId);
         if (job.getStatus() != ImportStatus.DRAFT && job.getStatus() != ImportStatus.READY) {
             throw new ConflictException(job.getStatus().working() ? BUSY : "Esta importación ya terminó: empieza una nueva");
         }
@@ -310,8 +310,8 @@ public class ImportServiceImpl implements ImportService {
 
     @Override
     @Transactional
-    public ImportJobResponse start(String slug, UUID jobId) {
-        ImportJob job = job(slug, jobId);
+    public ImportJobResponse start(String slug, UUID jobId, UUID userId) {
+        ImportJob job = lockedJob(slug, jobId);
         requireReady(job);
         boolean another = jobRepository.findAllByStatusIn(WORKING).stream()
                 .anyMatch(other -> other.getWorkspace().getId().equals(job.getWorkspace().getId()) && !other.getId().equals(jobId));
@@ -320,13 +320,29 @@ public class ImportServiceImpl implements ImportService {
         }
         // Las equivalencias con las que corre: lo que la persona eligió y, donde no tocó nada, lo propuesto
         Ready ready = ready(slug, job);
-        job.setMapping(ImportJson.write(ready.proposal().toMapping()));
+        ImportMapping mapping = ready.proposal().toMapping();
+        if (!accessControl.can(slug, userId, Permission.MEMBER_INVITE)) {
+            // Las equivalencias pueden venir de la importación anterior, hecha por alguien que sí podía invitar
+            mapping = withoutInvitations(mapping);
+        }
+        job.setMapping(ImportJson.write(mapping));
         job.setStatus(ImportStatus.RUNNING);
         job.setStartedAt(Instant.now());
         job.setError(null);
         Language language = Language.current();
         afterCommit(() -> runner.run(jobId, slug, language));
         return view(slug, job, false);
+    }
+
+    /** Las mismas equivalencias con las personas «invitar» puestas en «sin asignar». */
+    private static ImportMapping withoutInvitations(ImportMapping mapping) {
+        if (mapping.people() == null) {
+            return mapping;
+        }
+        Map<String, PersonTarget> people = new LinkedHashMap<>(mapping.people());
+        people.replaceAll((id, target) -> target != null && target.action() == PersonAction.INVITE
+                ? new PersonTarget(PersonAction.UNASSIGNED, null, target.email(), null) : target);
+        return new ImportMapping(mapping.types(), mapping.states(), mapping.priorities(), people);
     }
 
     private static void requireReady(ImportJob job) {
@@ -349,7 +365,7 @@ public class ImportServiceImpl implements ImportService {
     @Override
     @Transactional
     public ImportJobResponse undo(String slug, UUID jobId) {
-        ImportJob job = job(slug, jobId);
+        ImportJob job = lockedJob(slug, jobId);
         if (!job.getStatus().finished()) {
             throw new ConflictException(job.getStatus().working() ? BUSY : "Esta importación no tiene nada que deshacer");
         }
@@ -403,6 +419,9 @@ public class ImportServiceImpl implements ImportService {
     private static void row(StringBuilder csv, String... values) {
         for (int index = 0; index < values.length; index++) {
             String value = values[index] == null ? "" : values[index];
+            if (!value.isEmpty() && "=+-@\t\r".indexOf(value.charAt(0)) >= 0) {
+                value = "'" + value;
+            }
             csv.append(index == 0 ? "" : ",").append('"').append(value.replace("\"", "\"\"")).append('"');
         }
         csv.append("\r\n");
@@ -412,6 +431,11 @@ public class ImportServiceImpl implements ImportService {
 
     private ImportJob job(String slug, UUID jobId) {
         return jobRepository.findInWorkspace(jobId, slug).orElseThrow(() -> new ResourceNotFoundException(NOT_FOUND));
+    }
+
+    /** La importación, bloqueada mientras cambia de paso (ver {@link ImportJobRepository#findInWorkspaceForUpdate}). */
+    private ImportJob lockedJob(String slug, UUID jobId) {
+        return jobRepository.findInWorkspaceForUpdate(jobId, slug).orElseThrow(() -> new ResourceNotFoundException(NOT_FOUND));
     }
 
     private ImportJobResponse view(String slug, ImportJob job, boolean full) {

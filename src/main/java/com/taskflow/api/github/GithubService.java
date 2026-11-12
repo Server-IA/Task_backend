@@ -34,7 +34,6 @@ import com.taskflow.api.service.impl.IssueCompletedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -75,6 +74,8 @@ public class GithubService {
     /** Cuánto vale el enlace para instalar la app (segundos). */
     private static final long STATE_SECONDS = 3600;
     private static final int LIST_LIMIT = 100;
+    /** Cuánto se recuerdan los workflows ejecutables de un repositorio (segundos). */
+    private static final long WORKFLOWS_SECONDS = 180;
     private static final Set<StateGroup> NOT_STARTED = EnumSet.of(StateGroup.BACKLOG, StateGroup.UNSTARTED);
     private static final Set<StateGroup> OPEN = EnumSet.of(StateGroup.BACKLOG, StateGroup.UNSTARTED, StateGroup.STARTED);
     private static final Set<StateGroup> IN_PROGRESS = EnumSet.of(StateGroup.STARTED);
@@ -92,6 +93,12 @@ public class GithubService {
     private final ActivityService activityService;
     private final NotificationService notificationService;
     private final GithubAccounts accounts;
+    private final GithubBackground background;
+    /** Los workflows ejecutables de cada repositorio, unos minutos: leerlos cuesta una petición a GitHub por workflow. */
+    private final Map<UUID, CachedWorkflows> workflowCache = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private record CachedWorkflows(List<Workflow> workflows, Instant at) {
+    }
     private final UserRepository userRepository;
 
     // ----- Lo que se responde
@@ -138,17 +145,26 @@ public class GithubService {
 
     @Transactional(readOnly = true)
     public WorkspaceStatus workspace(String slug) {
+        return workspace(slug, true);
+    }
+
+    /**
+     * @param manage si quien pregunta puede configurar GitHub: solo entonces ve los repositorios que comparte la
+     *               instalación y a qué proyectos van (los demás ven si está conectado y las cuentas del equipo)
+     */
+    @Transactional(readOnly = true)
+    public WorkspaceStatus workspace(String slug, boolean manage) {
         Workspace workspace = requireWorkspace(slug);
         Installation installation = store.installationOf(workspace.getId()).orElse(null);
         if (installation == null) {
             return new WorkspaceStatus(properties.configured(), false, null, null, null, null, null, null, List.of(), List.of());
         }
-        String manage = "Organization".equalsIgnoreCase(installation.accountType())
+        String manageUrl = "Organization".equalsIgnoreCase(installation.accountType())
                 ? properties.webUrl() + "/organizations/" + installation.accountLogin() + "/settings/installations/" + installation.installationId()
                 : properties.webUrl() + "/settings/installations/" + installation.installationId();
         return new WorkspaceStatus(properties.configured(), true, installation.accountLogin(), installation.accountType(),
-                installation.installedByName(), installation.createdAt(), installation.lastEventAt(), manage, repositoryViews(workspace.getId()),
-                store.memberAccounts(workspace.getId()));
+                installation.installedByName(), installation.createdAt(), installation.lastEventAt(), manageUrl,
+                manage ? repositoryViews(workspace.getId()) : List.of(), store.memberAccounts(workspace.getId()));
     }
 
     private List<RepositoryView> repositoryViews(UUID workspaceId) {
@@ -247,8 +263,12 @@ public class GithubService {
     }
 
     private void refreshRepositories(Installation installation) {
+        applyRepositories(installation, client.repositories(installation.installationId()));
+    }
+
+    private void applyRepositories(Installation installation, List<JsonNode> repositories) {
         Set<Long> seen = new HashSet<>();
-        for (JsonNode repository : client.repositories(installation.installationId())) {
+        for (JsonNode repository : repositories) {
             long githubId = repository.path("id").asLong(0);
             seen.add(githubId);
             store.saveRepository(installation.id(), githubId, text(repository, "full_name"), blankToNull(text(repository, "default_branch")),
@@ -278,15 +298,29 @@ public class GithubService {
 
     @Transactional(readOnly = true)
     public ProjectStatus project(String slug, UUID projectId) {
+        return project(slug, projectId, true);
+    }
+
+    /**
+     * @param manage si quien pregunta puede configurar GitHub: solo entonces ve los demás repositorios del workspace
+     *               (para enlazarlos) y a qué otros proyectos va cada uno
+     */
+    @Transactional(readOnly = true)
+    public ProjectStatus project(String slug, UUID projectId, boolean manage) {
         Project project = requireProject(slug, projectId);
         UUID workspaceId = project.getWorkspace().getId();
         boolean connected = store.installationOf(workspaceId).isPresent();
-        List<LinkedProject> links = store.linkedProjects(workspaceId);
+        List<LinkedProject> links = manage ? store.linkedProjects(workspaceId) : ownLinks(workspaceId, projectId);
         Map<UUID, Integer> open = store.openPullRequests(projectId);
         return new ProjectStatus(properties.configured(), connected,
                 store.repositoriesOfProject(projectId).stream().map(repository -> view(repository, links, open)).toList(),
-                store.repositoriesOf(workspaceId).stream().map(repository -> view(repository, links)).toList(),
+                manage ? store.repositoriesOf(workspaceId).stream().map(repository -> view(repository, links)).toList() : List.of(),
                 store.settings(projectId), store.rules(projectId));
+    }
+
+    /** Los enlaces de repositorios de este proyecto solamente (sin nombrar los otros proyectos que comparten repositorio). */
+    private List<LinkedProject> ownLinks(UUID workspaceId, UUID projectId) {
+        return store.linkedProjects(workspaceId).stream().filter(link -> link.projectId().equals(projectId)).toList();
     }
 
     /** Dice qué repositorios son del proyecto. De los que entran se traen sus pull requests y ejecuciones recientes. */
@@ -367,13 +401,15 @@ public class GithubService {
     public List<PullRequest> pullRequests(String slug, UUID projectId, String filter) {
         requireProject(slug, projectId);
         List<String> states = "merged".equals(filter) ? List.of("MERGED") : "all".equals(filter) ? List.of() : List.of("OPEN", "DRAFT");
-        return store.pullRequestsOfProject(projectId, states, LIST_LIMIT);
+        return store.pullRequestsOfProject(projectId, states, LIST_LIMIT).stream()
+                .map(pull -> pull.issueProjectId() == null || pull.issueProjectId().equals(projectId) ? pull : pull.withoutIssue()).toList();
     }
 
     @Transactional(readOnly = true)
     public List<Run> runs(String slug, UUID projectId) {
         requireProject(slug, projectId);
-        return store.runsOfProject(projectId, LIST_LIMIT);
+        return store.runsOfProject(projectId, LIST_LIMIT).stream()
+                .map(run -> run.issueProjectId() == null || run.issueProjectId().equals(projectId) ? run : run.withoutIssue()).toList();
     }
 
     /** Las ramas enlazadas a tareas del proyecto. */
@@ -391,10 +427,19 @@ public class GithubService {
     }
 
     /** Los workflows del repositorio que se pueden ejecutar a mano, con los datos que pide cada uno. */
-    @Transactional(readOnly = true)
     public List<Workflow> workflows(String slug, UUID projectId, UUID repositoryId) {
         requireProject(slug, projectId);
         Repository repository = projectRepository(projectId, repositoryId);
+        CachedWorkflows cached = workflowCache.get(repositoryId);
+        if (cached != null && cached.at().isAfter(Instant.now().minusSeconds(WORKFLOWS_SECONDS))) {
+            return cached.workflows();
+        }
+        List<Workflow> fresh = readWorkflows(repository);
+        workflowCache.put(repositoryId, new CachedWorkflows(fresh, Instant.now()));
+        return fresh;
+    }
+
+    private List<Workflow> readWorkflows(Repository repository) {
         return attempt(() -> {
             List<Workflow> workflows = new ArrayList<>();
             for (JsonNode workflow : client.workflows(repository.installationId(), repository.fullName())) {
@@ -411,7 +456,6 @@ public class GithubService {
         });
     }
 
-    @Transactional(readOnly = true)
     public List<String> branches(String slug, UUID projectId, UUID repositoryId) {
         requireProject(slug, projectId);
         Repository repository = projectRepository(projectId, repositoryId);
@@ -471,6 +515,10 @@ public class GithubService {
         if (issueId != null && store.issue(issueId).filter(issue -> issue.projectId().equals(projectId)).isEmpty()) {
             throw new BadRequestException("Esa tarea no es de este proyecto");
         }
+        // Con un repositorio compartido entre proyectos, el pull request de una tarea de otro proyecto no se toca desde este
+        if (pull.issueProjectId() != null && !pull.issueProjectId().equals(projectId)) {
+            throw new ConflictException("Ese pull request está enlazado a una tarea de otro proyecto");
+        }
         store.setPullRequestIssue(pull.id(), issueId);
         if (issueId != null && pull.headBranch() != null) {
             store.linkBranch(pull.repositoryId(), issueId, pull.headBranch());
@@ -483,7 +531,7 @@ public class GithubService {
     @Transactional(readOnly = true)
     public IssueDev issue(String slug, UUID projectId, UUID issueId) {
         Issue issue = requireIssue(slug, projectId, issueId);
-        List<LinkedProject> links = store.linkedProjects(issue.getProject().getWorkspace().getId());
+        List<LinkedProject> links = ownLinks(issue.getProject().getWorkspace().getId(), projectId);
         List<RepositoryView> repositories = store.repositoriesOfProject(projectId).stream().map(repository -> view(repository, links)).toList();
         return new IssueDev(!repositories.isEmpty(), repositories, store.branchesOf(issueId), store.pullRequestsOf(issueId),
                 store.runsOf(issueId, 10), GithubText.branchName(store.settings(projectId).branchFormat(), issue.getCode(), issue.getTitle(),
@@ -575,7 +623,6 @@ public class GithubService {
             // Una instalación que ningún workspace reclamó (o que ya se desconectó): no hay a quién contarle
             return;
         }
-        store.touch(installationId);
         String action = text(payload, "action");
         switch (event == null ? "" : event) {
             case "installation" -> {
@@ -590,12 +637,11 @@ public class GithubService {
                 for (JsonNode removed : payload.path("repositories_removed")) {
                     store.deleteRepository(installationId, removed.path("id").asLong(0));
                 }
-                try {
-                    // El aviso no dice la rama principal de los que entran: se lee la lista entera
-                    refreshRepositories(installation);
-                } catch (GithubException | IllegalStateException ex) {
-                    log.info("GitHub: no se pudo releer la lista de repositorios de {}: {}", installation.accountLogin(), ex.getMessage());
-                }
+                // El aviso no dice la rama principal de los que entran: se lee la lista entera, ya fuera de esta transacción
+                background.afterCommit(() -> {
+                    List<JsonNode> repositories = client.repositories(installationId);
+                    background.write(() -> store.installation(installationId).ifPresent(current -> applyRepositories(current, repositories)));
+                });
             }
             case "pull_request" -> repository(installationId, payload).ifPresent(repository ->
                     onPullRequest(repository, payload.path("pull_request"), text(payload.path("sender"), "login")));
@@ -611,9 +657,12 @@ public class GithubService {
                 }
             }
             case "workflow_run" -> repository(installationId, payload).ifPresent(repository -> {
-                JsonNode run = payload.path("workflow_run");
-                saveRun(repository, run);
-                refreshChecks(repository, text(run, "head_sha"), "completed".equals(text(run, "status")));
+                // Las ejecuciones de un repositorio que ningún proyecto tiene enlazado no se guardan: nadie las vería
+                if (store.repositoryLinked(repository.id())) {
+                    JsonNode run = payload.path("workflow_run");
+                    saveRun(repository, run);
+                    refreshChecks(repository, text(run, "head_sha"), "completed".equals(text(run, "status")));
+                }
             });
             case "check_suite" -> repository(installationId, payload).ifPresent(repository ->
                     refreshChecks(repository, text(payload.path("check_suite"), "head_sha"), "completed".equals(action)));
@@ -621,6 +670,8 @@ public class GithubService {
                 // Un aviso que no interesa
             }
         }
+        // Al final: es lo único que toca la fila de la instalación, y así dos avisos a la vez casi no se esperan
+        store.touch(installationId);
     }
 
     private java.util.Optional<Repository> repository(long installationId, JsonNode payload) {
@@ -659,7 +710,12 @@ public class GithubService {
             store.linkBranch(repository.id(), now.issueId(), now.headBranch());
         }
         String previous = before == null ? null : before.state();
-        if (now.state().equals(previous) && (before == null || now.issueId().equals(before.issueId()))) {
+        boolean sameState = now.state().equals(previous);
+        boolean sameIssue = before != null && now.issueId().equals(before.issueId());
+        // Lo que mueve la tarea y lanza reglas es que el pull request cambie de estado. Si no cambió y solo apareció la
+        // tarea (alguien puso su código en el título), cuenta únicamente para uno abierto: uno ya fusionado o cerrado no
+        // vuelve a completar la tarea ni a ejecutar las reglas.
+        if (sameState && (sameIssue || !"OPEN".equals(now.state()))) {
             return;
         }
         IssueRef issue = store.issue(now.issueId()).orElseThrow();
@@ -745,11 +801,20 @@ public class GithubService {
             store.setChecks(repository.id(), sha, "PENDING", 0, 0);
             return;
         }
+        // Un push a la rama principal o a una rama sin pull request no tiene a quién contarle sus checks
+        if (store.pullRequestsAt(repository.id(), sha).isEmpty()) {
+            return;
+        }
+        background.afterCommit(() -> countChecks(repository, sha));
+    }
+
+    /** Le pregunta a GitHub por los checks del commit (sin transacción abierta) y guarda el resultado. */
+    private void countChecks(Repository repository, String sha) {
+        int total = 0;
+        int failed = 0;
+        int pending = 0;
+        List<String> failedNames = new ArrayList<>();
         try {
-            int total = 0;
-            int failed = 0;
-            int pending = 0;
-            List<String> failedNames = new ArrayList<>();
             for (JsonNode check : client.checkRuns(repository.installationId(), repository.fullName(), sha)) {
                 total++;
                 if (!"completed".equals(text(check, "status"))) {
@@ -759,7 +824,14 @@ public class GithubService {
                     failedNames.add(text(check, "name"));
                 }
             }
-            String state = failed > 0 ? "FAILURE" : pending > 0 ? "PENDING" : "SUCCESS";
+        } catch (GithubException | IllegalStateException ex) {
+            log.info("GitHub: no se pudieron leer los checks de {} en {}: {}", sha, repository.fullName(), ex.getMessage());
+            return;
+        }
+        String state = failed > 0 ? "FAILURE" : pending > 0 ? "PENDING" : "SUCCESS";
+        int counted = total;
+        int broken = failed;
+        background.write(() -> {
             if ("FAILURE".equals(state)) {
                 for (PullRequest pull : store.pullRequestsAt(repository.id(), sha)) {
                     if (pull.issueId() != null && !"FAILURE".equals(pull.checksState())) {
@@ -767,10 +839,8 @@ public class GithubService {
                     }
                 }
             }
-            store.setChecks(repository.id(), sha, state, total, failed);
-        } catch (GithubException | IllegalStateException ex) {
-            log.info("GitHub: no se pudieron leer los checks de {} en {}: {}", sha, repository.fullName(), ex.getMessage());
-        }
+            store.setChecks(repository.id(), sha, state, counted, broken);
+        });
     }
 
     /** La primera tarea que nombran esos textos, entre los proyectos que tienen enlazado el repositorio. */
@@ -822,30 +892,47 @@ public class GithubService {
 
     // ----- Reglas
 
-    /** Una tarea se completó: se ejecutan las reglas «al completar una tarea» de su proyecto. */
+    /**
+     * Una tarea se completó: se ejecutan las reglas «al completar una tarea» de su proyecto. Va en los hilos de la
+     * integración: quien completó la tarea no espera a GitHub ni gasta otra conexión a la base de datos.
+     */
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void onIssueCompleted(IssueCompletedEvent event) {
         if (!properties.configured()) {
             return;
         }
-        for (Rule rule : store.rules(event.projectId(), FIRES_ON_COMPLETED)) {
-            fire(rule, event.issueId());
-        }
+        background.run(() -> {
+            for (Rule rule : background.write(() -> store.rules(event.projectId(), FIRES_ON_COMPLETED))) {
+                Repository repository = background.write(() -> store.repository(rule.repositoryId()).orElse(null));
+                if (repository != null) {
+                    UUID runId = background.write(() -> store.requestRun(rule.repositoryId(), rule.workflowId(), rule.workflowName(),
+                            rule.ref(), event.issueId(), rule.id(), null));
+                    dispatchRule(rule, repository, runId);
+                }
+            }
+        });
     }
 
-    /** Pide a GitHub el workflow de una regla. Si falla, queda en el registro y lo demás sigue. */
+    /**
+     * La regla de un pull request recién fusionado, dentro de la transacción del aviso: la ejecución queda pedida ya, y
+     * a GitHub se le pide cuando la transacción se confirme (así, cuando GitHub avise de la ejecución, la fila existe).
+     */
     private void fire(Rule rule, UUID issueId) {
         Repository repository = store.repository(rule.repositoryId()).orElse(null);
         if (repository == null) {
             return;
         }
         UUID runId = store.requestRun(rule.repositoryId(), rule.workflowId(), rule.workflowName(), rule.ref(), issueId, rule.id(), null);
+        background.afterCommit(() -> dispatchRule(rule, repository, runId));
+    }
+
+    /** Pide a GitHub el workflow de una regla. Si falla, queda en el registro y la ejecución pedida se quita. */
+    private void dispatchRule(Rule rule, Repository repository, UUID runId) {
         try {
             client.dispatchWorkflow(repository.installationId(), repository.fullName(), rule.workflowId(), rule.ref(), Map.of());
         } catch (GithubException | IllegalStateException ex) {
             log.warn("GitHub: la regla {} no pudo ejecutar «{}» en {}: {}", rule.id(), rule.workflowName(), repository.fullName(), ex.getMessage());
-            store.failRequestedRun(runId);
+            background.write(() -> store.failRequestedRun(runId));
         }
     }
 

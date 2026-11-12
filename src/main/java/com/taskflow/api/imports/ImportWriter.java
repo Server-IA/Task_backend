@@ -409,7 +409,7 @@ public class ImportWriter {
             Issue issue = new Issue();
             issue.setProject(project);
             issue.setType(plannedIssue.type());
-            issue.setTitle(cut(firstText(VisibleText.strip(source.title()), session.language.t("(sin título)")), TITLE_MAX));
+            issue.setTitle(cut(firstText(VisibleText.strip(clean(source.title())), session.language.t("(sin título)")), TITLE_MAX));
             UUID stateId = target.stateOf.get(source.status());
             StateGroup group = target.groups.get(stateId);
             issue.setState(stateRepository.getReferenceById(stateId));
@@ -462,7 +462,7 @@ public class ImportWriter {
             String createdBy = knownCreator || source.creatorId() == null ? null : personName(session, source.creatorId());
 
             String description = description(session, source, lost, createdBy);
-            issue.setDescription(description);
+            issue.setDescription(clean(description));
             if (description != null) {
                 issue.setDescriptionUpdatedAt(now);
                 issue.setDescriptionUpdatedBy(importer);
@@ -474,7 +474,7 @@ public class ImportWriter {
             issue.setSortOrder(sortOrder);
             issue.setImportSource(session.source.name());
             issue.setImportKey(cut(blankToNull(source.key()), KEY_MAX));
-            issue.setImportUrl(source.url() != null && source.url().length() <= URL_MAX ? blankToNull(source.url()) : null);
+            issue.setImportUrl(webUrl(source.url()));
             issueRepository.save(issue);
 
             if (source.checklist() != null) {
@@ -632,7 +632,7 @@ public class ImportWriter {
                 Comment comment = new Comment();
                 comment.setIssue(issue);
                 comment.setAuthor(known ? userRepository.getReferenceById(author.userId()) : importer);
-                comment.setBody(cut(body, DESCRIPTION_MAX));
+                comment.setBody(cut(clean(body), DESCRIPTION_MAX));
                 commentRepository.save(comment);
                 saved.add(comment);
                 dates.add(source.createdAt());
@@ -821,6 +821,21 @@ public class ImportWriter {
 
     private static String cut(String text, int max) {
         return text == null || text.length() <= max ? text : text.substring(0, max).strip();
+    }
+
+    /** El texto sin caracteres nulos (PostgreSQL no los admite en un texto). */
+    static String clean(String text) {
+        return text == null || text.indexOf('\u0000') < 0 ? text : text.replace("\u0000", "");
+    }
+
+    /** Una dirección web ({@code http} o {@code https}) que cabe en la columna; cualquier otra cosa, nada. */
+    static String webUrl(String url) {
+        if (url == null || url.isBlank() || url.length() > URL_MAX) {
+            return null;
+        }
+        String trimmed = url.strip();
+        String lower = trimmed.toLowerCase(java.util.Locale.ROOT);
+        return lower.startsWith("https://") || lower.startsWith("http://") ? trimmed : null;
     }
 
     private static String blankToNull(String text) {

@@ -179,7 +179,7 @@ class ImportIntegrationTest {
         assertThat(mapped.preview().labels()).isEqualTo(2);
         assertThat(mapped.preview().sample()).extracting(ImportJobResponse.Sample::code).contains("PORT-2", "PORT-3", "PORT-7");
 
-        importService.start(slug, ready.id());
+        importService.start(slug, ready.id(), pm.getId());
         ImportJobResponse done = await(ready.id(), ImportStatus.COMPLETED);
 
         assertThat(done.report().stories()).isEqualTo(1);
@@ -277,7 +277,7 @@ class ImportIntegrationTest {
         assertThat(ready.preview().totals().tasks()).isEqualTo(3);
         assertThat(ready.preview().newStates()).isEmpty();
 
-        importService.start(slug, ready.id());
+        importService.start(slug, ready.id(), pm.getId());
         ImportJobResponse done = await(ready.id(), ImportStatus.COMPLETED);
 
         assertThat(done.report().projects()).singleElement().satisfies(project -> assertThat(project.created()).isFalse());
@@ -319,7 +319,7 @@ class ImportIntegrationTest {
         assertThat(mapped.preview().totals().bugs()).isZero();
         assertThat(mapped.preview().totals().modules()).isZero();
 
-        importService.start(slug, ready.id());
+        importService.start(slug, ready.id(), pm.getId());
         ImportJobResponse done = await(ready.id(), ImportStatus.COMPLETED);
         String projectId = done.report().projects().get(0).id().toString();
 

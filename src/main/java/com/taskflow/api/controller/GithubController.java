@@ -3,6 +3,7 @@ package com.taskflow.api.controller;
 import com.taskflow.api.github.GithubService;
 import com.taskflow.api.github.GithubService.WorkspaceStatus;
 import com.taskflow.api.security.UserPrincipal;
+import com.taskflow.api.security.WorkspaceSecurity;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class GithubController {
 
     private final GithubService githubService;
+    private final WorkspaceSecurity workspaceSecurity;
 
     /** A dónde va el navegador para instalar la app. */
     public record InstallLink(String url) {
@@ -33,7 +35,8 @@ public class GithubController {
     @GetMapping
     @PreAuthorize("@workspaceSecurity.isMember(#slug)")
     public WorkspaceStatus status(@PathVariable String slug) {
-        return githubService.workspace(slug);
+        // Los repositorios que comparte la instalación, solo para quien configura GitHub
+        return githubService.workspace(slug, workspaceSecurity.can(slug, "GITHUB_MANAGE"));
     }
 
     @Operation(summary = "Enlace para instalar la app en GitHub", description = "Vale una hora y solo para este workspace.")

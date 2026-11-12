@@ -94,8 +94,8 @@ public class ImportController {
     @Operation(summary = "Empezar a importar", description = "Corre en segundo plano; al terminar avisa en la Bandeja.")
     @PostMapping("/{jobId}/start")
     @PreAuthorize("@workspaceSecurity.can(#slug, 'DATA_IMPORT')")
-    public ImportJobResponse start(@PathVariable String slug, @PathVariable UUID jobId) {
-        return importService.start(slug, jobId);
+    public ImportJobResponse start(@PathVariable String slug, @PathVariable UUID jobId, @AuthenticationPrincipal UserPrincipal me) {
+        return importService.start(slug, jobId, me.getId());
     }
 
     @Operation(summary = "Detener una importación", description = "Para al terminar la tanda en curso; lo que ya entró se queda.")

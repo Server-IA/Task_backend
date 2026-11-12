@@ -11,6 +11,7 @@ import com.taskflow.api.github.GithubStore.PullRequest;
 import com.taskflow.api.github.GithubStore.Run;
 import com.taskflow.api.github.GithubStore.Settings;
 import com.taskflow.api.security.UserPrincipal;
+import com.taskflow.api.security.WorkspaceSecurity;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -44,6 +45,7 @@ import java.util.UUID;
 public class ProjectGithubController {
 
     private final GithubService githubService;
+    private final WorkspaceSecurity workspaceSecurity;
 
     public record RepositoriesRequest(List<UUID> repositoryIds) {
     }
@@ -71,7 +73,8 @@ public class ProjectGithubController {
     @GetMapping
     @PreAuthorize("@workspaceSecurity.canAccessProject(#slug, #projectId)")
     public ProjectStatus status(@PathVariable String slug, @PathVariable UUID projectId) {
-        return githubService.project(slug, projectId);
+        // Los demás repositorios del workspace y los proyectos que los comparten, solo para quien configura GitHub
+        return githubService.project(slug, projectId, workspaceSecurity.can(slug, "GITHUB_MANAGE"));
     }
 
     @Operation(summary = "Elegir los repositorios del proyecto")

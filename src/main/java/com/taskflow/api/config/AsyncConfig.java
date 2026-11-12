@@ -21,6 +21,7 @@ public class AsyncConfig {
 
     public static final String MAIL_EXECUTOR = "mailExecutor";
     public static final String IMPORT_EXECUTOR = "importExecutor";
+    public static final String GITHUB_EXECUTOR = "githubExecutor";
 
     @Bean(name = MAIL_EXECUTOR)
     public Executor mailExecutor() {
@@ -48,6 +49,29 @@ public class AsyncConfig {
         executor.setMaxPoolSize(2);
         executor.setQueueCapacity(50);
         executor.setThreadNamePrefix("import-");
+        executor.initialize();
+        return executor;
+    }
+
+    /**
+     * Lo que la integración con GitHub hace después de atender un aviso o de completarse una tarea (contar los checks
+     * de un commit, ejecutar el workflow de una regla): llama a GitHub, así que va fuera de la petición y de su
+     * transacción. Con {@code app.github.inline=true} se ejecuta en el mismo hilo (para las pruebas).
+     */
+    @Bean(name = GITHUB_EXECUTOR)
+    public Executor githubExecutor(@org.springframework.beans.factory.annotation.Value("${app.github.inline:false}") boolean inline) {
+        if (inline) {
+            return new org.springframework.core.task.SyncTaskExecutor();
+        }
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(500);
+        executor.setThreadNamePrefix("github-");
+        // Con la cola llena (GitHub caído o una ráfaga enorme de avisos) la tarea se descarta: lo siguiente que pase en
+        // ese pull request la vuelve a pedir
+        executor.setRejectedExecutionHandler((task, pool) ->
+                log.warn("Cola de GitHub llena ({} en espera): se descarta una tarea", pool.getQueue().size()));
         executor.initialize();
         return executor;
     }

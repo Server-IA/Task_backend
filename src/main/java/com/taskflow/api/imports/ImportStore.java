@@ -132,10 +132,15 @@ public class ImportStore {
 
     // ----- Deshacer
 
+    /** Cuántos identificadores van en cada borrado (PostgreSQL admite hasta 65 535 parámetros por consulta). */
+    private static final int DELETE_BATCH = 10_000;
+
     /** Borra por identificador en una de las tablas del importador (el nombre de la tabla lo pone el código, nunca la persona). */
     public void deleteByIds(String table, Collection<UUID> ids) {
-        if (!ids.isEmpty()) {
-            entityManager.createNativeQuery("DELETE FROM " + table + " WHERE id IN (:ids)").setParameter("ids", ids).executeUpdate();
+        java.util.List<UUID> all = new java.util.ArrayList<>(ids);
+        for (int from = 0; from < all.size(); from += DELETE_BATCH) {
+            entityManager.createNativeQuery("DELETE FROM " + table + " WHERE id IN (:ids)")
+                    .setParameter("ids", all.subList(from, Math.min(all.size(), from + DELETE_BATCH))).executeUpdate();
         }
     }
 
