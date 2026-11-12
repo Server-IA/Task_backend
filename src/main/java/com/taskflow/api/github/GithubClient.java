@@ -197,6 +197,35 @@ public class GithubClient {
         return false;
     }
 
+    /**
+     * Si la persona administra esa organización de GitHub (es dueña y su membresía está activa). Solo quien la administra
+     * puede instalar la app en ella. Si GitHub no lo dice (no es miembro, o la app no tiene permiso para leer miembros),
+     * no la administra.
+     */
+    public boolean adminsOrganization(String userToken, String organization) {
+        try {
+            JsonNode membership = send("GET", "/user/memberships/orgs/" + path(organization), userToken, null);
+            return "active".equals(text(membership, "state")) && "admin".equals(text(membership, "role"));
+        } catch (GithubException ex) {
+            if (ex.status() == 403 || ex.status() == 404) {
+                return false;
+            }
+            throw ex;
+        }
+    }
+
+    /** Si la persona puede escribir en el repositorio (hacer push). */
+    public boolean canPush(String userToken, String repository) {
+        try {
+            return send("GET", "/repos/" + repository, userToken, null).path("permissions").path("push").asBoolean(false);
+        } catch (GithubException ex) {
+            if (ex.status() == 403 || ex.status() == 404) {
+                return false;
+            }
+            throw ex;
+        }
+    }
+
     public void createBranchAs(String userToken, String repository, String name, String sha) {
         send("POST", "/repos/" + repository + "/git/refs", userToken, Map.of("ref", "refs/heads/" + name, "sha", sha));
     }
@@ -214,11 +243,14 @@ public class GithubClient {
         send("POST", "/repos/" + repository + "/actions/runs/" + runId + "/cancel", userToken, null);
     }
 
-    /** Anula el token de una persona (al desenlazar su cuenta). */
+    /**
+     * Quita la autorización que la persona le dio a la app (al desenlazar su cuenta): GitHub anula todos sus tokens, el
+     * de acceso y el de refresco.
+     */
     public void revoke(String userToken) {
         String basic = java.util.Base64.getEncoder()
                 .encodeToString((properties.clientId() + ":" + properties.clientSecret()).getBytes(StandardCharsets.UTF_8));
-        call("DELETE", properties.apiUrl() + "/applications/" + properties.clientId() + "/token", "Basic " + basic, Map.of("access_token", userToken));
+        call("DELETE", properties.apiUrl() + "/applications/" + properties.clientId() + "/grant", "Basic " + basic, Map.of("access_token", userToken));
     }
 
     // ----- Peticiones

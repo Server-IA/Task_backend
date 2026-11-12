@@ -23,6 +23,11 @@ public enum RateLimitRule {
      * {@link #FORGOT_PASSWORD} porque la página lo pide cada vez que se abre el enlace.
      */
     VALIDATE_RESET_TOKEN("GET", "/api/v1/auth/reset-password/validate", 10, Duration.ofMinutes(15)),
+    /**
+     * Avisos de GitHub: llegan sin sesión desde unas pocas IPs de GitHub. El techo es holgado para una organización con
+     * mucho movimiento y frena a quien los manda en masa para gastar memoria leyendo cuerpos con la firma falsa.
+     */
+    GITHUB_WEBHOOK("/api/v1/github/webhook", 600, Duration.ofMinutes(1)),
 
     /**
      * Intentos fallidos de entrar a una cuenta desde una misma IP (o prefijo IPv6 /64). Quien prueba contraseñas desde

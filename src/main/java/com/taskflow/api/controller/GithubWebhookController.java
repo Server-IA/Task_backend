@@ -37,8 +37,11 @@ import java.net.URI;
 public class GithubWebhookController {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
-    /** El tope de GitHub para un aviso. */
-    private static final long MAX_BODY = 25L * 1024 * 1024;
+    /**
+     * El tope para un aviso. GitHub admite hasta 25 MB, pero los eventos que pide la app (pull requests, ramas, ejecuciones,
+     * instalación) pesan mucho menos; con un tope bajo nadie gasta memoria del servidor mandando cuerpos enormes.
+     */
+    static final long MAX_BODY = 5L * 1024 * 1024;
 
     private final GithubService githubService;
     private final GithubProperties properties;
@@ -53,8 +56,12 @@ public class GithubWebhookController {
         if (!properties.configured()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
-        // GitHub nunca manda más de 25 MB. Si lo anuncia más grande se rechaza sin leerlo; si no lo anuncia (un proxy o
-        // un túnel pueden reenviarlo por partes), se lee hasta pasarse del tope y nada más
+        // Lo que no trae firma ni número de aviso no es de GitHub: se rechaza sin leer el cuerpo
+        if (signature == null || !signature.startsWith("sha256=") || delivery == null || delivery.isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        // Si anuncia más del tope se rechaza sin leerlo; si no lo anuncia (un proxy o un túnel pueden reenviarlo por
+        // partes), se lee hasta pasarse del tope y nada más
         long length = request.getContentLengthLong();
         if (length > MAX_BODY) {
             return ResponseEntity.status(HttpStatus.CONTENT_TOO_LARGE).build();
@@ -76,7 +83,9 @@ public class GithubWebhookController {
         if (!properties.configured()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
-        if (body == null || !GithubKeys.validSignature(properties.webhookSecret(), body, signature)) {
+        // Cada aviso de GitHub trae su número: sin él no se podría reconocer uno repetido
+        if (delivery == null || delivery.isBlank()
+                || body == null || !GithubKeys.validSignature(properties.webhookSecret(), body, signature)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
         JsonNode payload;

@@ -276,6 +276,7 @@ class ControllerPermissionsTest {
         rule(ProjectGithubController.class, "linkPullRequest", inProject(Permission.ISSUE_EDIT));
         rule(ProjectGithubController.class, "createBranch", inProject(Permission.ISSUE_EDIT));
         rule(ProjectGithubController.class, "linkBranch", inProject(Permission.ISSUE_EDIT));
+        rule(ProjectGithubController.class, "unlinkBranch", inProject(Permission.ISSUE_EDIT));
     }
 
     /** Un endpoint: su controlador y su método. */

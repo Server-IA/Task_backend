@@ -89,8 +89,10 @@ public class GithubStore {
      * @param lastRunAt     cuándo se ejecutó por última vez ({@code null} si nunca)
      * @param lastRunStatus cómo va esa ejecución ({@code requested}, {@code queued}, {@code in_progress}, {@code completed})
      */
+    /** @param createdById quien creó la regla: el workflow se ejecuta con su cuenta de GitHub */
     public record Rule(UUID id, UUID projectId, String firesOn, UUID repositoryId, String repository, long workflowId,
-                       String workflowName, String ref, Instant lastRunAt, String lastRunStatus, String lastRunConclusion) {
+                       String workflowName, String ref, Instant lastRunAt, String lastRunStatus, String lastRunConclusion,
+                       UUID createdById) {
     }
 
     /** Una tarea encontrada por su código, con lo que hace falta para decidir si se mueve. */
@@ -114,9 +116,12 @@ public class GithubStore {
         return jdbc.query(INSTALLATION + " WHERE g.installation_id = ?", INSTALLATION_ROW, installationId).stream().findFirst();
     }
 
-    /** Guarda dónde quedó instalada la app para el workspace (si ya tenía otra instalación, la reemplaza). */
+    /**
+     * Guarda dónde quedó instalada la app para el workspace (si ya tenía otra instalación, la reemplaza). Una instalación
+     * que ya es de otro workspace no se le quita: el índice único lo impide.
+     */
     public void saveInstallation(UUID workspaceId, long installationId, String accountLogin, String accountType, UUID installedById) {
-        jdbc.update("DELETE FROM github_installations WHERE workspace_id = ? OR installation_id = ?", workspaceId, installationId);
+        jdbc.update("DELETE FROM github_installations WHERE workspace_id = ?", workspaceId);
         jdbc.update("""
                 INSERT INTO github_installations (id, workspace_id, installation_id, account_login, account_type, installed_by_id)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -274,6 +279,13 @@ public class GithubStore {
                 INSERT INTO github_branches (id, repository_id, issue_id, name) VALUES (?, ?, ?, ?)
                 ON CONFLICT (repository_id, name, issue_id) DO NOTHING
                 """, UUID.randomUUID(), repositoryId, issueId, name) == 1;
+    }
+
+    /** Quita una rama de una tarea (la rama sigue en GitHub). @return si estaba enlazada a ella */
+    public Optional<Branch> unlinkBranch(UUID issueId, UUID branchId) {
+        Optional<Branch> branch = jdbc.query(BRANCH + " WHERE b.id = ? AND b.issue_id = ?", BRANCH_ROW, branchId, issueId).stream().findFirst();
+        branch.ifPresent(found -> jdbc.update("DELETE FROM github_branches WHERE id = ?", found.id()));
+        return branch;
     }
 
     public void deleteBranch(UUID repositoryId, String name) {
@@ -501,14 +513,15 @@ public class GithubStore {
 
     private static final String RULE = """
             SELECT g.id, g.project_id, g.fires_on, g.repository_id, r.full_name, g.workflow_id, g.workflow_name, g.ref,
-                   coalesce(last.started_at, last.requested_at, last.changed_at), last.status, last.conclusion
+                   coalesce(last.started_at, last.requested_at, last.changed_at), last.status, last.conclusion, g.created_by_id
             FROM github_rules g JOIN github_repositories r ON r.id = g.repository_id
                  LEFT JOIN LATERAL (
                      SELECT w.started_at, w.requested_at, w.changed_at, w.status, w.conclusion FROM github_workflow_runs w
                      WHERE w.rule_id = g.id AND NOT (w.run_id IS NULL AND w.requested_at < now() - interval '1 hour') ORDER BY coalesce(w.started_at, w.requested_at, w.changed_at) DESC LIMIT 1) last ON TRUE
             """;
     private static final RowMapper<Rule> RULE_ROW = (row, index) -> new Rule(uuid(row, 1), uuid(row, 2), row.getString(3), uuid(row, 4),
-            row.getString(5), row.getLong(6), row.getString(7), row.getString(8), instant(row, 9), row.getString(10), row.getString(11));
+            row.getString(5), row.getLong(6), row.getString(7), row.getString(8), instant(row, 9), row.getString(10), row.getString(11),
+            uuid(row, 12));
 
     public List<Rule> rules(UUID projectId) {
         return jdbc.query(RULE + " WHERE g.project_id = ? ORDER BY g.created_at", RULE_ROW, projectId);
@@ -637,8 +650,12 @@ public class GithubStore {
     }
 
     /** La persona del workspace de ese repositorio que tiene enlazado ese usuario de GitHub. */
-    public Optional<UUID> memberByLogin(UUID repositoryId, String login) {
-        if (login == null || login.isBlank()) {
+    /**
+     * La persona del workspace del repositorio que tiene enlazada esa cuenta de GitHub. Se busca por su número, que no
+     * cambia: el usuario (login) se puede cambiar y otra persona puede quedarse con el anterior.
+     */
+    public Optional<UUID> memberByGithubId(UUID repositoryId, long githubId) {
+        if (githubId <= 0) {
             return Optional.empty();
         }
         return jdbc.query("""
@@ -646,8 +663,13 @@ public class GithubStore {
                 FROM github_accounts ga JOIN workspace_members wm ON wm.user_id = ga.user_id
                      JOIN github_installations gi ON gi.workspace_id = wm.workspace_id
                      JOIN github_repositories r ON r.installation_id = gi.id
-                WHERE r.id = ? AND lower(ga.login) = lower(?)
-                """, (row, index) -> uuid(row, 1), repositoryId, login).stream().findFirst();
+                WHERE r.id = ? AND ga.github_id = ?
+                """, (row, index) -> uuid(row, 1), repositoryId, githubId).stream().findFirst();
+    }
+
+    public boolean isWorkspaceMember(UUID workspaceId, UUID userId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject(
+                "SELECT EXISTS (SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?)", Boolean.class, workspaceId, userId));
     }
 
     // ----- Utilidades

@@ -35,8 +35,8 @@ import java.util.UUID;
 
 /**
  * GitHub dentro de un proyecto. Ver (repositorios, pull requests, ejecuciones y lo de cada tarea) es de quien puede ver
- * el proyecto; configurarlo y ejecutar workflows van por permiso; crear la rama de una tarea o enlazarle un pull request
- * es editar la tarea.
+ * el proyecto; configurarlo y ejecutar workflows van por permiso; crear la rama de una tarea, enlazarle o quitarle una
+ * rama o un pull request es editar la tarea (y, como todo lo de GitHub, pide la cuenta de GitHub de la persona).
  */
 @Tag(name = "GitHub del proyecto", description = "Repositorios, pull requests, GitHub Actions y el desarrollo de cada tarea")
 @RestController
@@ -120,9 +120,9 @@ public class ProjectGithubController {
     @Operation(summary = "Enlazar un pull request con una tarea", description = "Sin tarea, lo deja suelto.")
     @PutMapping("/pulls/{pullRequestId}/issue")
     @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'ISSUE_EDIT')")
-    public PullRequest linkPullRequest(@PathVariable String slug, @PathVariable UUID projectId, @PathVariable UUID pullRequestId,
-                                       @RequestBody LinkRequest request) {
-        return githubService.linkPullRequest(slug, projectId, pullRequestId, request.issueId());
+    public PullRequest linkPullRequest(@PathVariable String slug, @PathVariable UUID projectId, @AuthenticationPrincipal UserPrincipal me,
+                                       @PathVariable UUID pullRequestId, @RequestBody LinkRequest request) {
+        return githubService.linkPullRequest(slug, projectId, me.getId(), pullRequestId, request.issueId());
     }
 
     @Operation(summary = "Ejecuciones de GitHub Actions del proyecto")
@@ -212,6 +212,14 @@ public class ProjectGithubController {
     public IssueDev linkBranch(@PathVariable String slug, @PathVariable UUID projectId, @AuthenticationPrincipal UserPrincipal me,
                                @PathVariable UUID issueId, @RequestBody LinkBranchRequest request) {
         return githubService.linkBranch(slug, projectId, me.getId(), issueId, request.repositoryId(), request.name());
+    }
+
+    @Operation(summary = "Quitar una rama de la tarea", description = "La rama sigue en GitHub.")
+    @DeleteMapping("/issues/{issueId}/branches/{branchId}")
+    @PreAuthorize("@workspaceSecurity.canInProject(#slug, #projectId, 'ISSUE_EDIT')")
+    public IssueDev unlinkBranch(@PathVariable String slug, @PathVariable UUID projectId, @AuthenticationPrincipal UserPrincipal me,
+                                 @PathVariable UUID issueId, @PathVariable UUID branchId) {
+        return githubService.unlinkBranch(slug, projectId, me.getId(), issueId, branchId);
     }
 
     @Operation(summary = "Ramas enlazadas a tareas del proyecto")

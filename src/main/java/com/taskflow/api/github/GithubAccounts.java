@@ -138,13 +138,16 @@ public class GithubAccounts {
         return status(userId);
     }
 
-    /** Desenlaza la cuenta: TaskFlow olvida sus tokens y le pide a GitHub que los anule. */
+    /**
+     * Desenlaza la cuenta: TaskFlow olvida sus tokens y le pide a GitHub que quite la autorización (anula el token de
+     * acceso y el de refresco). GitHub la quita solo con un token de acceso vigente, así que antes se renueva si hace falta.
+     */
     @Transactional
     public void unlink(UUID userId) {
         store.account(userId).ifPresent(account -> {
             try {
-                client.revoke(open(account.accessToken()));
-            } catch (GithubException | IllegalStateException ex) {
+                client.revoke(token(userId));
+            } catch (GithubException | ConflictException | IllegalStateException ex) {
                 // Si GitHub no responde, igual queda desenlazada aquí
                 log.info("GitHub: no se pudo anular el token de {}: {}", account.login(), ex.getMessage());
             }
@@ -161,7 +164,13 @@ public class GithubAccounts {
         Account account = store.account(userId).orElseThrow(() -> new ConflictException(NOT_LINKED));
         Instant now = Instant.now();
         if (account.accessExpiresAt() == null || account.accessExpiresAt().isAfter(now.plusSeconds(RENEW_SECONDS))) {
-            return open(account.accessToken());
+            String token = openOrNull(account.accessToken());
+            if (token == null) {
+                // Se guardó con otra clave (cambió el secreto de la app): ya no sirve, se olvida y se pide reconectar
+                ownTransaction.executeWithoutResult(status -> store.deleteAccount(userId));
+                throw new ConflictException(EXPIRED);
+            }
+            return token;
         }
         // Renovar gasta el token de refresco: lo nuevo se guarda en una transacción propia, así no se pierde si lo que la
         // persona estaba haciendo falla después (se quedaría con un refresco ya gastado y habría que reconectar). La fila
@@ -173,15 +182,20 @@ public class GithubAccounts {
             }
             if (locked.accessExpiresAt() == null || locked.accessExpiresAt().isAfter(Instant.now().plusSeconds(RENEW_SECONDS))) {
                 // Otra petición lo renovó mientras esta esperaba
-                return open(locked.accessToken());
+                String current = openOrNull(locked.accessToken());
+                if (current == null) {
+                    store.deleteAccount(userId);
+                }
+                return current;
             }
-            if (locked.refreshToken() == null || (locked.refreshExpiresAt() != null && locked.refreshExpiresAt().isBefore(Instant.now()))) {
+            String refresh = locked.refreshToken() == null ? null : openOrNull(locked.refreshToken());
+            if (refresh == null || (locked.refreshExpiresAt() != null && locked.refreshExpiresAt().isBefore(Instant.now()))) {
                 store.deleteAccount(userId);
                 return null;
             }
             UserToken fresh;
             try {
-                fresh = client.refresh(open(locked.refreshToken()));
+                fresh = client.refresh(refresh);
             } catch (GithubException ex) {
                 if (ex.status() == 0 || ex.status() >= 500) {
                     return UNAVAILABLE;
@@ -203,21 +217,53 @@ public class GithubAccounts {
     }
 
     /**
-     * Si la cuenta de GitHub de la persona puede ver esa instalación de la app (es de su organización o de su cuenta).
-     * Con esto se comprueba que quien conecta un workspace es de verdad quien instaló la app.
+     * Si la persona administra la cuenta de GitHub donde está esa instalación de la app: es esa misma cuenta personal, o
+     * es dueña de esa organización (solo ellas pueden instalar la app). Con esto se comprueba que quien conecta un
+     * workspace es de verdad quien instaló la app; no basta con ver la instalación, porque GitHub se la muestra a
+     * cualquiera que pueda leer uno de sus repositorios.
      *
-     * @return {@code false} si no tiene cuenta enlazada o GitHub no se la muestra
+     * @param installation la instalación como la describe GitHub ({@code account.id}, {@code account.login}, {@code account.type})
+     * @return {@code false} si no tiene cuenta enlazada o GitHub no confirma que la administra
      */
     @Transactional
-    public boolean canAccessInstallation(UUID userId, long installationId) {
-        if (store.account(userId).isEmpty()) {
+    public boolean administersInstallation(UUID userId, long installationId, JsonNode installation) {
+        Account account = store.account(userId).orElse(null);
+        if (account == null) {
             return false;
         }
+        JsonNode owner = installation.path("account");
         try {
-            return client.userCanAccess(token(userId), installationId);
+            if ("User".equalsIgnoreCase(text(owner, "type"))) {
+                return owner.path("id").asLong(-1) == account.githubId();
+            }
+            String token = token(userId);
+            return client.adminsOrganization(token, text(owner, "login")) && client.userCanAccess(token, installationId);
         } catch (GithubException | ConflictException | IllegalStateException ex) {
             log.info("GitHub: no se pudo comprobar la instalación {} con la cuenta de {}: {}", installationId, userId, ex.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Si la persona puede escribir en el repositorio con su cuenta de GitHub. Sin cuenta enlazada (o caducada) avisa
+     * que la conecte.
+     */
+    @Transactional
+    public boolean canPush(UUID userId, String repository) {
+        String token = token(userId);
+        try {
+            return client.canPush(token, repository);
+        } catch (GithubException ex) {
+            throw new ConflictException("GitHub no respondió. Inténtalo de nuevo en un momento.");
+        }
+    }
+
+    /** El texto guardado, descifrado; {@code null} si no se puede (se cifró con otra clave). */
+    private String openOrNull(String sealed) {
+        try {
+            return open(sealed);
+        } catch (IllegalStateException ex) {
+            return null;
         }
     }
 

@@ -10,6 +10,7 @@ import com.taskflow.api.entity.enums.IssueType;
 import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ConflictException;
+import com.taskflow.api.exception.ForbiddenException;
 import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.github.GithubStore.Branch;
 import com.taskflow.api.github.GithubStore.Installation;
@@ -76,6 +77,7 @@ public class GithubService {
     private static final int LIST_LIMIT = 100;
     /** Cuánto se recuerdan los workflows ejecutables de un repositorio (segundos). */
     private static final long WORKFLOWS_SECONDS = 180;
+    private static final long BRANCHES_SECONDS = 60;
     private static final Set<StateGroup> NOT_STARTED = EnumSet.of(StateGroup.BACKLOG, StateGroup.UNSTARTED);
     private static final Set<StateGroup> OPEN = EnumSet.of(StateGroup.BACKLOG, StateGroup.UNSTARTED, StateGroup.STARTED);
     private static final Set<StateGroup> IN_PROGRESS = EnumSet.of(StateGroup.STARTED);
@@ -96,6 +98,10 @@ public class GithubService {
     private final GithubBackground background;
     /** Los workflows ejecutables de cada repositorio, unos minutos: leerlos cuesta una petición a GitHub por workflow. */
     private final Map<UUID, CachedWorkflows> workflowCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<UUID, CachedBranches> branchCache = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private record CachedBranches(List<String> names, Instant at) {
+    }
 
     private record CachedWorkflows(List<Workflow> workflows, Instant at) {
     }
@@ -201,7 +207,8 @@ public class GithubService {
      * y devuelve a dónde va el navegador.
      * <p>
      * El número de instalación llega en la dirección, así que no se confía en él: no puede estar ya en otro workspace
-     * y GitHub tiene que confirmar que la cuenta de quien pidió conectar ve esa instalación (es de su organización).
+     * y GitHub tiene que confirmar que quien pidió conectar administra la cuenta donde está la instalación (es esa
+     * cuenta personal, o es dueña de la organización).
      */
     @Transactional
     public String completeSetup(long installationId, String state) {
@@ -231,15 +238,16 @@ public class GithubService {
         if (!accounts.linked(installer)) {
             return back + "unlinked";
         }
-        // El número de instalación llega en la dirección: solo vale si GitHub dice que la cuenta de quien la pidió la ve
-        if (!accounts.canAccessInstallation(installer, installationId)) {
-            return back + "foreign";
-        }
         JsonNode installation;
         try {
             installation = client.installation(installationId);
         } catch (GithubException ex) {
-            return back + "failed";
+            // Tampoco existe (o no es de esta app) un número inventado
+            return back + (ex.status() == 404 ? "foreign" : "failed");
+        }
+        // El número de instalación llega en la dirección: solo vale si GitHub dice que quien la pidió administra esa cuenta
+        if (!accounts.administersInstallation(installer, installationId, installation)) {
+            return back + "foreign";
         }
         if (bound == null) {
             store.saveInstallation(workspace.getId(), installationId, text(installation.path("account"), "login"),
@@ -275,6 +283,21 @@ public class GithubService {
                     repository.path("private").asBoolean(true));
         }
         store.keepOnlyRepositories(installation.id(), seen);
+    }
+
+    /**
+     * Antes de borrar un workspace: quita la app de su cuenta de GitHub, para que no quede instalada sin workspace (si
+     * GitHub no responde, el workspace igual se borra y la instalación cae con él).
+     */
+    @Transactional
+    public void forgetWorkspace(UUID workspaceId) {
+        store.installationOf(workspaceId).ifPresent(installation -> {
+            try {
+                client.uninstall(installation.installationId());
+            } catch (GithubException | IllegalStateException ex) {
+                log.warn("GitHub: no se pudo quitar la instalación {} del workspace borrado: {}", installation.installationId(), ex.getMessage());
+            }
+        });
     }
 
     /** Desconecta el workspace: quita la app de la organización en GitHub y borra lo que TaskFlow guardaba de ella. */
@@ -383,7 +406,11 @@ public class GithubService {
         if (!GithubText.validBranch(ref)) {
             throw new BadRequestException("Esa rama no es válida");
         }
-        projectRepository(projectId, repositoryId);
+        Repository repository = projectRepository(projectId, repositoryId);
+        // La regla ejecuta el workflow con la cuenta de quien la crea: tiene que poder hacerlo en GitHub
+        if (!accounts.canPush(userId, repository.fullName())) {
+            throw new ForbiddenException("Tu cuenta de GitHub no puede escribir en ese repositorio, y la regla ejecutaría el workflow a tu nombre");
+        }
         store.addRule(projectId, firesOn, repositoryId, workflowId, blankToNull(workflowName) == null ? "Workflow" : workflowName.strip(), ref.strip(), userId);
         return project(slug, projectId);
     }
@@ -456,10 +483,21 @@ public class GithubService {
         });
     }
 
+    /**
+     * Las ramas del repositorio. Un repositorio con cientos de ramas son varias páginas de GitHub: se guardan un minuto
+     * para que abrir y cerrar los diálogos no las vuelva a pedir.
+     */
     public List<String> branches(String slug, UUID projectId, UUID repositoryId) {
         requireProject(slug, projectId);
         Repository repository = projectRepository(projectId, repositoryId);
-        return attempt(() -> client.branches(repository.installationId(), repository.fullName()).stream().map(branch -> text(branch, "name")).toList());
+        CachedBranches cached = branchCache.get(repositoryId);
+        if (cached != null && cached.at().isAfter(Instant.now().minusSeconds(BRANCHES_SECONDS))) {
+            return cached.names();
+        }
+        List<String> fresh = attempt(() -> client.branches(repository.installationId(), repository.fullName()).stream()
+                .map(branch -> text(branch, "name")).toList());
+        branchCache.put(repositoryId, new CachedBranches(fresh, Instant.now()));
+        return fresh;
     }
 
     /** Ejecuta un workflow a mano. Queda como «pedida» hasta que GitHub avisa de la ejecución. */
@@ -506,10 +544,14 @@ public class GithubService {
         return run;
     }
 
-    /** Enlaza a mano un pull request con una tarea del proyecto ({@code null} lo deja sin tarea). */
+    /**
+     * Enlaza a mano un pull request con una tarea del proyecto ({@code null} lo deja sin tarea). Como todo lo que se hace
+     * con GitHub desde TaskFlow, pide la cuenta de GitHub de la persona enlazada.
+     */
     @Transactional
-    public PullRequest linkPullRequest(String slug, UUID projectId, UUID pullRequestId, UUID issueId) {
+    public PullRequest linkPullRequest(String slug, UUID projectId, UUID userId, UUID pullRequestId, UUID issueId) {
         requireProject(slug, projectId);
+        requireLinked(userId);
         PullRequest pull = store.pullRequest(pullRequestId).filter(found -> store.projectHasRepository(projectId, found.repositoryId()))
                 .orElseThrow(() -> new ResourceNotFoundException("Pull request no encontrado"));
         if (issueId != null && store.issue(issueId).filter(issue -> issue.projectId().equals(projectId)).isEmpty()) {
@@ -520,8 +562,14 @@ public class GithubService {
             throw new ConflictException("Ese pull request está enlazado a una tarea de otro proyecto");
         }
         store.setPullRequestIssue(pull.id(), issueId);
-        if (issueId != null && pull.headBranch() != null) {
+        if (issueId != null && pull.headBranch() != null && !issueId.equals(pull.issueId())) {
             store.linkBranch(pull.repositoryId(), issueId, pull.headBranch());
+        }
+        // Al quitarlo (o pasarlo a otra tarea), su rama deja la tarea anterior
+        if (pull.issueId() != null && !pull.issueId().equals(issueId) && pull.headBranch() != null) {
+            store.branchesOf(pull.issueId()).stream()
+                    .filter(branch -> branch.repositoryId().equals(pull.repositoryId()) && branch.name().equals(pull.headBranch()))
+                    .forEach(branch -> store.unlinkBranch(pull.issueId(), branch.id()));
         }
         return store.pullRequest(pullRequestId).orElseThrow();
     }
@@ -558,6 +606,7 @@ public class GithubService {
     @Transactional
     public IssueDev linkBranch(String slug, UUID projectId, UUID userId, UUID issueId, UUID repositoryId, String name) {
         Issue issue = requireIssue(slug, projectId, issueId);
+        requireLinked(userId);
         Repository repository = projectRepository(projectId, repositoryId);
         String branch = name == null ? "" : name.strip();
         if (!GithubText.validBranch(branch)) {
@@ -568,6 +617,15 @@ public class GithubService {
             throw new BadRequestException("Esa rama no existe en el repositorio");
         }
         branchLinked(repository, issue.getId(), branch, false, userId);
+        return issue(slug, projectId, issueId);
+    }
+
+    /** Quita una rama de la tarea. La rama sigue en GitHub: TaskFlow no borra ramas. */
+    @Transactional
+    public IssueDev unlinkBranch(String slug, UUID projectId, UUID userId, UUID issueId, UUID branchId) {
+        requireIssue(slug, projectId, issueId);
+        requireLinked(userId);
+        store.unlinkBranch(issueId, branchId).orElseThrow(() -> new ResourceNotFoundException("Rama no encontrada"));
         return issue(slug, projectId, issueId);
     }
 
@@ -600,6 +658,7 @@ public class GithubService {
             }
             throw failureAs(repository, ex);
         }
+        branchCache.remove(repositoryId);
         branchLinked(repository, issue.getId(), branch, move, userId);
         return issue(slug, projectId, issueId);
     }
@@ -644,16 +703,20 @@ public class GithubService {
                 });
             }
             case "pull_request" -> repository(installationId, payload).ifPresent(repository ->
-                    onPullRequest(repository, payload.path("pull_request"), text(payload.path("sender"), "login")));
+                    onPullRequest(repository, payload.path("pull_request"), payload.path("sender")));
             case "create" -> {
                 if ("branch".equals(text(payload, "ref_type"))) {
+                    repository(installationId, payload).ifPresent(repository -> branchCache.remove(repository.id()));
                     repository(installationId, payload).ifPresent(repository ->
-                            onBranch(repository, text(payload, "ref"), text(payload.path("sender"), "login")));
+                            onBranch(repository, text(payload, "ref"), payload.path("sender").path("id").asLong(0)));
                 }
             }
             case "delete" -> {
                 if ("branch".equals(text(payload, "ref_type"))) {
-                    repository(installationId, payload).ifPresent(repository -> store.deleteBranch(repository.id(), text(payload, "ref")));
+                    repository(installationId, payload).ifPresent(repository -> {
+                        branchCache.remove(repository.id());
+                        store.deleteBranch(repository.id(), text(payload, "ref"));
+                    });
                 }
             }
             case "workflow_run" -> repository(installationId, payload).ifPresent(repository -> {
@@ -679,8 +742,8 @@ public class GithubService {
     }
 
     /** Una rama nueva: si nombra una tarea, queda enlazada a ella. */
-    private void onBranch(Repository repository, String branch, String senderLogin) {
-        UUID actor = store.memberByLogin(repository.id(), senderLogin).orElse(null);
+    private void onBranch(Repository repository, String branch, long senderId) {
+        UUID actor = store.memberByGithubId(repository.id(), senderId).orElse(null);
         firstIssue(repository, branch).ifPresent(issue -> branchLinked(repository, issue.id(), branch, true, actor));
     }
 
@@ -696,9 +759,9 @@ public class GithubService {
     }
 
     /**
-     * @param senderLogin quién provocó el aviso en GitHub (quien abrió, fusionó o cerró el pull request)
+     * @param sender quién provocó el aviso en GitHub (quien abrió, fusionó o cerró el pull request)
      */
-    private void onPullRequest(Repository repository, JsonNode pull, String senderLogin) {
+    private void onPullRequest(Repository repository, JsonNode pull, JsonNode sender) {
         int number = pull.path("number").asInt(0);
         PullRequest before = store.pullRequest(repository.id(), number).orElse(null);
         savePullRequest(repository, pull);
@@ -706,12 +769,14 @@ public class GithubService {
         if (now == null || now.issueId() == null) {
             return;
         }
-        if (now.headBranch() != null) {
-            store.linkBranch(repository.id(), now.issueId(), now.headBranch());
-        }
         String previous = before == null ? null : before.state();
         boolean sameState = now.state().equals(previous);
         boolean sameIssue = before != null && now.issueId().equals(before.issueId());
+        // Su rama queda con la tarea cuando el PR se enlaza (no en cada aviso: si alguien la quitó de la tarea, no vuelve).
+        // La de un fork no es una rama de este repositorio.
+        if (!sameIssue && now.headBranch() != null && !fromFork(pull)) {
+            store.linkBranch(repository.id(), now.issueId(), now.headBranch());
+        }
         // Lo que mueve la tarea y lanza reglas es que el pull request cambie de estado. Si no cambió y solo apareció la
         // tarea (alguien puso su código en el título), cuenta únicamente para uno abierto: uno ya fusionado o cerrado no
         // vuelve a completar la tarea ni a ejecutar las reglas.
@@ -721,10 +786,11 @@ public class GithubService {
         IssueRef issue = store.issue(now.issueId()).orElseThrow();
         Settings settings = store.settings(issue.projectId());
         // Quién lo hizo: abrirlo, su autor; fusionarlo o cerrarlo, quien lo fusionó o cerró (si GitHub lo dice)
-        String merger = text(pull.path("merged_by"), "login");
-        String who = "OPEN".equals(now.state()) ? now.authorLogin()
-                : !merger.isEmpty() ? merger : senderLogin != null && !senderLogin.isEmpty() ? senderLogin : now.authorLogin();
-        UUID actor = store.memberByLogin(repository.id(), who).orElse(null);
+        JsonNode merger = pull.path("merged_by");
+        JsonNode whoNode = "OPEN".equals(now.state()) ? pull.path("user")
+                : merger.path("id").asLong(0) > 0 ? merger : sender.path("id").asLong(0) > 0 ? sender : pull.path("user");
+        String who = blankToNull(text(whoNode, "login"));
+        UUID actor = store.memberByGithubId(repository.id(), whoNode.path("id").asLong(0)).orElse(null);
         // El título va al final: puede traer cualquier carácter
         String detail = now.number() + "|" + (who == null ? "" : who) + "|" + now.title();
         switch (now.state()) {
@@ -758,11 +824,26 @@ public class GithubService {
         String head = blankToNull(text(pull.path("head"), "ref"));
         List<String> reviewers = new ArrayList<>();
         pull.path("requested_reviewers").forEach(reviewer -> reviewers.add(text(reviewer, "login")));
-        UUID issueId = firstIssue(repository, head, text(pull, "title"), text(pull, "body")).map(IssueRef::id).orElse(null);
+        // Un PR desde un fork de alguien de fuera no se enlaza solo con una tarea (en un repositorio público cualquiera
+        // podría abrir uno que nombre una tarea y moverla); alguien del equipo puede enlazarlo a mano
+        UUID issueId = fromFork(pull) && !fromTeam(pull) ? null
+                : firstIssue(repository, head, text(pull, "title"), text(pull, "body")).map(IssueRef::id).orElse(null);
         store.savePullRequest(repository.id(), pull.path("number").asInt(0), text(pull, "title"), state, text(pull, "html_url"),
                 blankToNull(text(pull.path("user"), "login")), head, blankToNull(text(pull.path("base"), "ref")),
                 blankToNull(text(pull.path("head"), "sha")), reviewers.isEmpty() ? null : String.join(", ", reviewers),
                 instant(text(pull, "merged_at")), instant(text(pull, "created_at")), instant(text(pull, "updated_at")), issueId);
+    }
+
+    /** Si el pull request viene de otro repositorio (un fork). */
+    private static boolean fromFork(JsonNode pull) {
+        long head = pull.path("head").path("repo").path("id").asLong(0);
+        long base = pull.path("base").path("repo").path("id").asLong(0);
+        return head != 0 && base != 0 && head != base;
+    }
+
+    /** Si quien abrió el pull request es del equipo del repositorio (dueño, miembro de la organización o colaborador). */
+    private static boolean fromTeam(JsonNode pull) {
+        return Set.of("OWNER", "MEMBER", "COLLABORATOR").contains(text(pull, "author_association"));
     }
 
     private void saveRun(Repository repository, JsonNode run) {
@@ -926,17 +1007,31 @@ public class GithubService {
         background.afterCommit(() -> dispatchRule(rule, repository, runId));
     }
 
-    /** Pide a GitHub el workflow de una regla. Si falla, queda en el registro y la ejecución pedida se quita. */
+    /**
+     * Pide a GitHub el workflow de una regla, con la cuenta de quien la creó: sale a su nombre y GitHub solo lo deja si
+     * todavía puede escribir en el repositorio. Si esa persona ya no está en el workspace o desenlazó su cuenta, la regla
+     * no ejecuta nada. Si falla, queda en el registro y la ejecución pedida se quita.
+     */
     private void dispatchRule(Rule rule, Repository repository, UUID runId) {
         try {
-            client.dispatchWorkflow(repository.installationId(), repository.fullName(), rule.workflowId(), rule.ref(), Map.of());
-        } catch (GithubException | IllegalStateException ex) {
+            if (rule.createdById() == null || !store.isWorkspaceMember(repository.workspaceId(), rule.createdById())) {
+                throw new IllegalStateException("quien creó la regla ya no está en el workspace");
+            }
+            String token = accounts.token(rule.createdById());
+            client.dispatchWorkflowAs(token, repository.fullName(), rule.workflowId(), rule.ref(), Map.of());
+        } catch (GithubException | ConflictException | IllegalStateException ex) {
             log.warn("GitHub: la regla {} no pudo ejecutar «{}» en {}: {}", rule.id(), rule.workflowName(), repository.fullName(), ex.getMessage());
             background.write(() -> store.failRequestedRun(runId));
         }
     }
 
     // ----- Utilidades
+
+    private void requireLinked(UUID userId) {
+        if (!accounts.linked(userId)) {
+            throw new ConflictException(GithubAccounts.NOT_LINKED);
+        }
+    }
 
     private void requireConfigured() {
         if (!properties.configured()) {

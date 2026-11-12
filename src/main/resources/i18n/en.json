@@ -523,7 +523,9 @@
     "GitHub ya no acepta tu cuenta. Vuelve a conectarla en tu perfil.": "GitHub no longer accepts your account. Connect it again in your profile.",
     "Tu conexión con GitHub caducó. Vuelve a conectar tu cuenta en tu perfil.": "Your connection to GitHub expired. Connect your account again in your profile.",
     "El archivo pesa más de 14 MB. Expórtalo por partes (por proyecto, por ejemplo).": "The file is larger than 14 MB. Export it in parts (by project, for example).",
-    "Ese pull request está enlazado a una tarea de otro proyecto": "That pull request is linked to a task from another project"
+    "Ese pull request está enlazado a una tarea de otro proyecto": "That pull request is linked to a task from another project",
+    "Rama no encontrada": "Branch not found",
+    "Tu cuenta de GitHub no puede escribir en ese repositorio, y la regla ejecutaría el workflow a tu nombre": "Your GitHub account can't write to that repository, and the rule would run the workflow on your behalf"
   },
   "patterns": [
     {
