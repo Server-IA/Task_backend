@@ -210,6 +210,11 @@ public class DailyServiceImpl implements DailyService {
             return workingDay;
         }
         LocalDate lastDay = LocalDate.ofInstant(last, zone);
+        // Lo último fue en un fin de semana (el martes tras un lunes festivo, alguien comentó el sábado): «ayer» empieza
+        // el viernes, no el sábado; si no, lo hecho el viernes desaparecía de la daily
+        if (lastDay.getDayOfWeek() == java.time.DayOfWeek.SATURDAY || lastDay.getDayOfWeek() == java.time.DayOfWeek.SUNDAY) {
+            lastDay = previousWorkingDay(lastDay);
+        }
         return lastDay.isBefore(workingDay) ? lastDay : workingDay;
     }
 

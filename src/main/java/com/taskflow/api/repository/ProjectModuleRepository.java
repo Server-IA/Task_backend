@@ -31,4 +31,10 @@ public interface ProjectModuleRepository extends JpaRepository<ProjectModule, UU
             """)
     List<IssueProgress> findProgress(@Param("ids") Collection<UUID> ids,
                                      @Param("completed") StateGroup completed);
+
+    /** El módulo con su fila bloqueada hasta el final de la transacción (agregar tareas a la vez no choca). */
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select m from ProjectModule m where m.id = :id and m.project.id = :projectId")
+    java.util.Optional<ProjectModule> findForUpdate(@org.springframework.data.repository.query.Param("id") java.util.UUID id,
+                                                    @org.springframework.data.repository.query.Param("projectId") java.util.UUID projectId);
 }

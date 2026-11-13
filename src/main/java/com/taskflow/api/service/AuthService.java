@@ -5,6 +5,7 @@ import com.taskflow.api.dto.request.LoginRequest;
 import com.taskflow.api.dto.request.RegisterRequest;
 import com.taskflow.api.dto.request.ResetPasswordRequest;
 import com.taskflow.api.dto.response.AuthResponse;
+import com.taskflow.api.dto.response.RegisterResponse;
 import com.taskflow.api.dto.response.UserResponse;
 import com.taskflow.api.util.ClientInfo;
 
@@ -12,7 +13,7 @@ import java.util.UUID;
 
 public interface AuthService {
 
-    UserResponse register(RegisterRequest request);
+    RegisterResponse register(RegisterRequest request);
 
     void verifyEmail(String token);
 

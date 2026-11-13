@@ -8,6 +8,7 @@ import com.taskflow.api.dto.request.ResetPasswordRequest;
 import com.taskflow.api.dto.request.TokenRequest;
 import com.taskflow.api.dto.response.AuthResponse;
 import com.taskflow.api.dto.response.MessageResponse;
+import com.taskflow.api.dto.response.RegisterResponse;
 import com.taskflow.api.dto.response.UserResponse;
 import com.taskflow.api.service.AuthService;
 import com.taskflow.api.util.ClientInfo;
@@ -38,7 +39,7 @@ public class AuthController {
     @Operation(summary = "Crear cuenta", description = "Envía un correo de verificación.")
     @PostMapping("/register")
     @ResponseStatus(HttpStatus.CREATED)
-    public UserResponse register(@Valid @RequestBody RegisterRequest request) {
+    public RegisterResponse register(@Valid @RequestBody RegisterRequest request) {
         return authService.register(request);
     }
 

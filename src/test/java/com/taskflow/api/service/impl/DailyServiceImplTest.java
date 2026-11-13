@@ -372,6 +372,20 @@ class DailyServiceImplTest {
         }
 
         @Test
+        void elMartesTrasUnLunesFestivoConActividadElSabadoEmpiezaElViernes() {
+            // El lunes 26 fue festivo y alguien comentó el sábado 24: lo del viernes 23 no se pierde
+            members(ana);
+            openIssues();
+            activities();
+            LocalDate tuesday = LocalDate.of(2026, 10, 27);
+            lastActivity(at(LocalDate.of(2026, 10, 24), 11));
+
+            DailyResponse daily = dailyService.getDaily(SLUG, project.getId(), VIEWER, tuesday);
+
+            assertThat(daily.previousDate()).isEqualTo(LocalDate.of(2026, 10, 23));
+        }
+
+        @Test
         void sinActividadEnDosSemanasEsElDiaHabilAnterior() {
             members(ana);
             openIssues();

@@ -67,6 +67,8 @@ class ModuleServiceImplTest {
         lenient().when(lookup.project(SLUG, project.getId())).thenReturn(project);
         lenient().when(moduleRepository.findByIdAndProjectId(module.getId(), project.getId()))
                 .thenReturn(Optional.of(module));
+        lenient().when(moduleRepository.findForUpdate(module.getId(), project.getId()))
+                .thenReturn(Optional.of(module));
         lenient().when(moduleRepository.saveAndFlush(any(ProjectModule.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
     }

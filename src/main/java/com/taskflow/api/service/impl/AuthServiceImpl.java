@@ -1,5 +1,7 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.dto.response.RegisterResponse;
+import java.util.Optional;
 import com.taskflow.api.config.AppProperties;
 import com.taskflow.api.dto.request.ChangePasswordRequest;
 import com.taskflow.api.dto.request.LoginRequest;
@@ -73,22 +75,37 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     @Transactional
-    public UserResponse register(RegisterRequest request) {
+    public RegisterResponse register(RegisterRequest request) {
         String email = normalizeEmail(request.email());
-        if (userRepository.existsByEmail(email)) {
-            throw new ConflictException("Ya existe una cuenta con ese correo");
+        // El hash se calcula siempre (tarda): así la respuesta tarda lo mismo exista o no la cuenta
+        String passwordHash = passwordEncoder.encode(request.password());
+        Optional<User> existing = userRepository.findByEmail(email);
+        if (existing.isPresent()) {
+            // Misma respuesta que una cuenta nueva: el registro no revela qué correos tienen cuenta. A la dueña le llega
+            // un aviso (o, si nunca verificó, otra vez la verificación), como mucho uno por hora
+            User owner = existing.get();
+            if (rateLimitService.tryConsume(RateLimitRule.REGISTER_EXISTING, email).isConsumed()) {
+                if (owner.isEmailVerified()) {
+                    emailNotifier.sendAccountExists(owner);
+                } else {
+                    String token = createVerificationToken(owner, VerificationTokenType.EMAIL_VERIFICATION,
+                            Duration.ofHours(properties.tokens().emailVerificationHours()));
+                    emailNotifier.sendEmailVerification(owner, token);
+                }
+            }
+            return new RegisterResponse(email);
         }
 
         User user = new User();
         user.setEmail(email);
-        user.setPasswordHash(passwordEncoder.encode(request.password()));
+        user.setPasswordHash(passwordHash);
         user.setFullName(HumanNames.required(request.fullName(), "fullName"));
         userRepository.save(user);
 
         String token = createVerificationToken(user, VerificationTokenType.EMAIL_VERIFICATION,
                 Duration.ofHours(properties.tokens().emailVerificationHours()));
         emailNotifier.sendEmailVerification(user, token);
-        return userMapper.toResponse(user);
+        return new RegisterResponse(email);
     }
 
     @Override

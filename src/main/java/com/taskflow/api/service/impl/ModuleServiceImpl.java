@@ -105,7 +105,10 @@ public class ModuleServiceImpl implements ModuleService {
     @Override
     @Transactional
     public ModuleResponse addIssues(String slug, UUID projectId, UUID moduleId, UUID userId, IssueIdsRequest request) {
-        ProjectModule module = findModule(slug, projectId, moduleId);
+        // Bloqueado, como el ciclo: agregar la misma tarea desde dos pestañas a la vez no termina en un error de clave
+        Project project = lookup.project(slug, projectId);
+        ProjectModule module = moduleRepository.findForUpdate(moduleId, project.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Módulo no encontrado"));
         List<Issue> issues = support.findIssues(module.getProject(), request.issueIds());
         User actor = lookup.user(userId);
         for (Issue issue : issues) {

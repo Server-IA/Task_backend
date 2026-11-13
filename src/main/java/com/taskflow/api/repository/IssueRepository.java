@@ -121,6 +121,14 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
     /** Issues de una columna del Kanban en orden; se usa para renumerar {@code sort_order}. */
     List<Issue> findAllByStateIdOrderBySortOrderAsc(UUID stateId);
 
+    /** La primera tarjeta de la columna después de esa posición (sin contar la que se mueve). */
+    java.util.Optional<Issue> findFirstByStateIdAndSortOrderGreaterThanAndIdNotOrderBySortOrderAsc(UUID stateId, double sortOrder,
+                                                                                                  UUID excluded);
+
+    /** La última tarjeta de la columna antes de esa posición (sin contar la que se mueve). */
+    java.util.Optional<Issue> findFirstByStateIdAndSortOrderLessThanAndIdNotOrderBySortOrderDesc(UUID stateId, double sortOrder,
+                                                                                                UUID excluded);
+
     boolean existsByStateId(UUID stateId);
 
     List<Issue> findAllByProjectIdAndIdIn(UUID projectId, Collection<UUID> ids);
@@ -279,6 +287,7 @@ public interface IssueRepository extends JpaRepository<Issue, UUID>, JpaSpecific
     @Query("""
             select count(i) from Issue i
             where i.project.id in :projectIds and i.completedAt >= :since
+              and i.type <> com.taskflow.api.entity.enums.IssueType.STORY
               and i.id in (select x.id from Issue x join x.assignees u where u.id = :userId)
             """)
     long countAssignedCompletedSince(@Param("projectIds") Collection<UUID> projectIds, @Param("userId") UUID userId,

@@ -129,18 +129,38 @@ class AuthServiceImplTest {
     class Register {
 
         @Test
-        void rechazaCorreoDuplicadoSinImportarMayusculas() {
-            when(userRepository.existsByEmail("ana@test.com")).thenReturn(true);
+        void unCorreoQueYaTieneCuentaRecibeLaMismaRespuestaYLaDuenaUnAvisoPorHora() {
+            User ana = user("ana@test.com");
+            ana.setEmailVerified(true);
+            when(userRepository.findByEmail("ana@test.com")).thenReturn(Optional.of(ana));
 
-            assertThatThrownBy(() -> authService.register(
-                    new RegisterRequest("  Ana@Test.com ", "Clave1234", "Ana")))
-                    .isInstanceOf(ConflictException.class);
+            // Igual que una cuenta nueva (sin importar mayúsculas): no revela que el correo está registrado
+            assertThat(authService.register(new RegisterRequest("  Ana@Test.com ", "Clave1234", "Ana")))
+                    .isEqualTo(new com.taskflow.api.dto.response.RegisterResponse("ana@test.com"));
+            authService.register(new RegisterRequest("ana@test.com", "Clave1234", "Ana"));
+
             verify(userRepository, never()).save(any());
+            // El hash se calcula igual (misma demora) y a la dueña le llega un solo aviso en la hora
+            verify(passwordEncoder, org.mockito.Mockito.times(2)).encode("Clave1234");
+            verify(emailNotifier, org.mockito.Mockito.times(1)).sendAccountExists(ana);
+        }
+
+        @Test
+        void siLaCuentaExistenteNuncaSeVerificoSeReenviaLaVerificacion() {
+            User ana = user("ana@test.com");
+            ana.setEmailVerified(false);
+            when(userRepository.findByEmail("ana@test.com")).thenReturn(Optional.of(ana));
+
+            authService.register(new RegisterRequest("ana@test.com", "Clave1234", "Ana"));
+
+            verify(userRepository, never()).save(any());
+            verify(emailNotifier).sendEmailVerification(eq(ana), any());
+            verify(emailNotifier, never()).sendAccountExists(any());
         }
 
         @Test
         void guardaUsuarioConContrasenaHasheadaYEnviaVerificacion() {
-            when(userRepository.existsByEmail("ana@test.com")).thenReturn(false);
+            when(userRepository.findByEmail("ana@test.com")).thenReturn(Optional.empty());
             when(passwordEncoder.encode("Clave1234")).thenReturn("bcrypt-hash");
 
             authService.register(new RegisterRequest("Ana@Test.com", "Clave1234", " Ana \t  Pérez "));

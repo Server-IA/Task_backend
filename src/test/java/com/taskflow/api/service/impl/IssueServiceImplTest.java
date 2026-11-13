@@ -344,6 +344,38 @@ class IssueServiceImplTest {
         }
 
         @Test
+        void conSoloLaDeArribaQuedaEntreEllaYLaSiguienteRealAunqueNoSeVea() {
+            // Tablero filtrado: debajo de la última visible (100) hay una oculta (200). Antes caía en 100 + GAP
+            Issue moving = issue(todo, 50);
+            Issue lastVisible = issue(done, 100);
+            // No se busca por id: la encuentra la consulta de la siguiente de la columna
+            Issue hidden = new Issue();
+            hidden.setId(UUID.randomUUID());
+            hidden.setState(done);
+            hidden.setSortOrder(200);
+            when(issueRepository.findFirstByStateIdAndSortOrderGreaterThanAndIdNotOrderBySortOrderAsc(done.getId(), 100d,
+                    moving.getId())).thenReturn(Optional.of(hidden));
+
+            issueService.move(SLUG, project.getId(), moving.getId(), author.getId(),
+                    new MoveIssueRequest(done.getId(), lastVisible.getId(), null));
+
+            assertThat(moving.getSortOrder()).isEqualTo(150);
+        }
+
+        @Test
+        void dosTarjetasEmpatadasSeRenumeranEnVezDeRechazar() {
+            Issue moving = issue(todo, 50);
+            Issue above = issue(done, 500);
+            Issue below = issue(done, 500);
+            when(issueRepository.findAllByStateIdOrderBySortOrderAsc(done.getId())).thenReturn(List.of(above, below));
+
+            issueService.move(SLUG, project.getId(), moving.getId(), author.getId(),
+                    new MoveIssueRequest(done.getId(), above.getId(), below.getId()));
+
+            assertThat(moving.getSortOrder()).isEqualTo(1.5 * SortOrderCalculator.GAP);
+        }
+
+        @Test
         void rechazaVecinasDeOtroEstado() {
             Issue moving = issue(todo, 50);
             Issue otherColumn = issue(todo, 100);

@@ -79,6 +79,15 @@ public class EmailNotifier {
                 "minutes", properties.tokens().passwordResetMinutes()));
     }
 
+    /** Alguien intentó registrarse con el correo de esta cuenta: se le avisa a su dueña (el registro no lo revela). */
+    public void sendAccountExists(User user) {
+        String link = properties.frontendUrl() + "/login";
+        send(user.getEmail(), languageOf(user), "exists.subject", "account-exists", link, Map.of(
+                "name", user.getFullName(),
+                "link", link,
+                "resetLink", properties.frontendUrl() + "/forgot-password"));
+    }
+
     public void sendPasswordChanged(User user) {
         String link = properties.frontendUrl() + "/forgot-password";
         Language language = languageOf(user);
