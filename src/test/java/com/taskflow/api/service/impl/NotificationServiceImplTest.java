@@ -20,6 +20,7 @@ import com.taskflow.api.entity.Workspace;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.entity.enums.NotificationType;
 import com.taskflow.api.mapper.CollaborationMapper;
+import com.taskflow.api.realtime.RealtimeHub;
 import com.taskflow.api.repository.NotificationRepository;
 import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.UserRepository;
@@ -67,6 +68,9 @@ class NotificationServiceImplTest {
     private CollaborationMapper mapper;
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private RealtimeHub realtime;
 
     @InjectMocks
     private NotificationServiceImpl notificationService;

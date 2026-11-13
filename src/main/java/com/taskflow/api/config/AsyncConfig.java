@@ -22,6 +22,7 @@ public class AsyncConfig {
     public static final String MAIL_EXECUTOR = "mailExecutor";
     public static final String IMPORT_EXECUTOR = "importExecutor";
     public static final String GITHUB_EXECUTOR = "githubExecutor";
+    public static final String REALTIME_EXECUTOR = "realtimeExecutor";
 
     @Bean(name = MAIL_EXECUTOR)
     public Executor mailExecutor() {
@@ -72,6 +73,27 @@ public class AsyncConfig {
         // ese pull request la vuelve a pedir
         executor.setRejectedExecutionHandler((task, pool) ->
                 log.warn("Cola de GitHub llena ({} en espera): se descarta una tarea", pool.getQueue().size()));
+        executor.initialize();
+        return executor;
+    }
+
+    /**
+     * Reparte los avisos en tiempo real ({@code RealtimeHub}) fuera de la petición que hizo el cambio. Un solo hilo:
+     * los avisos salen en el orden en que pasaron. Con {@code app.realtime.inline=true} van en el mismo hilo (pruebas).
+     */
+    @Bean(name = REALTIME_EXECUTOR)
+    public Executor realtimeExecutor(@org.springframework.beans.factory.annotation.Value("${app.realtime.inline:false}") boolean inline) {
+        if (inline) {
+            return new org.springframework.core.task.SyncTaskExecutor();
+        }
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(2000);
+        executor.setThreadNamePrefix("realtime-");
+        // Con la cola llena se pierde un aviso: la pestaña lo recupera al volver al frente (refresca igual)
+        executor.setRejectedExecutionHandler((task, pool) ->
+                log.warn("Cola de avisos en tiempo real llena ({} en espera): se descarta uno", pool.getQueue().size()));
         executor.initialize();
         return executor;
     }

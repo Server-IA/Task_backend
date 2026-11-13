@@ -75,6 +75,8 @@ class ControllerPermissionsTest {
             "WorkspaceController.create",
             // Aceptar una invitación: el servicio exige que sea para el correo de la sesión
             "InvitationController.accept",
+            // Mi conexión de avisos en tiempo real: cada aviso se reparte solo a quien puede ver lo que cambió
+            "RealtimeController.events",
             // Mi perfil y mi contraseña
             "UserController.getProfile",
             "UserController.updateProfile",
