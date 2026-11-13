@@ -14,11 +14,13 @@ import com.taskflow.api.entity.Cycle;
 import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.Notification;
 import com.taskflow.api.entity.Project;
+import com.taskflow.api.entity.State;
 import com.taskflow.api.entity.ProjectMember;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.Workspace;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.entity.enums.NotificationType;
+import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.mapper.CollaborationMapper;
 import com.taskflow.api.realtime.RealtimeHub;
 import com.taskflow.api.repository.NotificationRepository;
@@ -197,6 +199,21 @@ class NotificationServiceImplTest {
             assertThat(notification.getComment()).isNull();
             assertThat(notification.getIssue()).isSameAs(issue);
         });
+    }
+
+    @Test
+    void siLaQueBloqueabaSeCanceloElAvisoLoDice() {
+        Issue blocker = new Issue();
+        blocker.setProject(issue.getProject());
+        blocker.setSequenceId(3);
+        State cancelled = new State();
+        cancelled.setStateGroup(StateGroup.CANCELLED);
+        blocker.setState(cancelled);
+
+        notificationService.notifyUnblocked(issue, blocker, luis);
+
+        assertThat(saved()).extracting(Notification::getMessage)
+                .containsExactly("WEB-12 ya no está bloqueada: WEB-3 se canceló");
     }
 
     @Test

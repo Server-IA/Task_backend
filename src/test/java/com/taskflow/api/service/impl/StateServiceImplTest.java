@@ -210,6 +210,16 @@ class StateServiceImplTest {
     }
 
     @Test
+    void pasarUnEstadoAbiertoACanceladoTambienAvisaDesbloqueos() {
+        State qa = state(StateGroup.STARTED);
+
+        changeGroup(qa, StateGroup.CANCELLED);
+
+        verify(issueRepository).closeStoriesInState(eq(qa.getId()), any(), eq(pm));
+        verify(relationService).notifyUnblockedByState(qa, pm);
+    }
+
+    @Test
     void entreCompletadoYCanceladoLasHistoriasSiguenCerradasConSuFecha() {
         State done = state(StateGroup.COMPLETED);
 

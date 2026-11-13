@@ -124,7 +124,7 @@ public class StateServiceImpl implements StateService {
         stateRepository.saveAndFlush(state);
 
         storyProgress.stateGroupChanged(state, previous, actor);
-        if (IssueServiceImpl.becameCompleted(previous, next)) {
+        if (IssueServiceImpl.becameClosed(previous, next)) {
             relationService.notifyUnblockedByState(state, actor);
         }
     }
