@@ -1,914 +1,485 @@
 # TaskFlow — Backend
 
-API REST de **TaskFlow**, una aplicación de gestión de proyectos ágiles hecha a la medida de equipos de
-pasantías (al estilo de Plane o Jira, sin copiar código de ninguno). Proyecto de prácticas universitarias.
+API REST de **TaskFlow**, una aplicación de gestión de proyectos ágiles hecha a la medida de equipos de pasantías
+(al estilo de Plane o Jira, sin copiar código de ninguno). Proyecto de prácticas universitarias.
 
-La consume la SPA de [`Task_frontend`](https://github.com/Server-IA/Task_frontend).
+- La consume la SPA de [`Task_frontend`](https://github.com/Server-IA/Task_frontend).
+- En producción corre en **https://dev.inmero.co** (Dokploy de la universidad); ver [DESPLIEGUE.md](DESPLIEGUE.md).
 
-## Funcionalidades
+## Contenido
 
-- **Roles**: project manager (`OWNER`) y miembro (`MEMBER`), con permisos por workspace y por proyecto.
-- **Cuentas**: registro con verificación de correo, login con JWT y refresh token rotativo, recuperar y
-  cambiar la contraseña, foto de perfil, aviso de inicio de sesión por correo.
-- **Workspaces y proyectos**: invitaciones por correo, miembros, estados personalizables, etiquetas y plantillas.
-- **Tareas**: tipos Historia, Tarea y Bug, código legible (`WEB-12`), Kanban con orden, subtareas, dependencias,
-  criterios de aceptación, checklist, comentarios con menciones e historial de cambios.
-- **Historias de usuario**: partir en tareas, avance automático, «lista para revisar», cierre y reapertura por el PM.
-- **Planeación**: ciclos con cierre y retrospectiva, módulos, daily standup y vistas guardadas.
-- **Seguimiento**: estadísticas (tiempo de ciclo, throughput, burndown), «Mi trabajo», feed de actividad,
-  búsqueda y notificaciones.
-- **Archivos**: adjuntos, imágenes en descripciones y comentarios y fotos de perfil en Cloudflare R2, con cuota
-  por workspace.
+1. [Qué hace](#qué-hace)
+2. [Stack](#stack)
+3. [Cómo levantarlo en local](#cómo-levantarlo-en-local)
+4. [Variables de entorno](#variables-de-entorno)
+5. [Arquitectura](#arquitectura)
+6. [Roles y permisos](#roles-y-permisos)
+7. [Seguridad](#seguridad)
+8. [Tiempo real](#tiempo-real)
+9. [Integración con GitHub](#integración-con-github)
+10. [Importaciones](#importaciones)
+11. [Archivos (Cloudflare R2)](#archivos-cloudflare-r2)
+12. [Correos](#correos)
+13. [Idiomas](#idiomas)
+14. [Tareas programadas](#tareas-programadas)
+15. [La API](#la-api)
+16. [Modelo de datos](#modelo-de-datos)
+17. [Pruebas](#pruebas)
+18. [Despliegue](#despliegue)
+19. [Convenciones](#convenciones)
+
+## Qué hace
+
+| Área | Funcionalidades |
+|---|---|
+| **Cuentas** | Registro con verificación de correo, login con JWT y refresh token rotativo, recuperar y cambiar la contraseña, foto de perfil, idioma (español / inglés) y aviso por correo de cada inicio de sesión |
+| **Workspaces** | Invitaciones por correo, miembros, **roles personalizados** con 47 permisos, cuota de almacenamiento e integraciones |
+| **Proyectos** | Identificador (`WEB`) y color, estados agrupados (Backlog, Sin empezar, En curso, Completado, Cancelado) que son las columnas del Kanban, etiquetas, plantillas de tarea y miembros |
+| **Tareas** | Tipos Historia, Tarea y Bug con código legible (`WEB-12`), orden del Kanban, subtareas, dependencias (bloquea / bloqueada por / relacionada), criterios de aceptación, checklist, adjuntos, comentarios con @menciones e historial de cambios |
+| **Historias de usuario** | «Partir en tareas», avance automático según sus tareas, aviso de «lista para revisar», cierre y reapertura |
+| **Planeación** | Ciclos (sprints) con cierre guiado y retrospectiva (notas, votos y acciones), módulos, hoja de ruta, vistas guardadas y daily standup con agenda configurable |
+| **Seguimiento** | Estadísticas (tiempo de ciclo, throughput, burndown, carga por persona), reportes en **PDF**, «Mi trabajo», actividad del workspace, búsqueda y bandeja de notificaciones |
+| **GitHub** | GitHub App: ramas desde una tarea, pull requests y checks enlazados a la tarea que nombran, la tarea avanza sola con su PR, y GitHub Actions a mano o por reglas |
+| **Importar** | Desde Jira Cloud, Trello, Linear, Asana o un CSV, en segundo plano, con mapeo de estados y personas, informe y **deshacer** |
+| **Tiempo real** | Cada pestaña abierta se entera al instante de lo que cambian los demás (Server-Sent Events) |
+| **Archivos** | Adjuntos, imágenes en descripciones y comentarios y fotos de perfil en Cloudflare R2, subidos directo desde el navegador con URLs firmadas |
 
 ## Stack
 
 | Área | Tecnología |
 |---|---|
-| Lenguaje / framework | Java 21 · Spring Boot 4.1.1 (Spring Framework 7, Spring Security 7, Hibernate 7) |
-| Build | Maven (con wrapper `./mvnw`) |
-| Base de datos | PostgreSQL 16 en Docker · Spring Data JPA · Flyway |
-| Seguridad | Spring Security + JWT (jjwt 0.13) · BCrypt · Bucket4j (rate limiting) |
-| Correos | Resend 4.29 (producción) o SMTP (Mailpit en local) + plantillas Thymeleaf, envío con `@Async` |
+| Lenguaje y framework | **Java 21** · **Spring Boot 4.1.1** (Spring Framework 7, Spring Security 7, Hibernate 7) |
+| Build | Maven con wrapper (`./mvnw`) |
+| Base de datos | **PostgreSQL 16** · Spring Data JPA · Flyway |
+| Seguridad | Spring Security + JWT (jjwt 0.13) · BCrypt · Bucket4j 8.21 (límites de peticiones) |
+| Correos | SMTP (Gmail en producción, Mailpit en local) o Resend 4.29 · plantillas Thymeleaf · envío asíncrono |
 | Archivos | Cloudflare R2 con AWS SDK S3 2.56 (URLs firmadas) |
+| Reportes | OpenPDF 2.4 |
 | Otros | Bean Validation · MapStruct 1.6 · Lombok · springdoc-openapi 3.1 (Swagger UI) |
-| Pruebas | JUnit 5 + Mockito · Spring Boot Test · integración con PostgreSQL |
+| Pruebas | JUnit 5 + Mockito · Spring Boot Test · integración contra PostgreSQL real |
 
 ## Cómo levantarlo en local
 
-Requisitos: **Java 21+** y **Docker**.
+Requisitos: **Java 21** y **Docker**.
 
 ```bash
-cp .env.example .env          # completar JWT_SECRET (mínimo 32 caracteres)
-docker compose up -d          # PostgreSQL 16 (5432) y Mailpit (bandeja de correo en http://localhost:8025)
-./mvnw spring-boot:run        # API en http://localhost:8080
+cp .env.example .env          # completar al menos JWT_SECRET (32 caracteres o más)
+docker compose up -d          # PostgreSQL 16 (puerto 5432) y Mailpit (correo de prueba, http://localhost:8025)
+./mvnw spring-boot:run        # API en http://localhost:8080  (en Windows: .\mvnw.cmd spring-boot:run)
 ```
 
-- Swagger UI: http://localhost:8080/swagger-ui.html (botón **Authorize** → pegar el `accessToken`).
-- OpenAPI JSON: http://localhost:8080/v3/api-docs (útil para generar tipos en el front).
-- Las tablas las crea Flyway al arrancar (`src/main/resources/db/migration`).
-- **Correos en local:** con `MAIL_PROVIDER=smtp` todos los correos (verificación, recuperar contraseña,
-  invitaciones, aviso de login) llegan a **Mailpit**, en http://localhost:8025, sin importar a qué
-  dirección se envíen. Nada sale a internet, así que puedes registrar cualquier correo de prueba.
+Después levanta el frontend (`npm run dev` en `Task_frontend`) y entra a http://localhost:5173. La primera persona que
+se registra crea su workspace y queda como project manager.
 
-### Variables de entorno (`.env`)
+- **Swagger UI:** http://localhost:8080/swagger-ui.html (botón *Authorize* → pegar el `accessToken` del login).
+- **OpenAPI:** http://localhost:8080/v3/api-docs (el frontend genera sus tipos con esto).
+- **Salud:** `GET /api/v1/health` → `{"status":"ok"}` cuando la API llega a la base de datos.
+- **Esquema:** lo crea Flyway al arrancar (`src/main/resources/db/migration`).
+- **Correos en local:** con `MAIL_PROVIDER=smtp` y los valores de `.env.example`, todo correo (verificación,
+  recuperar contraseña, invitaciones, avisos) llega a **Mailpit** en http://localhost:8025, sea cual sea el
+  destinatario. Nada sale a internet, así que se puede registrar cualquier correo inventado.
+- **Archivos en local:** necesitan las credenciales `R2_*` de un bucket de desarrollo cuyo CORS permita
+  `http://localhost:5173`. Sin ellas todo funciona menos subir y ver archivos (responden 503).
+- **GitHub en local:** necesita una GitHub App de desarrollo y un túnel público hacia la API para recibir sus
+  webhooks. Sin las variables `GITHUB_*` la integración aparece como no configurada y lo demás funciona igual.
 
-| Variable | Descripción |
+## Variables de entorno
+
+Se leen del entorno o de un archivo `.env` en la raíz (está en `.gitignore`; nunca se suben secretos).
+`.env.example` trae todas con valores para local.
+
+| Variable | Para qué |
 |---|---|
 | `DB_URL`, `DB_USER`, `DB_PASSWORD` | Conexión a PostgreSQL |
-| `JWT_SECRET` | Clave para firmar los JWT (≥ 32 caracteres). Generar una con `openssl rand -base64 48` |
-| `MAIL_PROVIDER` | `smtp` (Mailpit en local, o Brevo/Gmail) o `resend` (producción). Por defecto `resend` |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_AUTH`, `SMTP_STARTTLS` | Servidor SMTP. Los valores de `.env.example` son los de Mailpit (`localhost:1025`, sin autenticación) |
-| `RESEND_API_KEY` | API key de Resend (solo con `MAIL_PROVIDER=resend`). **Si está vacía**, los correos no se envían. Con un `FRONTEND_URL` que no es localhost (producción) la API **no arranca** sin ella |
-| `MAIL_LOG_LINKS` | `true`/`false`: escribir en el log los enlaces de los correos que no salen (verificar, restablecer contraseña, invitar). Son **secretos**: quien lea el log puede tomar la cuenta. Vacío (por defecto): solo si `FRONTEND_URL` es localhost, para probar en local sin proveedor de correo |
-| `MAIL_FROM` | Remitente. Con Resend debe ser de un **dominio verificado**; sin él, Resend solo permite `onboarding@resend.dev` y únicamente hacia el correo dueño de la cuenta |
-| `FRONTEND_URL` | Base de los enlaces de los correos (por defecto `http://localhost:5173`); su origen (`esquema://host[:puerto]`, sin la ruta) es el único que CORS deja llamar a la API, así que el frontend puede vivir en una subruta |
-| `FORWARD_HEADERS_STRATEGY` | `none` (por defecto) o `native` detrás de un proxy (Dokploy/Traefik): ver [Docker / despliegue](#docker--despliegue) |
-| `SPRINGDOC_ENABLED` | Swagger UI y `/v3/api-docs` (por defecto `true`; el frontend genera sus tipos con `/v3/api-docs`). `false` los apaga |
-| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | Cloudflare R2 (archivos e imágenes). Endpoint `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com`, región `auto`; `R2_ENDPOINT` lo reemplaza (opcional). Sin credenciales la API arranca, pero subir o ver archivos responde 503. El bucket es privado y su CORS debe permitir `GET`, `PUT` y `HEAD` desde `FRONTEND_URL` con cabeceras `*` (y exponer `ETag`) |
-| `STORAGE_CLEANUP_CRON` | Limpieza de archivos (por defecto cada hora, `0 15 * * * *`): subidas sin confirmar de más de 24 h e imágenes pegadas que ya no están en ningún texto desde hace 7 días |
-| `NOTIFICATION_RETENTION_DAYS`, `MAINTENANCE_CRON` | Limpieza diaria: notificaciones leídas de más de 90 días, tokens vencidos o usados e invitaciones vencidas (por defecto a las 3:30, `0 30 3 * * *`, en `app.timezone`) |
+| `JWT_SECRET` | Clave con la que se firman los JWT (32 caracteres o más). Generarla con `openssl rand -base64 48`. También deriva la clave con la que se cifran los tokens de GitHub guardados |
+| `FRONTEND_URL` | URL pública del frontend (por defecto `http://localhost:5173`). Es la base de los enlaces de los correos y su origen es el **único** que CORS deja llamar a la API |
+| `MAIL_PROVIDER` | `smtp` o `resend` (por defecto `resend`) |
+| `MAIL_FROM` | Remitente, p. ej. `TaskFlow <cuenta@gmail.com>`. Con Gmail tiene que ser la misma cuenta que envía; con Resend, una dirección de un dominio verificado |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_AUTH`, `SMTP_STARTTLS` | Servidor SMTP. En local, Mailpit (`localhost:1025`, sin autenticación); en producción, `smtp.gmail.com:587` con una contraseña de aplicación |
+| `RESEND_API_KEY` | Solo con `MAIL_PROVIDER=resend`. Si `FRONTEND_URL` no es localhost, la API no arranca sin ella |
+| `MAIL_LOG_LINKS` | `true` escribe en el log los enlaces de los correos que no salen. Son **secretos** (quien lea el log puede tomar la cuenta). Vacío: solo cuando `FRONTEND_URL` es localhost |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | Cloudflare R2. Endpoint `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com`, región `auto` (`R2_ENDPOINT` lo reemplaza si hace falta) |
+| `GITHUB_APP_ID`, `GITHUB_APP_SLUG` | Id y slug (`github.com/apps/<slug>`) de la GitHub App |
+| `GITHUB_PRIVATE_KEY_PATH` o `GITHUB_PRIVATE_KEY` | Clave privada de la app: la ruta del `.pem` (local) o su contenido con `\n` (producción) |
+| `GITHUB_WEBHOOK_SECRET` | Secreto con el que GitHub firma sus webhooks |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | Para que cada persona enlace su cuenta de GitHub |
+| `FORWARD_HEADERS_STRATEGY` | `none` (por defecto) o `native` detrás de un proxy (Dokploy/Traefik). Ver [Seguridad](#seguridad) |
+| `SPRINGDOC_ENABLED` | Swagger UI y `/v3/api-docs` (por defecto `true`; la imagen de Docker lo pone en `false`) |
+| `REFRESH_REUSE_GRACE_SECONDS` | Margen para reusar un refresh token recién rotado (por defecto 30 s) |
+| `STORAGE_CLEANUP_CRON` | Limpieza de archivos huérfanos (por defecto cada hora, `0 15 * * * *`) |
+| `MAINTENANCE_CRON`, `NOTIFICATION_RETENTION_DAYS` | Limpieza diaria (por defecto 3:30, hora de Bogotá) y días que se guardan las notificaciones leídas (90) |
 
-El archivo `.env` está en `.gitignore`; nunca se suben secretos.
-
-### Pruebas
-
-```bash
-./mvnw test
-```
-
-**Pruebas con PostgreSQL.** Las de `integration/` (carreras con bloqueos, rondas de QA, almacenamiento) y las de
-`migration/` necesitan un PostgreSQL de verdad: toman `DB_URL`, `DB_USER` y `DB_PASSWORD` del entorno o del `.env`,
-crean una base descartable en ese servidor (`taskflow_it_*`, `taskflow_v25_test_*`…) y la borran al terminar. El
-usuario necesita permiso para crear bases de datos. **Sin `DB_URL` se omiten en silencio** (no fallan), así que en CI hay que definirlas, por
-ejemplo con un servicio `postgres:16`:
-
-```bash
-DB_URL=jdbc:postgresql://localhost:5432/taskflow DB_USER=taskflow DB_PASSWORD=… ./mvnw test
-```
-
-Son más de 800 pruebas, organizadas como el código (`src/test/java/com/taskflow/api`):
-
-| Carpeta | Qué cubre |
-|---|---|
-| `service/` | Reglas de negocio: tareas, historias, ciclos y su cierre, retrospectiva, daily, estadísticas, dependencias, checklist, plantillas, vistas, menciones, notificaciones y archivos |
-| `controller/`, `security/` | La regla `@PreAuthorize` de cada endpoint, el filtro JWT, `CredentialsGuard` y `WorkspaceSecurity` |
-| `ratelimit/`, `email/`, `storage/` | Límites de peticiones, armado y envío de correos, firma y limpieza de archivos en R2 |
-| `migration/` | Migraciones de datos (`V24`, `V25`, `V26`) sobre una base PostgreSQL descartable |
-| `integration/` | Flujos completos contra PostgreSQL: concurrencia, rondas de QA, almacenamiento y errores de Tomcat |
-| `config/`, `dto/`, `entity/`, `exception/`, `util/` | Propiedades, validaciones, formato de errores, orden del Kanban, tokens y slugs |
+Otros valores fijos en `application.yml`:
+- duración de los tokens: access 15 min, refresh 7 días, verificación 24 h, restablecer contraseña 60 min, invitación 7 días;
+- cuota por workspace: 2 GB;
+- zona horaria: `America/Bogota`.
 
 ## Arquitectura
 
 ```
-Request → RateLimitFilter → JwtAuthFilter → Controller → Service → Repository → PostgreSQL
+Petición → RequestLanguageFilter → RateLimitFilter → JwtAuthFilter → Controller → Service → Repository → PostgreSQL
+                                                                         └→ RealtimeInterceptor (avisa del cambio)
 ```
 
-- **Controller**: recibe y valida DTOs (`record`), nunca toca entidades ni repositorios.
-- **Service** (interfaz + `impl/`): lógica de negocio, permisos y `@Transactional`.
-- **Repository**: Spring Data JPA (+ `Specification` para los filtros de issues).
-- **Mapper**: MapStruct convierte entidades a DTOs.
-- Permisos por workspace con `@PreAuthorize("@workspaceSecurity.isManager(#slug)")`; el rol se
-  consulta en la BD, no viaja en el token.
+- **Controller:** recibe y valida DTOs (`record` con Bean Validation). No toca entidades ni repositorios. Cada
+  endpoint lleva su regla de acceso en `@PreAuthorize` (`@workspaceSecurity.isMember(#slug)`,
+  `hasPermission(#slug, 'ISSUE_EDIT')`…).
+- **Service:** interfaz más `impl/`. Ahí están las reglas de negocio, los permisos finos (por ejemplo, «eliminar sus
+  propias tareas» frente a «eliminar cualquier tarea») y las transacciones.
+- **Repository:** Spring Data JPA, con `Specification` para los filtros de tareas y bloqueos pesimistas donde hay
+  carreras (el número de la tarea, el orden del Kanban, el avance de las historias).
+- **Mapper:** MapStruct convierte entidades en DTOs.
+- **Errores:** `GlobalExceptionHandler` da a todos los errores la misma forma (ver [La API](#la-api)).
 
 ```
 src/main/java/com/taskflow/api/
-├── config/       SecurityConfig, CorsConfig, AsyncConfig, OpenApiConfig, ResendConfig, AppProperties
-├── security/     JwtService, JwtAuthFilter, CustomUserDetailsService, WorkspaceSecurity
-├── ratelimit/    RateLimitFilter, RateLimitService, RateLimitRule
-├── controller/   Un controlador por recurso
-├── service/      Interfaces  ·  service/impl/ implementaciones
-├── repository/   Repositorios JPA y especificaciones
-├── entity/       Entidades + BaseEntity (UUID, created_at, updated_at) · entity/enums/
-├── dto/          request/ y response/ (records)
-├── mapper/       Mappers de MapStruct
-├── exception/    GlobalExceptionHandler y excepciones propias
-├── email/        EmailService, ResendEmailService, SmtpEmailService, EmailNotifier
-├── storage/      R2ObjectStorage, tipos de archivo permitidos, StorageCleanup (cola de borrado)
-├── maintenance/  Limpieza diaria de tokens, invitaciones y notificaciones
-└── util/         Tokens, slugs, IP/navegador, orden del Kanban
+├── config/        Seguridad, CORS, hilos asíncronos, OpenAPI, propiedades (AppProperties)
+├── security/      JWT, filtro de autenticación, CredentialsGuard, WorkspaceSecurity y AccessControl (permisos)
+├── ratelimit/     RateLimitFilter, RateLimitService, reglas y KnownLogins
+├── controller/    Un controlador por recurso
+├── service/       Interfaces · service/impl/ implementaciones (tareas, historias, ciclos, daily, retro…)
+├── repository/    Repositorios JPA y especificaciones
+├── entity/        Entidades (UUID, created_at, updated_at) · entity/enums/
+├── dto/           request/ y response/ (records)
+├── mapper/        MapStruct
+├── exception/     GlobalExceptionHandler y excepciones propias
+├── realtime/      Server-Sent Events: RealtimeHub, RealtimeController, RealtimeInterceptor
+├── github/        GitHub App: cliente, webhooks, cuentas enlazadas, reglas y mantenimiento
+├── imports/       Importación: orígenes (Jira, Trello, Linear, Asana, CSV), plan, escritura y deshacer
+├── report/        Reporte de tareas en PDF
+├── email/         Envío por SMTP o Resend y EmailNotifier (qué correo se manda y cuándo)
+├── storage/       R2, tipos de archivo permitidos y limpieza de huérfanos
+├── i18n/          Idioma de la petición y traducción al inglés de los mensajes
+├── maintenance/   Limpieza diaria
+└── util/          Orden del Kanban, cursores de paginación, menciones, slugs, tokens…
 ```
 
----
+## Roles y permisos
 
-## Guía para el frontend
+Cada workspace tiene roles con permisos sueltos (47, en 11 grupos: tareas, historias, comentarios, ciclos, retro,
+módulos, daily, seguimiento, proyectos, workspace e integraciones). El catálogo completo sale de
+`GET /api/v1/permissions` y vive en `entity/enums/Permission.java`.
 
-Prefijo de todas las rutas: **`/api/v1`**. Todas requieren `Authorization: Bearer <accessToken>`
-excepto `/auth/**` y `GET /invitations/{token}`.
+- **Project manager:** tiene todos los permisos y no se puede editar. Lo es quien crea el workspace, y puede nombrar
+  a otros.
+- **Miembro:** el rol con el que entra cada invitado. Sus permisos se ajustan desde *Ajustes → Roles*.
+- **Roles propios** («Líder», «QA»…): se crean con los permisos que se quieran.
+- **Acceso a proyectos:** quien no tiene «Ver todos los proyectos» solo ve los proyectos de los que es miembro. Todo
+  lo que se lee o se cambia de un proyecto lo comprueba `WorkspaceSecurity.canAccessProject`.
+- **Decisiones en la base de datos:** el rol no viaja en el token. Se consulta en cada petición, así un cambio de rol
+  cuenta al instante.
+
+## Seguridad
+
+La seguridad fue una prioridad del proyecto: cada punto de abajo tiene pruebas.
+
+**Sesiones**
+- El **access token** dura 15 min y el **refresh token** 7 días. Cada refresh **rota** el token. Si alguien reutiliza
+  uno ya rotado (fuera del margen de 30 s para dos recargas seguidas), se cierran todas las sesiones de esa cuenta,
+  porque significa que lo robaron.
+- Los access tokens llevan la versión de las credenciales (claim `cv`). Al cambiar o restablecer la contraseña sube
+  la versión, y los tokens anteriores dejan de servir en el acto, sin esperar a que venzan (`CredentialsGuard`).
+- `logout` cierra esa sesión entera (el token y todos sus sucesores).
+- Los tokens (refresh, verificación, restablecer contraseña, invitación) se guardan **hasheados con SHA-256**. Las
+  contraseñas, con **BCrypt**.
+
+**Cuentas**
+- **Login sin verificar el correo:** responde 403.
+- **Registro:** responde lo mismo exista o no la cuenta (`201 { email }`), y tarda lo mismo porque el hash se calcula
+  siempre. Así no sirve para averiguar qué correos están registrados. Si el correo ya tenía cuenta, a su dueño le
+  llega un aviso, como mucho uno por hora.
+- **Aviso de inicio de sesión:** cada login manda un correo con la IP y el navegador, así el dueño se entera si entra
+  otra persona.
+
+**Límites de peticiones** (Bucket4j, en memoria; al pasarse, `429` con `Retry-After`)
+
+| Regla | Límite |
+|---|---|
+| Login, por IP | 5 por minuto |
+| Login de una cuenta desde una IP | 10 cada 15 min |
+| Login de una cuenta desde cualquier IP | 50 cada 15 min. No se aplica desde una IP donde la cuenta ya entró bien (`KnownLogins`), así nadie puede dejar al dueño sin entrar con solo saber su correo |
+| Registro, por IP | 3 cada 10 min |
+| Olvidé mi contraseña · reenviar verificación | 3 cada 15 min |
+| Validar un enlace de restablecer contraseña | 10 cada 15 min |
+| Cambiar la contraseña | 5 cada 15 min |
+| Invitaciones | 20 por hora quien invita · 3 por hora a un mismo correo |
+| Subidas de archivos | 300 por hora por persona |
+| Webhook de GitHub | 600 por minuto |
+
+**Detrás de un proxy:** con `FORWARD_HEADERS_STRATEGY=native` la IP real sale de `X-Forwarded-For`. Esa cabecera
+solo se acepta si la conexión viene de una red interna (el proxy en la red de Docker), así un cliente no puede
+falsear su IP. Sin `native`, detrás de un proxy todos compartirían el límite de login.
+
+**Archivos**
+- El bucket es privado. Las URLs firmadas duran 15 min para subir y 1 h para descargar.
+- La URL de subida lleva `If-None-Match: *`, así no sirve para reemplazar un archivo ya subido.
+- Solo se aceptan los tipos de la lista. La extensión manda, y se comprueban los primeros bytes: un ejecutable
+  renombrado a `.png` se rechaza. HTML, SVG y ejecutables nunca entran.
+- Hay cuota por workspace y límite de tamaño: 5 MB las imágenes y 10 MB los demás archivos.
+
+**Accesos y permisos**
+- Cada endpoint comprueba la membresía y el permiso.
+- Las acciones diferidas vuelven a comprobar el permiso al ejecutarse: completar la instalación de GitHub, las reglas
+  de Actions y las importaciones a un proyecto.
+
+**GitHub e importaciones**
+- Los webhooks de GitHub se verifican con su firma HMAC-SHA256 y se descartan los repetidos.
+- Los tokens de GitHub de cada persona se guardan cifrados con **AES-GCM**.
+- Las credenciales de un origen de importación (token de Jira, Trello…) viven solo en memoria y se olvidan al
+  terminar.
+
+**Respuestas de la API**
+- Los errores no filtran detalles internos (`server.error.include-message: never`).
+- Las respuestas llevan las cabeceras de seguridad de Spring Security.
+- En producción Swagger está apagado.
+
+**Riesgos aceptados**
+- Los límites viven en memoria (una sola instancia de la API).
+- El refresh token se guarda en `localStorage` del navegador: la API lo devuelve en el cuerpo, no en una cookie
+  httpOnly. Lo compensa la Content-Security-Policy estricta del frontend.
+
+## Tiempo real
+
+`GET /api/v1/events` abre un canal **Server-Sent Events** por pestaña. Cuando alguien cambia algo, la API avisa a
+quien lo está viendo y el frontend vuelve a pedir solo lo que cambió.
+
+- **Sin datos en los avisos:** solo llevan identificadores (workspace, proyecto, tarea, qué tipo de cambio). Lo que se
+  muestra se sigue pidiendo a la API con los permisos de siempre, así un aviso nunca filtra nada.
+- **Quién recibe cada aviso:**
+  - un cambio en un proyecto, quien puede verlo;
+  - un cambio del workspace (miembros, GitHub, una importación), sus miembros;
+  - una notificación, solo su destinatario.
+- **Cuándo se envía:** después del commit, desde un hilo aparte. `RealtimeInterceptor` lo hace solo tras cada
+  petición que cambia algo (POST, PUT, PATCH o DELETE con 2xx).
+- **Sin eco:** la pestaña que hizo el cambio manda `X-Client-Id` y no recibe su propio eco.
+- **Conexión:** latido cada 25 s; el servidor cierra a los 30 min y el navegador reconecta solo.
+- **Escala:** las conexiones viven en memoria, lo que basta con una instancia. Con varias habría que pasar a un canal
+  compartido (por ejemplo `LISTEN/NOTIFY` de PostgreSQL).
+
+## Integración con GitHub
+
+TaskFlow se conecta como una **GitHub App**. La configuración de producción está en [DESPLIEGUE.md](DESPLIEGUE.md#5-github-app-de-producción).
+
+1. **Conectar el workspace:** *Ajustes → Integraciones → Conectar con GitHub* instala la app en una cuenta u
+   organización y elige los repositorios.
+2. **Repositorios del proyecto:** en *Ajustes del proyecto → GitHub* se dice qué repositorios son de ese proyecto, el
+   formato del nombre de las ramas y a qué estado pasa la tarea cuando se crea su rama o cuando su PR se abre, se
+   fusiona o se cierra.
+3. **Enlazar cada cuenta:** cada persona enlaza su cuenta de GitHub. Lo que hace desde TaskFlow (crear una rama,
+   ejecutar o cancelar un workflow) sale a su nombre y solo donde GitHub le da permiso. Sin cuenta enlazada se puede
+   ver, no actuar.
+4. **Ramas y PRs:** una rama o un PR que nombra la tarea (`WEB-12` en el nombre de la rama, el título o la
+   descripción) queda enlazado a ella. Se ven el estado del PR, sus checks y quién lo hizo, con su foto.
+5. **Avance automático:** la tarea cambia de estado sola según su rama y su PR. No se completa sola si le faltan
+   criterios de aceptación; en ese caso avisa a los asignados.
+6. **GitHub Actions:** ejecutar, repetir o cancelar workflows desde la tarea o desde la página GitHub del proyecto, y
+   **reglas** que ejecutan un workflow al completar una tarea (también al cerrar una historia).
+
+Los webhooks entran por `POST /api/v1/github/webhook` y la instalación vuelve por `GET /api/v1/github/setup`.
+
+## Importaciones
+
+*Ajustes del workspace → Importar* trae proyectos desde **Jira Cloud, Trello, Linear y Asana** (conexión directa con
+un token) o desde un **CSV** o la exportación JSON de Trello.
+
+1. **Conectar o subir:** se conecta al origen o se sube el archivo. La API lista los proyectos que hay.
+2. **Elegir:** qué traer y a dónde, a un proyecto nuevo o a uno existente. Hace falta permiso sobre el destino.
+3. **Mapear:** estados, tipos y personas. A quien todavía no está en el workspace se le puede invitar desde ahí: sus
+   tareas quedan apuntadas y se le asignan cuando acepta la invitación.
+4. **Ejecutar:** corre en segundo plano por tandas. Se puede detener y al final da un **informe** descargable en CSV.
+5. **Deshacer:** borra exactamente lo que creó la importación.
+
+Se importan tareas, historias, bugs, subtareas, descripciones (el formato ADF de Jira pasa a Markdown), comentarios,
+etiquetas, ciclos, módulos y adjuntos.
+
+## Archivos (Cloudflare R2)
+
+Los archivos nunca pasan por la API: el navegador sube y descarga directo de R2.
+
+1. `POST .../files` pide una URL firmada para subir. La API valida el tipo, el tamaño y la cuota.
+2. El navegador hace `PUT` a R2.
+3. `POST .../files/{id}/confirm` revisa que el objeto exista, su tamaño y sus primeros bytes, y lo da por subido.
+4. Para mostrar archivos se piden las URLs de descarga en lote: `GET /api/v1/files/urls?ids=...`.
+
+**Limpieza:**
+- Al borrar un archivo, también en cascada con su tarea, proyecto o workspace, un trigger deja su clave en
+  `storage_deletions`. Después del commit y cada minuto se borra de R2, con reintentos si R2 falla.
+- Cada hora se borran las subidas sin confirmar de más de 24 h, las imágenes pegadas que ya no aparecen en ningún
+  texto desde hace 7 días y las fotos de perfil sin dueño.
+
+El CORS del bucket tiene que permitir `GET`, `PUT` y `HEAD` desde `FRONTEND_URL`, con `AllowedHeaders: ["*"]` y
+exponiendo `ETag`.
+
+## Correos
+
+Los correos se arman con plantillas Thymeleaf (`templates/email/`) en el idioma de la persona y se envían en segundo
+plano.
+- **Cuenta:** verificación, recuperar contraseña, contraseña cambiada, aviso de inicio de sesión e intento de crear
+  una cuenta con un correo ya registrado.
+- **Workspace:** invitaciones.
+
+Lo demás (asignaciones, menciones, desbloqueos, historias listas para revisar, espacio casi lleno…) llega a la
+bandeja de notificaciones de la app.
+
+En producción salen por **SMTP de Gmail**, desde una cuenta exclusiva con contraseña de aplicación. Para usar dominio
+propio está **Resend**. En local salen por Mailpit.
+
+## Idiomas
+
+La API responde en español o en inglés según `Accept-Language` (el frontend lo manda con el idioma elegido).
+- **Errores y validaciones:** el texto en español es la clave, y `src/main/resources/i18n/en.json` tiene su
+  traducción, también con patrones para mensajes con partes variables.
+- **Coherencia:** `MessageCoverageTest` falla si un mensaje nuevo del código no tiene traducción.
+- **Correos:** usan `i18n/email.properties` y `email_en.properties`.
+- **Estados de fábrica:** Backlog, Todo, In Progress, Done y Cancelled se muestran traducidos mientras nadie los
+  renombre.
+
+## Tareas programadas
+
+| Qué | Cuándo |
+|---|---|
+| Borrar de R2 los archivos eliminados (cola `storage_deletions`) | Después de cada commit y cada minuto |
+| Archivos huérfanos (subidas sin confirmar, imágenes que ya no se usan) | Cada hora (`STORAGE_CLEANUP_CRON`) |
+| Tokens vencidos o usados, invitaciones vencidas, notificaciones leídas de más de 90 días | Diario, 3:30 (`MAINTENANCE_CRON`) |
+| Webhooks de GitHub ya atendidos y ejecuciones de Actions antiguas | Diario |
+
+## La API
+
+Prefijo **`/api/v1`**. Todo requiere `Authorization: Bearer <accessToken>` salvo `/auth/**`, `/health`,
+`GET /invitations/{token}` y los webhooks de GitHub. El detalle de cada endpoint (cuerpos, respuestas y validaciones)
+está en **Swagger** (`/swagger-ui.html` en local).
 
 ### Formato de error
-
-Todas las respuestas de error tienen la misma forma (`errors` solo aparece en validaciones):
 
 ```json
 {
   "status": 400,
   "message": "Datos inválidos",
   "errors": { "title": "El título es obligatorio" },
-  "timestamp": "2026-10-22T15:30:00Z"
+  "timestamp": "2026-11-13T15:30:00Z"
 }
 ```
 
 | Código | Cuándo |
 |---|---|
-| 400 | Validación o regla de negocio (el `message` sirve para mostrar en un toast) |
-| 401 | Sin token, o `"Token inválido o expirado"` → llamar a `/auth/refresh` |
-| 403 | Sin permiso, o email sin verificar en el login |
-| 404 | Recurso no encontrado |
-| 409 | Conflicto (slug, identificador o email duplicado, estado con issues…). Algunos traen `code`: `STORY_CLOSED`, `DESCRIPTION_CONFLICT`, `WORKSPACE_LIMIT` |
-| 415 | El cuerpo no es JSON (`Content-Type` distinto de `application/json`) |
-| 429 | Rate limit: leer la cabecera `Retry-After` (segundos) y mostrarlo con Sonner |
-| 503 | Almacenamiento de archivos sin configurar o sin respuesta (R2) |
+| 400 | Validación o regla de negocio. `message` se puede mostrar tal cual; `errors` trae el error de cada campo |
+| 401 | Sin token o vencido: hay que llamar a `/auth/refresh` |
+| 403 | Sin permiso (o sin acceso al proyecto), o correo sin verificar en el login |
+| 404 | No existe |
+| 409 | Conflicto: slug o identificador repetido, estado con tareas, descripción editada por otra persona… Algunos traen `code` (`STORY_CLOSED`, `DESCRIPTION_CONFLICT`, `WORKSPACE_LIMIT`) |
+| 412 | Al subir a R2: la URL firmada ya se usó |
+| 415 | El cuerpo no es JSON |
+| 429 | Límite de peticiones: esperar los segundos de `Retry-After` |
+| 503 | R2 sin configurar o sin respuesta |
 
 ### Autenticación
 
 | Método | Ruta | Cuerpo | Respuesta |
 |---|---|---|---|
-| POST | `/auth/register` | `{ email, password, fullName }` | `201` usuario (sin verificar) |
+| POST | `/auth/register` | `{ email, password, fullName }` | `201 { email }`, igual exista o no la cuenta |
 | POST | `/auth/verify-email` | `{ token }` | `{ message }` |
 | POST | `/auth/resend-verification` | `{ email }` | `{ message }` (siempre 200) |
 | POST | `/auth/login` | `{ email, password }` | `AuthResponse` |
-| POST | `/auth/refresh` | `{ refreshToken }` | `AuthResponse` (nuevo par) |
+| POST | `/auth/refresh` | `{ refreshToken }` | `AuthResponse` (par nuevo; guardar el refresh nuevo) |
 | POST | `/auth/logout` | `{ refreshToken }` | `204` |
 | POST | `/auth/forgot-password` | `{ email }` | `{ message }` (siempre 200) |
+| GET | `/auth/reset-password/validate?token=` | — | Si el enlace sigue sirviendo |
 | POST | `/auth/reset-password` | `{ token, newPassword }` | `{ message }` |
 
-`AuthResponse`: `{ accessToken, refreshToken, tokenType: "Bearer", expiresIn: 900, user }`.
+`AuthResponse` = `{ accessToken, refreshToken, tokenType: "Bearer", expiresIn: 900, user }`. Las contraseñas deben
+tener entre 8 y 72 caracteres con al menos una letra y un número, y caber en 72 bytes (el límite de BCrypt).
 
-- Contraseña: 8–72 caracteres con al menos una letra y un número, y como mucho **72 bytes** (el límite
-  de BCrypt: con tildes, ñ o emojis caben menos de 72 caracteres; si no, 400).
-- El **access token dura 15 min** y el **refresh token 7 días**. Cada refresh **rota** el token:
-  hay que guardar el nuevo. Si se reutiliza un refresh token ya usado, se cierran todas las
-  sesiones del usuario (protección contra robo), salvo dentro de los 30 s siguientes a su rotación
-  (`REFRESH_REUSE_GRACE_SECONDS`, dos recargas seguidas): ahí recibe un par nuevo de la misma sesión.
-- `logout` cierra **esa sesión entera**: el token enviado, sus sucesores (aunque se envíe uno ya rotado) y
-  los rotados hace poco que apuntan a ellos. Las demás sesiones del usuario siguen.
-- Login sin verificar el email → `403 "Debes verificar tu correo antes de iniciar sesión"`.
-- Rate limit por IP: login 5/min, registro 3/10 min, olvidé mi contraseña y reenviar
-  verificación 3/15 min (la ruta se compara decodificada: `/auth/%6Cogin` cuenta como login).
-- Rate limit por cuenta: 10 contraseñas incorrectas cada 15 min para un mismo correo, desde cualquier IP
-  (después, 429 con `Retry-After`). Cambiar la contraseña (`PATCH /users/me/password`): 5 intentos cada
-  15 min.
-- Cambiar o restablecer la contraseña **invalida los access tokens emitidos antes** (no solo los refresh
-  tokens): las demás sesiones reciben 401 «Token inválido o expirado» en su siguiente petición y, como su
-  refresh token ya no existe, vuelven al login. La sesión que cambió la contraseña recibe un par nuevo.
-- El correo de cada operación sale **después** de confirmarla; si el proveedor de correo falla o su cola
-  está llena, la operación (login, registro, invitación…) no falla.
+### Mapa de recursos
 
-**Páginas que debe tener el front** (los correos enlazan a ellas):
-
-| Ruta del front | Qué hace |
+| Recurso | Ruta base |
 |---|---|
-| `/verify-email?token=…` | Llama a `POST /auth/verify-email` |
-| `/reset-password?token=…` | Formulario → `POST /auth/reset-password` |
-| `/forgot-password` | Formulario → `POST /auth/forgot-password` (enlace «¿No fuiste tú?» del aviso de login) |
-| `/invitations/{token}` | `GET /invitations/{token}` para mostrarla y `POST /invitations/{token}/accept` (requiere sesión con el mismo email invitado) |
-
-### Usuario
-
-| Método | Ruta | Descripción |
-|---|---|---|
-| GET / PATCH | `/users/me` | Ver / editar perfil (`{ fullName?, avatarUrl? }`) |
-| POST | `/users/me/avatar` | `{ contentType, size }` → subida firmada de la foto de perfil (la recorta el navegador a 512 × 512 WebP; PNG/JPG/WebP hasta 5 MB). Ver [Archivos](#archivos) |
-| POST | `/users/me/avatar/{fileId}/confirm` | Confirma la foto y la pone en el perfil: `avatarUrl` pasa a ser `/files/<id>` (la anterior se borra) |
-| DELETE | `/users/me/avatar` | Quita la foto (vuelven las iniciales) |
-| PATCH | `/users/me/password` | `{ currentPassword, newPassword }` → devuelve un `AuthResponse` nuevo (las demás sesiones se cierran) |
-
-### Workspaces e invitaciones
-
-Roles: **project manager** (`OWNER`) y **miembro** (`MEMBER`); no hay administradores. Quien crea el
-workspace es su project manager e invita al equipo. Puede haber varios project managers, pero nunca
-menos de uno: degradar, quitar o hacer salir al último responde **409**. Cada workspace se identifica
-por su **slug** en la URL. Algunos slugs están reservados porque chocan con rutas del frontend
-(`login`, `register`, `profile`, `notifications`, `onboarding`, `invitations`, `settings`…); el
-backend responde 400 si se usan.
-
-| Método | Ruta | Permiso |
-|---|---|---|
-| GET / POST | `/workspaces` | Mis workspaces (con `myRole`) / crear (`{ name, slug? }`; como mucho 10 propios, si no 409 `code: "WORKSPACE_LIMIT"`) |
-| GET | `/workspaces/{slug}` | Miembro |
-| PATCH | `/workspaces/{slug}` | Project manager |
-| DELETE | `/workspaces/{slug}` | Project manager |
-| GET | `/workspaces/{slug}/members` | Miembro |
-| PATCH | `/workspaces/{slug}/members/{userId}` | Project manager (`{ role: "OWNER" \| "MEMBER" }`) |
-| DELETE | `/workspaces/{slug}/members/{userId}` | Project manager, o uno mismo para salir |
-| POST / GET | `/workspaces/{slug}/invitations` | Project manager: invitar (`{ email }`, entra como `MEMBER`; 20 invitaciones por hora por persona y 3 por hora a un mismo correo, si no 429) / pendientes |
-| DELETE | `/workspaces/{slug}/invitations/{invitationId}` | Project manager: cancelar |
-| GET | `/invitations/{token}` | Ver invitación (**público**, sin sesión) |
-| POST | `/invitations/{token}/accept` | Aceptar (con sesión del email invitado). Volver a aceptarla quien ya entró con ella (doble clic, el enlace abierto otra vez) responde el workspace de nuevo mientras no venza |
-
-### Proyectos, estados y etiquetas
-
-Base: `/workspaces/{slug}/projects`. El **project manager** ve todos los proyectos; un **miembro**,
-solo aquellos de los que es miembro. Al crearlo se generan los estados Backlog, Todo, In Progress,
-Done y Cancelled, y las plantillas de tarea Reporte de bug, Historia de usuario y Tarea técnica.
-
-Dentro de un proyecto, un miembro puede ver y crear tareas, editarlas, moverlas, comentar (y
-editar/borrar sus comentarios), meterlas o sacarlas de ciclos y módulos, gestionar dependencias y
-checklists, guardar vistas personales, y ver estados, etiquetas, miembros, ciclos, módulos y
-plantillas. Configurar el proyecto es solo del project manager (los demás reciben **403**): crear,
-editar o borrar proyectos; crear, editar, reordenar o borrar estados, etiquetas y plantillas; agregar
-o quitar miembros; crear, editar o borrar ciclos y módulos; gestionar las vistas compartidas.
-
-| Método | Ruta | Descripción |
-|---|---|---|
-| GET / POST | `/projects` | Listar / crear (PM; `{ name, identifier, description? }`; identifier ej. `WEB`). Cada proyecto trae `memberCount` y `members` (los 5 primeros por nombre, `UserSummary`) para los avatares de la tarjeta |
-| GET / PATCH / DELETE | `/projects/{projectId}` | Ver / editar (PM) / eliminar (PM) |
-| GET / POST | `/projects/{projectId}/members` | Miembros / agregar (PM; `{ userId }`, debe estar en el workspace) |
-| DELETE | `/projects/{projectId}/members/{userId}` | Quitar miembro (PM) |
-| GET / POST | `/projects/{projectId}/states` | Estados (ordenados por `position`) / crear (PM) `{ name, color, group, position? }` |
-| PATCH / DELETE | `/projects/{projectId}/states/{stateId}` | Editar o reordenar / borrar (PM; no si tiene issues) |
-| PUT | `/projects/{projectId}/states/order` | Reordenar todas las columnas (PM) `{ stateIds: [...] }`: exactamente los estados del proyecto, sin repetir (si no, 400 y nada cambia). Devuelve los estados en el orden nuevo |
-| GET / POST | `/projects/{projectId}/labels` | Etiquetas / crear (PM) `{ name, color }` |
-| PATCH / DELETE | `/projects/{projectId}/labels/{labelId}` | Editar / borrar (PM) |
-
-`group` ∈ `BACKLOG | UNSTARTED | STARTED | COMPLETED | CANCELLED`; los colores van como `#RRGGBB`.
-
-Cada proyecto trae `nextIssueCode`: el código que recibirá la próxima tarea (`"WEB-26"`, para el «→ será
-WEB-26» del formulario de nueva tarea). Es orientativo: si otra persona crea una tarea antes, esa se
-lleva el número.
-
-### Issues
-
-Base: `/workspaces/{slug}/projects/{projectId}/issues`.
-
-| Método | Ruta | Descripción |
-|---|---|---|
-| GET | `/issues` | Listado paginado con filtros |
-| POST | `/issues` | Crear |
-| GET / PATCH / DELETE | `/issues/{issueId}` | Ver / editar / eliminar (PM o quien la creó; si no, 403) |
-| PATCH | `/issues/{issueId}/move` | Mover en el Kanban |
-| GET | `/issues/{issueId}/sub-issues` | Sub-tareas |
-| GET / POST | `/issues/{issueId}/comments` | Comentarios / comentar `{ body }` |
-| PATCH / DELETE | `/issues/{issueId}/comments/{commentId}` | Editar (autor) / borrar (autor o PM) |
-| GET | `/issues/{issueId}/activity` | Historial de cambios |
-| GET / POST | `/issues/{issueId}/relations` | Dependencias / agregar `{ type, issueId }` |
-| DELETE | `/issues/{issueId}/relations/{relationId}` | Quitar dependencia |
-| GET / POST | `/issues/{issueId}/checklist` | Criterios y checklist / agregar `{ kind, text }` |
-| PATCH / DELETE | `/issues/{issueId}/checklist/{itemId}` | Editar, marcar o reordenar `{ text?, done?, position? }` / eliminar |
-| GET | `/stories` | Historias del proyecto con su progreso, personas, tareas, bugs y relacionadas |
-| POST | `/issues/{issueId}/split` | «Partir en tareas» (PM): `{ items: [{ title, type?, priority?, assigneeIds? }], reopen? }` |
-| POST | `/issues/{issueId}/close` | «Cerrar historia» (PM): al primer estado completado |
-| POST | `/issues/{issueId}/reopen` | «Reabrir» (PM): al primer estado en curso |
-
-**Crear** — solo `title` es obligatorio:
-
-```json
-{
-  "title": "Login con Google",
-  "description": "…",
-  "stateId": "uuid (por defecto, el primer estado)",
-  "priority": "URGENT | HIGH | MEDIUM | LOW | NONE",
-  "parentId": "uuid",
-  "startDate": "2026-10-22",
-  "dueDate": "2026-10-30",
-  "assigneeIds": ["uuid"],
-  "labelIds": ["uuid"],
-  "checklist": [ { "kind": "CRITERION | CHECK", "text": "…" } ],
-  "templateId": "uuid"
-}
-```
-
-Las fechas de planificación (`startDate`/`dueDate` de las tareas, las de ciclos y módulos y el `date`
-de la daily) van del año 1900 al 2999 (si no, 400 del campo). Un título, comentario, elemento de
-checklist o nota de la retro hecho solo de espacios, también duros (U+00A0) o de ancho cero (U+200B),
-es un 400 del campo.
-
-`checklist` (opcional, máx. 50) crea los criterios y pasos en la misma transacción, en el orden
-recibido; es lo que se envía al crear una tarea desde una plantilla. `templateId` (opcional) es la
-plantilla con la que se rellenó el formulario: suma un uso a la plantilla (`usageCount`); 400 si no es
-de este proyecto.
-
-El issue recibe un código legible (`code: "WEB-12"`) que sigue al identificador del proyecto. La
-respuesta incluye también su ciclo (`cycle: { id, name }` o `null`), sus módulos (`modules: [...]`),
-`completedAt`: cuándo entró a un estado del grupo `COMPLETED` (`null` si no está completada; se
-borra si sale de ese grupo y no cambia al moverla entre dos estados completados), `startedAt`: la
-primera vez que entró a un estado del grupo `STARTED` (`null` si nunca pasó por uno; no se borra al
-salir), y los contadores `blockedByCount` (tareas que la bloquean y siguen abiertas: si es mayor que 0,
-mostrar «bloqueada»), `checklistTotal`/`checklistDone` y `criteriaTotal`/`criteriaDone`. Además:
-
-- `blockedByCodes`: códigos de esas tareas, ordenados (`["AMC-4", "WEB-2"]`; pueden ser de otro
-  proyecto) para el chip «bloqueada por WEB-2».
-- `blockingCodes`: códigos de las tareas abiertas que esta bloquea mientras siga abierta, para el chip
-  «bloquea WEB-7» (o «bloquea 2» si hay varias).
-- `checklistUpdatedAt`: último cambio de los criterios o la checklist («actualizado hace…»); `null` si
-  nunca tuvo. Cambiar la checklist no modifica `updatedAt`.
-
-**Tipos** (`type`): `STORY` (historia), `TASK` (tarea, por defecto) o `BUG`. Una historia se parte en
-tareas (sus hijas por `parentId`); los bugs hijos de una historia son sus «bugs ligados».
-
-- Solo el project manager crea historias, convierte una tarea en historia o al revés (403) y las parte,
-  cierra o reabre. Una historia con hijas no cambia de tipo (409) y no puede ser hija de otra tarea (400).
-  Pasar a `BUG` con la descripción vacía agrega las secciones del reporte.
-- Progreso en la historia: `storyTaskCount` (tareas sin las canceladas), `storyTaskDoneCount`,
-  `storyTaskStartedCount`, `openBugCount` y `bugsAfterCloseCount`; los bugs no cuentan en «x de y».
-- **Avance automático**: cuando una de sus tareas entra a un estado `STARTED` y la historia sigue en
-  Backlog o Todo, pasa sola al primer estado `STARTED` (historial `STORY_AUTO_STATE` sin autor, con
-  `oldValue: "Luis empezó WEB-41"` y `newValue` el estado nuevo).
-- `readyForReview` («lista para revisar»): abierta, con al menos una tarea **completada**, todas completadas
-  o canceladas y ningún bug ligado abierto (si todas sus tareas se cancelaron, no está lista). El estado no
-  cambia; se avisa una vez a los project managers con `STORY_READY` (sin autor) y la marca se borra si se
-  reabre una tarea o llega una tarea o un bug abierto. Reabrir una historia que ya está lista no vuelve a
-  avisar; si no lo está, avisará cuando lo esté. Convertir en historia una tarea con hijas la revisa en el
-  acto.
-- Eliminar una historia es **solo del project manager** (403 «Solo el project manager elimina historias»),
-  aunque la haya creado otra persona cuando era tarea.
-- Cerrar (pasar a `COMPLETED`/`CANCELLED`) o reabrir una historia es del project manager por cualquier
-  camino (`PATCH`, `/move`, `/close`, `/reopen`; si no, 403 «Solo el project manager cierra la historia»).
-  Se guarda `closedAt` y `closedBy`.
-- Una `TASK` no vuelve a ser trabajo abierto de una historia cerrada sin reabrirla. Responde **409** con
-  `code: "STORY_CLOSED"` salvo que llegue `reopenParent: true` (solo el PM: la reabre y queda en su
-  historial; un miembro recibe 403 «Solo el project manager reabre la historia»):
-  - agregarle una `TASK` (crear con `parentId`, o cambiar el padre con `PATCH`);
-  - convertir en `TASK` (`PATCH { type: "TASK" }`) un hijo suyo (un bug, por ejemplo);
-  - sacar una `TASK` suya de un estado completado o cancelado a uno abierto, por `PATCH { stateId }` o por
-    `PATCH /move` (que también acepta `reopenParent`).
-
-  Un `BUG` se liga (o se reabre) sin reabrirla. Moverse entre estados cerrados, o editar otros campos, no
-  pide nada. `relatesToId` en el `POST /issues` deja la tarea nueva relacionada (`RELATES`) con esa tarea
-  en la misma transacción («crear tarea relacionada»).
-- Una historia no puede ser hija de otra tarea (400 `STORY_AS_CHILD`); se valida solo cuando la petición
-  cambia el tipo o el padre.
-- Listado: `?type=TASK&type=BUG` (sin `type`, todos). Las vistas guardadas sin `type` muestran tareas y
-  bugs; `groupBy` acepta además `type` (lista) y `story` (carriles del tablero).
-- Las tareas de un proyecto que cuentan (`issueCount`, `openIssueCount`, `overdueIssueCount`, el avance de
-  ciclos y módulos, la vista previa y las cuentas del cierre de un ciclo, el resumen de la retrospectiva, el
-  resumen de actividad, las estadísticas y la daily) son el trabajo: tareas y bugs, no las historias. Las
-  canceladas no suman al total del avance (9 hechas y 1 cancelada = 9/9). El proyecto trae además
-  `openStoryCount` y `unsplitStoryCount` («2 sin partir»). «Vencida» (`overdueIssueCount`) usa el día de
-  `app.timezone`.
-
-**Dependencias** (`relations`): `type` = `BLOCKS` (esta tarea bloquea a `issueId`), `BLOCKED_BY`
-(`issueId` bloquea a esta; se guarda como el `BLOCKS` inverso) o `RELATES` (simétrica). La otra tarea
-puede ser de **cualquier proyecto del workspace** al que el usuario tenga acceso (si no existe o no
-tiene acceso, 400). Responde **409** si es la misma tarea, si la relación ya existe o si dos tareas
-quedarían bloqueándose mutuamente. Cada cambio queda en el historial de ambas tareas
-(`field: "RELATION"`, con textos como `"bloquea WEB-12"`, `"bloqueada por AMC-3"` o
-`"relacionada con WEB-7"`; en `newValue` al agregar y en `oldValue` al quitar). Cuando una tarea
-abierta pasa a un estado `COMPLETED`, los asignados de cada tarea que bloqueaba y que ya no tiene
-otros bloqueos abiertos reciben `ISSUE_UNBLOCKED`.
-
-```json
-{ "blocks": [ Rel ], "blockedBy": [ Rel ], "related": [ Rel ] }
-Rel = { "relationId": "…", "issue": RelatedIssue, "accessible": true }
-RelatedIssue = { "id", "code": "AMC-4", "title", "state": StateResponse, "assignees": [ UserSummary ],
-                 "project": { "id", "name", "identifier" }, "dueDate", "blockedByCount", "subIssueCount",
-                 "completedSubIssueCount", "checklistTotal", "checklistDone" }
-```
-
-Cada lista va ordenada por código, primero las tareas del proyecto de la URL. `accessible: false`
-cuando el usuario no tiene acceso al proyecto de la otra tarea: entonces `title` viene `null` y
-`assignees` vacío (el código, el proyecto y el estado sí vienen). `POST` devuelve el `Rel` visto desde
-la tarea de la URL (`issue` es la otra tarea). Para buscar tareas de otros proyectos al agregar una
-dependencia sirve `GET /workspaces/{slug}/search?q=`.
-
-**Criterios y checklist** (`checklist`): `kind` = `CRITERION` (criterio de aceptación) o `CHECK`
-(paso); `text` de 1 a 500 caracteres; máximo 100 por tarea (409). El `GET` devuelve
-`[ { id, kind, text, done, position, checkedBy, checkedAt } ]`: primero los criterios y luego los
-pasos, cada grupo por `position` (0, 1, 2…). Al agregar, el elemento queda al final de los de su tipo;
-en el `PATCH`, `position` es el nuevo índice dentro de su tipo y los demás se renumeran. Marcarlo
-(`done: true`) guarda `checkedBy` (UserSummary de quien lo marcó) y `checkedAt`; desmarcarlo los
-borra. Los marcados antes de esta versión tienen `checkedBy: null` y `checkedAt` aproximado.
-
-**Editar** (PATCH parcial): los campos `null` u omitidos no cambian; `assigneeIds`/`labelIds`
-reemplazan la lista completa (`[]` la vacía); `description: ""` la borra; para quitar padre o
-fechas se envía `clearParent`, `clearStartDate` o `clearDueDate` en `true`.
-
-**Listado con filtros** (se pueden repetir para varios valores y se combinan con AND):
-
-```
-GET /issues?state=<id>&state=<id>&priority=HIGH&assignee=<userId>&label=<id>
-           &cycle=<id>&module=<id>&blocked=true&search=login&page=0&size=20&sort=sortOrder,asc
-```
-
-`search` busca en el título y también por código (`WEB-12` o `12`). `blocked=true` deja solo las
-tareas con al menos un bloqueo abierto (`blocked=false`, las que no tienen): el «N bloqueadas» del
-encabezado es el `totalElements` de `?blocked=true&size=1` con los mismos filtros. Tamaño máximo de
-página: 200. `sort` admite `sortOrder`, `priorityRank`, `priority`, `sequenceId`, `title`, `type`,
-`createdAt`, `updatedAt`, `dueDate`, `startDate`, `startedAt`, `completedAt` y `closedAt` (cualquier otro: 400).
-Respuesta paginada:
-
-```json
-{ "content": [ … ], "page": 0, "size": 20, "totalElements": 57, "totalPages": 3, "first": true, "last": false }
-```
-
-**Kanban** — para pintar el tablero: `GET /states` y `GET /issues?size=200` (o una petición por
-estado con `?state=`), agrupar por `state.id` y ordenar por `sortOrder`. Al soltar una tarjeta:
-
-```http
-PATCH /issues/{issueId}/move
-{ "stateId": "<columna destino>", "afterIssueId": "<tarjeta de arriba>", "beforeIssueId": "<tarjeta de abajo>",
-  "reopenParent": false }
-```
-
-`reopenParent` (opcional): solo hace falta al sacar una `TASK` de una historia cerrada de una columna
-completada o cancelada a una abierta (sin él, 409 `STORY_CLOSED`; con él, el PM reabre la historia).
-
-`afterIssueId` y `beforeIssueId` son opcionales (sin ninguno, la tarjeta va al final de la
-columna). El backend calcula el nuevo `sortOrder` como el promedio de las vecinas, así que solo se
-actualiza una fila.
-
-### Ciclos y módulos
-
-Base: `/workspaces/{slug}/projects/{projectId}`.
-
-| Método | Ruta | Descripción |
-|---|---|---|
-| GET / POST | `/cycles` | Listar / crear (PM) `{ name, description?, startDate?, endDate? }` |
-| GET / PATCH / DELETE | `/cycles/{cycleId}` | Ver / editar (PM; `clearDates: true` lo vuelve borrador; `clearStartDate` / `clearEndDate` quitan solo una) / eliminar (PM) |
-| POST | `/cycles/{cycleId}/issues` | Agregar `{ issueIds: [...] }` (un issue está en un solo ciclo: se mueve) |
-| DELETE | `/cycles/{cycleId}/issues/{issueId}` | Quitar |
-| GET | `/cycles/{cycleId}/close-preview` | Vista previa del cierre (PM) |
-| POST | `/cycles/{cycleId}/close` | Cerrar el ciclo (PM) |
-| GET / POST | `/modules` | Listar / crear (PM) `{ name, description?, startDate?, targetDate? }` |
-| GET / PATCH / DELETE | `/modules/{moduleId}` | Ver / editar (PM; `clearDates`, `clearStartDate`, `clearTargetDate` o `clearEndDate` quitan fechas) / eliminar (PM) |
-| POST | `/modules/{moduleId}/issues` | Agregar `{ issueIds: [...] }` (un issue puede estar en varios módulos) |
-| DELETE | `/modules/{moduleId}/issues/{issueId}` | Quitar |
-
-Cada ciclo y módulo trae `progress: { totalIssues, completedIssues, percentage }` (completados =
-issues en estados del grupo `COMPLETED`). Los ciclos traen además `status`:
-`DRAFT | UPCOMING | CURRENT | COMPLETED`, `closedAt` (`null` mientras siga abierto; un ciclo cerrado
-siempre está `COMPLETED`) y `closedBy` (UserSummary de quien lo cerró, para «cerrado por …»; `null` si
-sigue abierto). Para listar los issues de un ciclo o módulo se usa el filtro `?cycle=` o `?module=` del
-listado de issues.
-
-**Tiempo de ciclo** (cierre, retrospectiva y estadísticas): mediana de días «de En curso a Hecho», de
-`startedAt` a `completedAt`, redondeada a un decimal. Las tareas completadas que nunca pasaron por un
-estado `STARTED` (`startedAt: null`) no cuentan; si no queda ninguna, `null`.
-
-**Cerrar un ciclo** (solo el PM). `close-preview` responde:
-
-```json
-{ "cycle": CycleResponse, "completed": [IssueRef], "unfinished": [IssueRef], "completedCount": 8,
-  "unfinishedCount": 3, "cycleTimeDays": 2.5, "nextCycle": CycleResponse | null }
-```
-
-`IssueRef` es el `RelatedIssue` de las dependencias (`id, code, title, state, assignees, project,
-dueDate, blockedByCount, subIssueCount, completedSubIssueCount, checklistTotal, checklistDone`;
-`blockedByCount > 0` = «bloqueada»). `completed` = grupo `COMPLETED`; `unfinished` = ni completadas ni
-canceladas (las canceladas no salen en ninguna lista y se quedan en el ciclo); ambas por número.
-`cycleTimeDays` = tiempo de ciclo de las completadas (ver arriba). `nextCycle` = el siguiente ciclo sin
-cerrar por fecha de inicio (para un ciclo sin fechas, el primero que no ha terminado).
-
-```http
-POST /cycles/{cycleId}/close
-{ "moveTo": "NEXT_CYCLE | BACKLOG", "targetCycleId": "uuid?",
-  "overrides": [ { "issueId": "uuid", "moveTo": "BACKLOG" } ], "startRetro": true }
-→ { "cycle": CycleResponse, "movedToCycle": 2, "movedToBacklog": 1, "retroStarted": true, "retroStartedNow": true }
-```
-
-Las sin terminar van a `targetCycleId` (o, sin él, al siguiente ciclo) o salen del ciclo (`BACKLOG`,
-sin cambiar de estado); `overrides` cambia el destino de tareas puntuales (las que no estén sin
-terminar se ignoran). Sin ciclo siguiente y con alguna tarea hacia `NEXT_CYCLE` → 400; un
-`targetCycleId` que no es del proyecto o es el mismo ciclo → 400, cerrado → 409. Si el ciclo terminaba
-después de hoy, su `endDate` pasa a hoy. Cerrar un ciclo ya cerrado, o que aún no empieza, → 409. Cada
-tarea movida registra `CYCLE` en su historial. Un ciclo cerrado no acepta cambios de nombre ni de
-fechas (la descripción sí), ni tareas nuevas, ni quitarle tareas → 409. Una tarea de un ciclo cerrado sí
-puede agregarse a otro ciclo (sale del cerrado y su historial registra `CYCLE` «Sprint 1 → Sprint 2»); el
-resumen del ciclo cerrado no cambia porque se guarda al cerrarlo. Las historias abiertas del ciclo se
-mueven con el resto, pero no cuentan en `movedToCycle`/`movedToBacklog` ni en la vista previa. Dos
-cierres a la vez (doble clic) se ejecutan en fila: el segundo recibe 409. `startRetro: true` abre la
-retrospectiva y avisa a los miembros del proyecto (notificación `RETRO_STARTED`, menos a quien la abre;
-solo en la app). `retroStarted` dice si la retro del ciclo está abierta (también si ya se había abierto
-antes); `retroStartedNow`, si la abrió este cierre y se avisó al equipo (si ya estaba abierta, no se
-vuelve a avisar y es `false`).
-
-### Retrospectiva
-
-Base: `/workspaces/{slug}/projects/{projectId}/cycles/{cycleId}/retro`.
-
-| Método | Ruta | Permiso | Descripción |
-|---|---|---|---|
-| GET | (base) | Acceso al proyecto | Ver la retro (sin empezar: `started: false` y sin notas) |
-| POST | `/start` | PM | Abrirla (también con `startRetro` al cerrar) y avisar al equipo (`RETRO_STARTED`); si ya estaba abierta, no cambia ni vuelve a avisar |
-| POST | `/notes` | Acceso | `{ column: WENT_WELL \| IMPROVE \| ACTION, text, ownerId? }` (1 a 500) → `201` nota |
-| PATCH / DELETE | `/notes/{noteId}` | Autor o PM (403) | Editar `{ text?, ownerId?, clearOwner? }` (parcial) / eliminar (`204`) |
-| POST / DELETE | `/notes/{noteId}/vote` | Acceso | Votar / quitar mi voto → `{ note, myVotesLeft }` |
-| POST | `/notes/{noteId}/convert` | PM | Acción → tarea (`201` `IssueResponse`) |
-| POST | `/finish` | PM | Terminarla: notas y votos quedan de solo lectura |
-
-```json
-{ "started": true, "finishedAt": null,
-  "summary": { "completedCount": 8, "totalCount": 12, "carriedToCycle": 3, "carriedToBacklog": 1,
-               "cycleTimeDays": 2.5 },
-  "notes": [ { "id": "…", "column": "ACTION", "text": "Automatizar el deploy", "author": UserSummary,
-               "owner": UserSummary | null, "createdAt": "…", "votes": 2, "votedByMe": true,
-               "issue": IssueRef | null } ],
-  "myVotesLeft": 3,
-  "previousActions": [ nota ACTION de la retro del ciclo cerrado anterior, con su issue si se convirtió ] }
-```
-
-- Columnas: `WENT_WELL` «Qué salió bien», `IMPROVE` «Qué mejorar», `ACTION` «Acciones». Notas en orden
-  de creación.
-- `summary`: tareas y bugs (sin historias ni canceladas). En un ciclo cerrado es la foto del cierre
-  (`completedCount`, `totalCount` = completadas + las que movió el cierre, `cycleTimeDays`), que no cambia
-  si después una tarea se reabre o pasa a otro ciclo; en uno abierto (o cerrado antes de esta versión), se
-  calcula con las tareas que están en él. `carriedTo*` salen de lo que hizo el cierre.
-- Votos: uno por nota y 5 por persona en cada retro (409 si ya votaste o no te quedan). Quitar un voto
-  que no existe no cambia nada.
-- Crear, editar, borrar y votar solo con la retro abierta y sin terminar (409).
-- Responsable (`owner`, «responsable: Luis»): solo en las `ACTION` (si no, 400) y debe ser miembro del
-  proyecto (400). `ownerId` lo cambia y `clearOwner: true` lo quita; mismas reglas que editar la nota.
-- Convertir: solo `ACTION` (400) y una vez (409). La tarea se crea en el primer estado `UNSTARTED` (o
-  el estado por defecto), con el texto como título (cortado a 255 con «…»; entonces el texto completo
-  va en la descripción) y la descripción «Acción acordada en la retrospectiva del ciclo «Sprint 3».»,
-  asignada al responsable si sigue siendo miembro del proyecto (si no, sin asignar). Se puede convertir
-  también con la retro terminada.
-- «Cerrado por X» sale de `closedBy` del ciclo (`GET /cycles/{cycleId}`).
-
-### Plantillas de tarea y vistas guardadas
-
-Base: `/workspaces/{slug}/projects/{projectId}`.
-
-| Método | Ruta | Descripción |
-|---|---|---|
-| GET / POST | `/templates` | Plantillas en su orden / crear (PM) |
-| PATCH / DELETE | `/templates/{templateId}` | Editar o reordenar (PM) / eliminar (PM) |
-| GET / POST | `/views` | Vistas visibles / guardar una vista |
-| PUT | `/views/order` | Ordenar vistas `{ shared?: [ids], personal?: [ids] }` |
-| PATCH / DELETE | `/views/{viewId}` | Editar, compartir o reordenar / eliminar |
-
-**Plantillas**: `{ id, name, titlePrefix, description, priority, labels: [LabelResponse], checklist:
-[ { kind, text } ], position, usageCount }`. Al crear la tarea, el frontend antepone `titlePrefix` al
-título (por ejemplo `"[Bug] "`, con su espacio), usa `description` (markdown), `priority` (`null` = no
-la fija) y `labels`, y envía `checklist` en el campo `checklist` y el id de la plantilla en
-`templateId` de `POST /issues` (eso suma 1 a `usageCount`, «12 usos»). Crear:
-`{ name, titlePrefix?, description?, priority?, labelIds?, checklist? }` (`name` de 1 a 60 y único en
-el proyecto → 409; etiquetas del proyecto → si no, 400). Editar es parcial: `titlePrefix` o
-`description` vacíos los quitan, `priority: "NONE"` quita la prioridad, `labelIds` y `checklist`
-reemplazan la lista y `position` es el nuevo índice (desde 0).
-
-**Vistas guardadas**: `[ { id, name, shared, owner: UserSummary, filters, position, mine, issueCount } ]`,
-primero las compartidas del proyecto y luego mis vistas personales, cada grupo por `position`
-(`mine` = la creé yo; `issueCount` = tareas que cumplen sus filtros ahora, las mismas que devuelve
-`GET /issues` con esos filtros). `filters` usa los mismos nombres que el listado de tareas:
-
-```json
-{ "state": ["uuid"], "priority": ["HIGH"], "assignee": ["uuid"], "label": ["uuid"],
-  "search": "login", "cycle": "uuid", "module": "uuid", "blocked": true,
-  "view": "list | board", "sort": "dueDate,asc", "groupBy": "state | priority | assignee | label" }
-```
-
-Crear: `{ name, shared?, filters? }` (`name` de 1 a 40). Editar: `{ name?, filters?, shared?,
-position? }` (`filters` reemplaza todos los filtros; `position` es el índice dentro de su grupo; al
-cambiar `shared` pasa al final del otro grupo). Una vista personal solo la ve y gestiona su dueño
-(para los demás, 404); crear, editar, eliminar o compartir una vista compartida es solo del project
-manager (403).
-
-**Ordenar vistas** (`PUT /views/order`): `shared` = ids de **todas** las vistas compartidas en el
-nuevo orden (solo el project manager, si no 403); `personal` = ids de **todas** mis vistas personales.
-Al menos una de las dos (400); cada lista debe tener exactamente las vistas de su grupo, sin repetir
-(400). Devuelve las vistas visibles, como el `GET`, pero con `issueCount: null` (el orden no cambia los
-filtros: hay que conservar los conteos del listado; así arrastrar no repite un conteo por vista).
-
-### Estadísticas, mi trabajo, actividad y búsqueda
-
-Todas responden solo con datos de los proyectos a los que el usuario tiene acceso. «Abierta» = ni
-completada ni cancelada. Las semanas empiezan el **lunes**, en la zona horaria `app.timezone`
-(America/Bogota).
-
-| Método | Ruta | Permiso | Descripción |
-|---|---|---|---|
-| GET | `/workspaces/{slug}/projects/{projectId}/stats?weeks=8&assignee=` | Acceso al proyecto | Estadísticas (`weeks` ∈ 4, 8, 12; otro valor → 400; `assignee` = filtro «+ persona») |
-| GET | `/workspaces/{slug}/my-work?view=assigned` | Miembro | Mis tareas abiertas: `assigned` \| `created` \| `commented` |
-| GET | `/workspaces/{slug}/activity?page=0&size=30&type=all&projectId=&actorId=&before=` | Miembro | Feed paginado (`PageResponse`), lo más reciente primero; `size` máx. 100. Por cursor: `before=<nextCursor>` (ver la bandeja) |
-| GET | `/workspaces/{slug}/activity/summary?days=7` | Miembro | Resumen de los últimos `days` días (1 a 365) |
-| GET | `/workspaces/{slug}/search?q=pago&limit=8` | Miembro | `IssueResponse[]`; `limit` máx. 20; `q` vacío → `[]` |
-
-**Estadísticas** (`stats`):
-
-```json
-{
-  "openCount": 12, "createdThisWeek": 5, "completedThisWeek": 9, "completedLastWeek": 6,
-  "overdue": [ { "id": "…", "code": "WEB-2", "title": "…" } ],
-  "cycleTimeDays": 3.4, "previousCycleTimeDays": 4.0,
-  "throughput": [ { "weekStart": "2026-09-01", "completed": 5 } ],
-  "burndown": { "cycleId": "…", "name": "Sprint 1", "startDate": "2026-10-15", "endDate": "2026-10-29",
-                "total": 8, "points": [ { "date": "2026-10-15", "remaining": 8 } ] },
-  "openByState": [ { "stateId": "…", "name": "Backlog", "color": "#A3A3A3", "group": "BACKLOG", "count": 5 } ],
-  "workload": [ { "user": { "id": "…", "email": "…", "fullName": "…", "avatarUrl": null }, "open": 5, "overdue": 1 } ],
-  "stale": [ { "id": "…", "code": "WEB-15", "title": "…", "daysWithoutChanges": 21 } ]
-}
-```
-
-- `overdue`: abiertas con `dueDate` anterior a hoy, la más vencida primero, máximo 10.
-- `cycleTimeDays`: tiempo de ciclo (de `startedAt` a `completedAt`, ver «Ciclos») de las completadas
-  en las `weeks` semanas mostradas; `previousCycleTimeDays`, la del periodo anterior de igual
-  duración. `null` si no hay ninguna que cuente.
-- `assignee` (se puede repetir: `?assignee=a&assignee=b`): todas las métricas cuentan solo las tareas
-  asignadas ahora a alguna de esas personas (abiertas, creadas, completadas, vencidas, tiempo de
-  ciclo, throughput, burndown, por estado, estancadas) y `workload` muestra solo a esas personas.
-- `throughput`: exactamente `weeks` elementos, del más antiguo a la semana actual.
-- `burndown`: el ciclo en curso (hoy entre sus fechas; si se solapan, el que empezó más tarde) o
-  `null`. `total` = tareas del ciclo sin las canceladas; un punto por día desde el inicio hasta hoy
-  (como mucho los últimos 366 días) con las que seguían sin completar al final de ese día.
-- `openByState`: solo estados abiertos, en el orden del tablero, con ceros.
-- `workload`: tareas abiertas por asignado (una con dos asignados cuenta para ambos); `user: null` =
-  sin asignar. De más a menos.
-- `stale`: abiertas sin cambios hace más de 14 días, la más antigua primero, máximo 5.
-
-**Mi trabajo** (`my-work`): `issues` trae las tareas abiertas de la vista, ordenadas por `dueDate`
-(sin fecha al final), prioridad (URGENT primero) y número:
-
-```json
-{ "issues": [ IssueResponse… ], "assignedCount": 7, "createdCount": 4, "commentedCount": 3,
-  "completedThisWeek": 4, "inProgressCount": 3, "overdueCount": 1, "projectCount": 2,
-  "byState": [ { "name": "En curso", "color": "#F59E0B", "group": "STARTED", "count": 2 },
-               { "name": "En revisión", "color": "#8B5CF6", "group": "STARTED", "count": 1 } ],
-  "nextDue": IssueRef | null }
-```
-
-Los contadores de las asignadas no dependen de la vista pedida. `completedThisWeek` = asignadas a mí y
-completadas desde el lunes («4 cerradas»); `inProgressCount` = asignadas a mí y abiertas en un estado
-del grupo `STARTED`; `overdueCount` y `projectCount` son el «7 tareas asignadas a ti en 2 proyectos · 1
-vencida»; `byState` = mis asignadas abiertas por estado (solo estados con alguna; los de distintos
-proyectos con el mismo nombre y grupo se suman), por grupo y orden del tablero: «2 en curso · 1 en
-revisión» son las entradas del grupo `STARTED`; `nextDue` = la asignada con la fecha límite más
-próxima **después de hoy** («Próxima fecha: mañana · WEB-19»).
-
-**Feed de actividad** (`activity`): `type` = `all` | `state` (cambios de estado, incluido completar) |
-`comments` | `assignments`. En los comentarios, `newValue` trae el texto (hasta 240 caracteres).
-
-```json
-{ "id": "…", "actor": { … } | null, "field": "STATE", "oldValue": "En curso", "newValue": "En revisión",
-  "createdAt": "…", "issue": { "id": "…", "code": "WEB-4", "title": "…" },
-  "project": { "id": "…", "name": "Sitio web 2026", "identifier": "WEB" } }
-```
-
-Un `projectId` sin acceso devuelve una página vacía.
-
-**Resumen** (`activity/summary`): `changes` = entradas del historial de cualquier tipo (comentarios
-incluidos); `comments`; `completed` y `created` = tareas completadas y creadas; `byProject` =
-entradas por proyecto, de más a menos (solo proyectos con actividad):
-
-```json
-{ "changes": 38, "comments": 12, "completed": 9, "created": 5,
-  "byProject": [ { "projectId": "…", "name": "…", "identifier": "WEB", "count": 29 } ] }
-```
-
-### Daily
-
-| Método | Ruta | Permiso | Descripción |
-|---|---|---|---|
-| GET | `/workspaces/{slug}/projects/{projectId}/daily?date=2026-10-28` | Acceso al proyecto | Daily del día (`date` por defecto = hoy en Bogotá) |
-| PUT | `/workspaces/{slug}/projects/{projectId}/daily/note?date=…` | Acceso al proyecto | Nota del día `{ text }` (máx. 5000) → `200` nota; vacío la borra → `204` |
-
-```json
-{ "date": "2026-10-28", "previousDate": "2026-10-27",
-  "cycle": { "id": "…", "name": "Sprint 1", "startDate": "2026-10-15", "endDate": "2026-10-29" } | null,
-  "summary": { "moved": 2, "started": 1, "completed": 1, "comments": 4, "blocked": 1 },
-  "people": [ { "user": UserSummary,
-                "yesterday": [ { "issue": IssueRef, "change": "movió a En revisión",
-                                 "fromState": "En curso", "toState": "En revisión" } ],
-                "today": [ IssueRef ],
-                "blockers": [ { "issue": IssueRef, "blockedBy": [ IssueRef ] } ],
-                "openCount": 3, "cycleAssignedCount": 4, "cycleCompletedCount": 1 } ],
-  "note": { "text": "…", "updatedBy": UserSummary | null, "updatedAt": "…" } | null }
-```
-
-`IssueRef` es el mismo de las dependencias: trae `dueDate` («vence mañana»), `assignees`,
-`blockedByCount`, `subIssueCount`/`completedSubIssueCount` y `checklistTotal`/`checklistDone`.
-
-- `previousDate`: el día anterior; si `date` es lunes, sábado o domingo, el viernes.
-- `people`: miembros del proyecto y asignados a tareas abiertas, por nombre, aunque no tengan nada.
-- `yesterday`: lo que hizo la persona desde el inicio de `previousDate` hasta el inicio de `date` (el
-  lunes incluye el fin de semana), una entrada por tarea con el cambio más importante: `completó` >
-  `movió a {estado}` > `creó` > `comentó` > `actualizó` (cualquier otro campo). Máximo 8.
-- `today`: sus tareas abiertas en un estado `STARTED` o con `dueDate` ≤ `date`, por fecha límite (sin
-  fecha al final), prioridad y número. Máximo 8.
-- `blockers`: sus tareas abiertas con bloqueos abiertos. `blockedBy` (por código) trae el estado y los
-  asignados de cada tarea que bloquea («bloqueada por WEB-2 (Luis)»), aunque esa tarea no aparezca en
-  otra parte de la daily; si es de otro proyecto al que no tengo acceso, viene sin título ni asignados.
-- `fromState`/`toState`: solo en `completó` y `movió a …` («Por hacer → En curso»), con los nombres
-  que guardó el historial.
-- `cycle`: el ciclo en curso ese día (sin cerrar y con `date` entre sus fechas), para «Sprint 1 · día 13
-  de 15»; `cycleAssignedCount`/`cycleCompletedCount` = tareas de la persona en ese ciclo (sin las
-  canceladas) y cuántas completó («4 tareas asignadas · 1 hecha»); 0 si no hay ciclo. `openCount` =
-  sus tareas abiertas del proyecto.
-- `summary` (mismo periodo que `yesterday`, de todo el proyecto): `moved` = tareas distintas que
-  cambiaron de estado, `started` = tareas que empezaron (su `startedAt` cae en el periodo),
-  `completed` = completadas, `comments` = comentarios, `blocked` = tareas en `blockers` de alguien.
-
-**Búsqueda** (`search`): título (sin importar mayúsculas) o código. `WEB-12` busca esa tarea exacta
-(y va primera); `12` busca el número en todos los proyectos. Después, las actualizadas más
-recientemente.
-
-### Archivos
-
-Adjuntos de las tareas, imágenes pegadas en descripciones y comentarios, y fotos de perfil, en **Cloudflare R2**
-(bucket privado). El navegador sube y descarga directo de R2 con **URLs firmadas**; la API nunca pasa los bytes.
-
-- **Tipos**: imágenes PNG, JPG, GIF y WebP hasta **5 MB**; PDF, DOCX, XLSX, PPTX, TXT, MD, CSV y ZIP hasta
-  **10 MB**. Lo demás (ejecutables, HTML, SVG…) se rechaza. La extensión decide el tipo; el `contentType` declarado
-  debe corresponderle (o venir vacío) y se guarda el canónico.
-- **Subir** (3 pasos): `POST …/files` valida y firma un `PUT` que incluye el tipo y el tamaño (R2 rechaza otro
-  archivo); el navegador hace `PUT url` con exactamente `headers`; `POST …/files/{id}/confirm` comprueba en R2 (HEAD y
-  los primeros bytes) que llegó lo firmado. Si no coincide, lo borra y responde 400 `UPLOAD_REJECTED`.
-- **Ver**: el Markdown guarda una referencia estable, `![nombre](/files/<id>)`, nunca una URL que vence. El frontend
-  pide las URLs en lote con `GET /files/urls?ids=…` (1 h; volver a pedirlas antes de `expiresAt`). Lo mismo con
-  `avatarUrl` cuando es `/files/<id>`. Imágenes y PDF se abren en el navegador; lo demás se descarga con su nombre.
-- **Permisos**: subir y ver, cualquiera con acceso al proyecto; eliminar, quien lo subió o un project manager. Las
-  URLs solo se firman para archivos de proyectos accesibles y fotos de quien comparte un workspace: un id ajeno no
-  viene, aunque se adivine.
-- **Cuota**: 2 GB por workspace (adjuntos e imágenes de sus tareas; las fotos de perfil no cuentan). Al pedir una
-  subida cuentan también las que están en curso; si no cabe, 409 `STORAGE_FULL`. Al pasar el 90 % los project
-  managers reciben `STORAGE_WARNING` en la Bandeja.
-- **Sin huérfanos**: borrar un archivo, una tarea, un proyecto o un workspace deja las claves de sus objetos en
-  `storage_deletions` (un trigger, en la misma transacción) y se borran de R2 después del commit y cada minuto (si R2
-  falla, se reintenta). Cada hora se borran las subidas sin confirmar de más de 24 h y las imágenes pegadas que no
-  están en ningún texto del proyecto desde hace 7 días. Borrar un comentario borra sus imágenes (salvo las que
-  siguen en otro texto del proyecto).
-- **Historial**: adjuntar o eliminar un adjunto queda como `ATTACHMENT` (`newValue`/`oldValue` = nombre; `file:
-  { id, fileName, contentType, size, image }` mientras exista). Las imágenes de los textos no se registran ni
-  cuentan para el clip (`IssueResponse.attachmentCount`).
-
-| Método | Ruta | Descripción |
-|---|---|---|
-| POST | `/workspaces/{slug}/projects/{projectId}/files` | `{ purpose: ATTACHMENT \| INLINE_IMAGE, issueId?, fileName, contentType, size }` → `{ file, url, method: "PUT", headers, expiresAt, storage }`. `issueId` obligatorio en un adjunto; en una imagen de «Nueva tarea» puede faltar (se liga a la tarea al crearla con ese Markdown) |
-| POST | `/workspaces/{slug}/projects/{projectId}/files/{fileId}/confirm` | Confirmar (quien la pidió) → `FileResponse`. 409 `UPLOAD_MISSING` si todavía no está en R2 |
-| DELETE | `/workspaces/{slug}/projects/{projectId}/files/{fileId}` | Eliminar (quien lo subió o PM); también cancela una subida en curso |
-| GET | `/workspaces/{slug}/projects/{projectId}/issues/{issueId}/attachments` | Adjuntos confirmados de la tarea |
-| GET | `/files/urls?ids=a,b&download=false` | URLs firmadas (hasta 100 ids): `[{ id, url, expiresAt, fileName, contentType, size, image }]`; `download=true` descarga todo |
-| GET | `/workspaces/{slug}/storage/usage` | `{ usedBytes, quotaBytes, percent, warning, full }` (cualquier miembro) |
-| GET | `/workspaces/{slug}/storage` | Pestaña «Almacenamiento» (PM): `usage`, `byType` (`IMAGES`, `DOCUMENTS`, `OTHER`), `byProject` y `largest` (10) |
-
-### Notificaciones
-
-Nunca se avisa a quien hizo la acción. Cada notificación trae
-`issue: { id, code, title, projectId, workspaceSlug }` para navegar al issue (`null` en
-`RETRO_STARTED`), `cycle: { id, name, projectId, projectIdentifier, workspaceSlug }` (solo en
-`RETRO_STARTED`) y `comment: { id, excerpt }` en `ISSUE_COMMENTED` e `ISSUE_MENTIONED` (el texto del
-comentario en una línea, con las menciones como «@Nombre», hasta 200 caracteres con «…»; `null` si el
-comentario se borró). Tipos (`type`):
-
-- `ISSUE_ASSIGNED`: te asignaron la tarea.
-- `ISSUE_COMMENTED`: comentaron una tarea que tienes asignada o que creaste.
-- `ISSUE_MENTIONED`: te mencionaron en un comentario (`"Ana te mencionó en WEB-12: …"`). Las
-  menciones se escriben en el cuerpo como `@[Nombre Visible](id-del-usuario)`; solo cuentan los
-  miembros del proyecto y los project managers (el resto se ignora). Quien está mencionado recibe
-  solo la mención, no además `ISSUE_COMMENTED`. Al editar un comentario se avisa únicamente a los
-  mencionados por primera vez. Para el autocompletado sirven `GET /projects/{projectId}/members`
-  más los project managers de `GET /workspaces/{slug}/members` (`role: "OWNER"`).
-- `ISSUE_UNBLOCKED`: se completó el último bloqueo abierto de una tarea que tienes asignada
-  (`"WEB-15 ya no está bloqueada: WEB-12 se completó"`).
-- `RETRO_STARTED`: se abrió la retrospectiva de un ciclo de un proyecto del que eres miembro
-  (`"Ana abrió la retrospectiva de «Sprint 1»: agrega tus notas"`). Solo en la app (sin correo).
-- `STORY_READY`: una historia quedó lista para revisar (a los project managers, sin `actor`:
-  `"WEB-15 está lista para revisar: Pantalla de perfil de usuario"`). Solo en la app.
-- `STORAGE_WARNING`: el workspace pasó el 90 % de su espacio para archivos (a los project managers, sin `actor`, como
-  mucho una vez por semana). Trae `workspace: { id, slug, name }` en lugar de tarea. Solo en la app.
-
-| Método | Ruta | Descripción |
-|---|---|---|
-| GET | `/notifications?unread=false&type=&page=0&size=20&before=` | Mis notificaciones (más recientes primero); `type` filtra (se puede repetir; sin `type`, todas). Solo se ordena por `createdAt` (otro `sort`, 400). Por cursor: la respuesta trae `nextCursor` (`<createdAt>,<id>`, `null` si no hay más) y `before=<nextCursor>` pide las siguientes; con `before` se ignoran `page` y `sort`, `size` es como mucho 100 y `totalElements`/`totalPages` son `-1` |
-| GET | `/notifications/unread-count` | `{ count }` para el badge |
-| GET | `/notifications/counts` | `{ unread, unreadMentions, mentions }` para las pestañas de la bandeja |
-| PATCH | `/notifications/{id}/read` | Marcar como leída |
-| POST | `/notifications/read-all` | Marcar todas como leídas |
-
-Las notificaciones de un proyecto que ya no puedes ver (te quitaron de él o del workspace) no aparecen ni
-cuentan. Al quitar a alguien de un proyecto o del workspace deja de estar asignado a sus tareas, y los
-avisos de comentarios y desbloqueos solo llegan a quien todavía puede ver la tarea. Las leídas de hace más
-de 90 días se borran.
-
----
+| Usuario (perfil, foto, idioma, contraseña) | `/users/me` |
+| Cuenta de GitHub de la persona | `/users/me/github` |
+| Workspaces y miembros | `/workspaces`, `/workspaces/{slug}/members` |
+| Roles y catálogo de permisos | `/workspaces/{slug}/roles`, `/permissions` |
+| Invitaciones | `/workspaces/{slug}/invitations`, `/invitations/{token}` |
+| Proyectos | `/workspaces/{slug}/projects` |
+| Estados · etiquetas · plantillas · vistas guardadas | `/workspaces/{slug}/projects/{projectId}/states` · `labels` · `templates` · `views` |
+| Tareas (filtros, orden del Kanban con `PATCH /{id}/move`) | `/workspaces/{slug}/projects/{projectId}/issues` |
+| Comentarios · checklist · dependencias de una tarea | `.../issues/{issueId}/comments` · `checklist` · `relations` |
+| Historias (listado, partir, cerrar, reabrir) | `.../projects/{projectId}/stories`, `.../issues/{id}/split` · `close` · `reopen` |
+| Ciclos y su retrospectiva · módulos | `.../projects/{projectId}/cycles`, `.../cycles/{cycleId}/retro` · `modules` |
+| Daily | `.../projects/{projectId}/daily` |
+| Estadísticas · reportes PDF | `.../projects/{projectId}/stats` · `reports` |
+| Archivos | `.../projects/{projectId}/files`, `/files/urls`, `/workspaces/{slug}/storage/usage` |
+| GitHub del workspace · del proyecto | `/workspaces/{slug}/github` · `.../projects/{projectId}/github` |
+| Importaciones | `/workspaces/{slug}/imports` |
+| Mi trabajo · actividad · búsqueda | `/workspaces/{slug}/my-work` · `activity` · `search` |
+| Notificaciones | `/notifications` |
+| Tiempo real (SSE) | `/events` |
+| Salud | `/health` |
+
+Los listados largos se paginan con `page`/`size` (máximo 200); la bandeja de notificaciones usa cursor (`before`).
 
 ## Modelo de datos
 
-PostgreSQL 16 con 48 tablas. El esquema completo está en una sola migración,
-`src/main/resources/db/migration/V1__esquema_inicial.sql` (las 37 del desarrollo se unificaron antes del primer
-despliegue); los cambios nuevos van en `V2__…`, `V3__…`. Hibernate solo valida el esquema (`ddl-auto: validate`).
-`V7` elimina el rol `ADMIN` (los admins e invitaciones con ese rol pasan a `MEMBER`) y `V8` agrega
-`issues.completed_at` (rellenado con la fecha del último cambio de estado hacia el estado actual, o
-`updated_at`). `V9` crea `issue_relations` (un índice único sobre el par de tareas sin importar la
-dirección y el tipo evita duplicados y bloqueos mutuos), `V10` `issue_checklist_items`, `V11`
-`issue_templates` (+ `issue_template_labels` e `issue_template_items`) con las tres plantillas por
-defecto para los proyectos existentes, `V12` `saved_views` (filtros en `jsonb`), `V13` agrega los
-tipos de notificación `ISSUE_UNBLOCKED` e `ISSUE_MENTIONED`, `V14` el cierre de ciclos
-(`cycles.closed_at`, `closed_by_id`, `carried_to_cycle`, `carried_to_backlog`, `retro_started_at`,
-`retro_finished_at`) y la retrospectiva (`retro_notes`, cuya columna se llama `retro_column`, y
-`retro_note_votes`), `V15` `daily_notes` (una nota por proyecto y día), `V16` `issues.started_at` (la
-primera vez que la tarea entró a un estado `STARTED`; rellenado desde el historial: el primer cambio
-hacia un estado `STARTED` por nombre, o la creación si se creó en uno; las que hoy están en curso sin
-explicación en el historial toman su último cambio de estado; las demás quedan en `NULL`), `V17` quién
-y cuándo marcó cada elemento de la checklist (`checked_by_id`, `checked_at`; los ya marcados toman
-`checked_at = updated_at`) e `issues.checklist_updated_at`, `V18` `issue_templates.usage_count` y
-`retro_notes.owner_id`, y `V19` el tipo `RETRO_STARTED` con `notifications.cycle_id` y
-`notifications.comment_id` (rellenado para las notificaciones de comentarios ya enviadas). `V20` agrega el estado y
-los asignados por defecto de las plantillas, `V21` el color del proyecto, `V22` el esqueleto de las plantillas por
-defecto y `V23` la versión de la descripción (para avisar de ediciones simultáneas). `V24` agrega
-`issues.issue_type` (`STORY`, `TASK`, `BUG`; las que existían quedan como tareas, salvo títulos que empiezan
-con «[Bug]», que pasan a bugs, y descripciones con la cita «> **Como**» de la historia de usuario, que pasan a
-historias), `issues.closed_at`/`closed_by_id` y `issues.review_notified`, el tipo de cada plantilla
-(`issue_templates.issue_type`: «Reporte de bug» → bug, «Historia de usuario» → historia) y la notificación
-`STORY_READY`. `V25` corrige las historias con padre, agrega `users.credentials_changed_at`, la foto del cierre de
-los ciclos (`closed_completed_count`, `closed_total_count`, `closed_cycle_time_days`) e índices; `V26` agrega
-`users.credentials_version` (la versión que llevan los access tokens en el claim `cv`; 1 para quien ya había cambiado
-su contraseña), rellena la foto del cierre de los ciclos cerrados antes de `V25` con sus tareas de ese momento y agrega
-el índice del cursor de la bandeja. `V27` crea `stored_files` (archivos en R2), la cola `storage_deletions` con el
-trigger que la llena al borrar archivos (también en cascada), `issue_activities.file_id`, `notifications.workspace_id`
-y el tipo `STORAGE_WARNING`. `V28` agrega `refresh_tokens.revoked_at` y `replaced_by`, para el margen de
-reutilización de un refresh token recién rotado.
-Las entidades usan **UUID** y `created_at`/`updated_at`. Las tablas intermedias puras
-(`issue_assignees`, `issue_labels`, `cycle_issues`, `module_issues`, `issue_template_labels`,
-`retro_note_votes`) usan clave compuesta.
+PostgreSQL 16 con **48 tablas**. Todo el esquema está en una sola migración,
+`src/main/resources/db/migration/V1__esquema_inicial.sql`: las del desarrollo se unificaron antes del primer
+despliegue. Hibernate solo valida (`ddl-auto: validate`).
 
-Detalles a tener en cuenta:
+- **Llaves:** las entidades usan **UUID** y `created_at`/`updated_at`. Las tablas intermedias (`issue_assignees`,
+  `issue_labels`, `cycle_issues`, `module_issues`…) usan llave compuesta.
+- **Código de la tarea (`WEB-12`):** `projects.issue_counter` sube con un `UPDATE` atómico en la misma transacción
+  que crea la tarea. Dos peticiones a la vez nunca reciben el mismo número.
+- **Orden del Kanban:** `sort_order` es un `double`. Al soltar una tarjeta se usa el promedio de sus vecinas. Si solo
+  llega una vecina (tablero filtrado), la otra es la siguiente tarjeta real de la columna. Cuando ya no cabe un
+  promedio, la columna se renumera sola.
+- **Cálculo en la lectura:** contadores como «3 de 5 tareas», bloqueos o «lista para revisar» se calculan al leer
+  (`@Formula`). Así nunca quedan desactualizados.
+- **Nombres de columna:** el grupo del estado se llama `state_group` porque `GROUP` es palabra reservada.
 
-- **Código del issue (`WEB-12`)**: `projects.issue_counter` se incrementa con un `UPDATE` atómico
-  en la misma transacción que crea el issue, así dos peticiones simultáneas nunca obtienen el
-  mismo número.
-- **Orden del Kanban**: `sort_order` es un `double`; las tarjetas se separan por 65535 y al mover
-  una se usa el promedio de sus vecinas. Si después de muchos movimientos ya no cabe un promedio,
-  se renumera la columna automáticamente.
-- La columna del grupo del estado se llama `state_group` (porque `GROUP` es palabra reservada en
-  SQL) y la de leído en notificaciones `is_read`.
-- Los tokens (refresh, verificación, reset, invitación) se guardan **hasheados con SHA-256**.
+## Pruebas
 
-## Convenciones
+```bash
+./mvnw test
+```
 
-- Ramas: el trabajo diario va a `develop`; `main` solo recibe pull requests desde `develop`.
-- Commits: [Conventional Commits](https://www.conventionalcommits.org/es/) (`feat(auth): …`).
-- Migraciones: nunca editar una ya ejecutada; siempre crear una nueva `V{n}__descripcion.sql`.
-- DTOs con `record`. Secretos solo en variables de entorno.
+Son **1082 pruebas** (JUnit 5 + Mockito), organizadas como el código en `src/test/java/com/taskflow/api`:
 
-## Docker / despliegue
+| Carpeta | Qué cubre |
+|---|---|
+| `service/` | Reglas de negocio: tareas, historias, ciclos y su cierre, retro, daily, estadísticas, dependencias, notificaciones, archivos… |
+| `controller/`, `security/` | La regla de acceso de cada endpoint (`ControllerPermissionsTest`), el filtro JWT, `CredentialsGuard` y `WorkspaceSecurity` |
+| `github/`, `imports/` | Webhooks, reglas, cuentas enlazadas; orígenes, mapeo, escritura y deshacer de las importaciones |
+| `ratelimit/`, `email/`, `storage/`, `report/`, `i18n/` | Límites, correos, R2 y su limpieza, el PDF y que todo mensaje tenga traducción |
+| `integration/` | Flujos completos contra PostgreSQL: carreras con bloqueos, tiempo real, almacenamiento, GitHub, importaciones |
+| `config/`, `dto/`, `entity/`, `exception/`, `util/` | Propiedades, validaciones, formato de errores, orden del Kanban, cursores… |
 
-TaskFlow se despliega en **Dokploy** con tres servicios en una red interna y un solo dominio (puerto 5446). Los
-pasos, las variables de producción, el correo con Gmail, la GitHub App de producción y el CORS de R2 están en
-**[DESPLIEGUE.md](DESPLIEGUE.md)**.
+**Pruebas con PostgreSQL:**
+- **Base:** las de `integration/` necesitan un PostgreSQL de verdad. Toman `DB_URL`, `DB_USER` y `DB_PASSWORD` del
+  entorno o del `.env`, crean una base descartable (`taskflow_it_*`) y la borran al terminar. El usuario necesita
+  permiso para crear bases.
+- **Sin `DB_URL`:** se omiten sin fallar. En CI hay que definirla, por ejemplo con un servicio `postgres:16`.
+
+## Despliegue
+
+TaskFlow corre en **Dokploy** con tres servicios en una red interna. Solo el frontend tiene dominio y puerto público
+(5446).
 
 | Servicio | Imagen | Puerto |
 |---|---|---|
-| `frontend` | nginx (sin privilegios) con la SPA compilada; reenvía `/api` al backend | 5446 (dominio) |
-| `backend` | Este repositorio: `Dockerfile` multi-stage (Maven + `eclipse-temurin:21-jre-alpine`), usuario sin privilegios, `HEALTHCHECK` contra `GET /api/v1/health` | 8080 (interno) |
-| `db` | PostgreSQL 16 de Dokploy, con respaldos a R2 | 5432 (interno) |
+| `frontend` | nginx sin privilegios con la SPA; reenvía `/api` a la API | 5446 (dominio) |
+| `backend` | Este repositorio: `Dockerfile` multi-stage (Maven → `eclipse-temurin:21-jre-alpine`), usuario sin privilegios, `HEALTHCHECK` contra `/api/v1/health` | 8080 (interno) |
+| `db` | PostgreSQL 16 de Dokploy | 5432 (interno) |
 
-Al arrancar, Flyway aplica las migraciones pendientes (en una base vacía, `V1__esquema_inicial.sql` crea todo). Como el frontend y la API comparten origen, `FRONTEND_URL`
-es la URL pública de la app. Los archivos no pasan por el servidor: el navegador sube y descarga directo de R2, así
-que el CORS del bucket debe permitir ese origen.
+**Imagen:** ya trae `FORWARD_HEADERS_STRATEGY=native`, `SPRINGDOC_ENABLED=false` y la memoria de la JVM ajustada al
+contenedor.
 
-El rate limiting guarda los contadores en memoria (una sola instancia; los que llevan sin usarse más que su
-periodo se descartan).
+**Arranque:** Flyway aplica las migraciones pendientes. Cuando la API nueva pasa el health check (unos 30 s después
+del build), reemplaza a la anterior sin cortar el servicio.
 
-**Detrás de Dokploy/Traefik**: definir `FORWARD_HEADERS_STRATEGY=native`. Sin eso, la API ve la IP del
-proxy en todas las peticiones: todos los usuarios comparten el mismo límite de login (5 por minuto entre
-todos) y el aviso de inicio de sesión muestra la IP del proxy. Con `native`, Tomcat toma la IP de
-`X-Forwarded-For` solo si la conexión viene de una red interna (10.x, 172.16–31.x, 192.168.x, 127.x: el
-proxy en la red de Docker), así un cliente no puede falsearla. No usar `native` si la API queda expuesta
-directamente a internet sin proxy.
+Los pasos completos (variables, Gmail, GitHub App, CORS de R2) están en **[DESPLIEGUE.md](DESPLIEGUE.md)**.
 
-**Producción**, además:
+## Convenciones
 
-| Variable | Valor |
-|---|---|
-| `JWT_SECRET` | Secreto aleatorio largo (`openssl rand -base64 48`) |
-| `FRONTEND_URL` | URL pública de la aplicación |
-| `FORWARD_HEADERS_STRATEGY` | `native` (ya viene en la imagen) |
-| `MAIL_PROVIDER` y lo suyo | `smtp` con Gmail (contraseña de aplicación; `MAIL_FROM` = esa cuenta) o `resend` con la API key y un remitente del dominio verificado (SPF y DKIM) |
-| `MAIL_LOG_LINKS` | Vacío o `false`: los enlaces de los correos nunca van al log |
-| `SPRINGDOC_ENABLED` | `false` (ya viene en la imagen): sin Swagger público |
-| `R2_*` | Credenciales del bucket de producción |
-| `GITHUB_*` | Las de la GitHub App de producción; la clave privada en `GITHUB_PRIVATE_KEY` (contenido del `.pem` con `\n`) |
-
-Los secretos se guardan en el panel de entorno de Dokploy, nunca en el repositorio. La base se respalda a diario con
-`pg_dump`.
+- **Ramas:** el trabajo diario va a `develop`; `main` solo recibe pull requests desde `develop`, y lo que llega a
+  `main` es lo que se despliega.
+- **Migraciones:** nunca editar una ya ejecutada. Siempre una nueva `V{n}__descripcion.sql`.
+- **Código:** en inglés, con comentarios y mensajes en español. Los DTOs son `record`.
+- **Pruebas:** cada regla nueva lleva su prueba.
+- **Secretos:** solo en variables de entorno, nunca en el repositorio.

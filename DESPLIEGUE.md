@@ -19,8 +19,9 @@ expuesta. GitHub también entra por ahí (`https://<dominio>/api/v1/github/...`)
    Dokploy), la base, el usuario y la contraseña.
 2. No hace falta crear tablas: la API las crea al arrancar (Flyway aplica `V1__esquema_inicial.sql`, que trae todo el
    esquema en una sola migración).
-3. Respaldos: en *Backups*, un destino S3 apuntando a R2 (endpoint `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com`,
-   región `auto`, un bucket aparte para respaldos, p. ej. `taskflow-backups`) y un respaldo diario.
+3. Respaldos (opcional; hoy no están activados): en *Backups*, un destino S3 apuntando a R2 (endpoint
+   `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com`, región `auto`, el bucket `taskflow-backups`) y un respaldo
+   diario.
 
 ## 2. API (`Task_backend`)
 
@@ -57,8 +58,12 @@ llega de Traefik), `SPRINGDOC_ENABLED=false` (sin Swagger público) y la memoria
 4. *Deploy* y abre `https://<dominio>`: la primera persona que se registra crea su workspace y queda como project
    manager.
 
-nginx sirve la app con caché larga para `/assets`, cabeceras de seguridad (nosniff, sin iframes, HSTS) y acepta
-subidas de hasta 20 MB (la importación); los adjuntos e imágenes no pasan por aquí: van directo a R2.
+nginx sirve la app con caché larga para `/assets`. Pone las cabeceras de seguridad: nosniff, sin iframes, HSTS y una
+**Content-Security-Policy** que solo deja ejecutar los scripts de la app y conectarse a la API y a R2.
+
+También tiene dos reglas para la API:
+- deja pasar sin búfer `/api/v1/events`, el canal de tiempo real, con una hora de espera;
+- acepta subidas de hasta 20 MB, para la importación. Los adjuntos e imágenes no pasan por aquí: van directo a R2.
 
 ## 4. Correo con Gmail (la cuenta exclusiva de TaskFlow)
 
@@ -69,8 +74,10 @@ subidas de hasta 20 MB (la importación); los adjuntos e imágenes no pasan por 
 
 ## 5. GitHub App de producción
 
-La app de desarrollo (*TaskFlow Dev Kaaapo*) apunta al túnel local; producción lleva una propia. En
-*GitHub → Settings → Developer settings → GitHub Apps → New GitHub App* (o en la organización):
+La app de desarrollo (*TaskFlow Dev Kaaapo*) apunta al túnel local; producción lleva una propia. Hoy es
+**TaskFlow Inmero** (`taskflow-inmero`), creada en la organización para que no dependa de una cuenta personal.
+Para crear otra: *GitHub → Settings → Developer settings → GitHub Apps → New GitHub App* (o lo mismo en la
+organización):
 
 | Campo | Valor |
 |---|---|
@@ -118,8 +125,11 @@ dominio de producción (*R2 → bucket → Settings → CORS policy*):
 
 ## Actualizaciones
 
-- Lo que llega a `main` se despliega con *Deploy* en cada aplicación (o automático con *Autodeploy* / el webhook de
-  Dokploy).
+- Lo que llega a `main` se despliega con *Deploy* en cada aplicación. *Autodeploy* está activado, pero para que se
+  dispare solo hay que poner la URL del webhook de Dokploy (*Deployments → Webhook URL*) en cada repositorio de GitHub
+  (*Settings → Webhooks*, evento *push*).
+- Al terminar el build, la versión nueva reemplaza a la anterior cuando pasa su health check (unos 30 s): hasta
+  entonces sigue respondiendo la anterior.
 - Cambios de la base: siempre una migración nueva (`V2__…`, `V3__…`); `V1__esquema_inicial.sql` no se vuelve a
   editar. Flyway las aplica al arrancar la API.
 - El túnel de Cloudflare (`Escritorio/taskflow-tunel`) solo servía para probar sin despliegue: ya no hace falta.
