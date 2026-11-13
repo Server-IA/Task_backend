@@ -79,8 +79,9 @@ public class ImportController {
     @Operation(summary = "Elegir qué traer", description = "Guarda los proyectos y las opciones y empieza a leerlos del origen.")
     @PutMapping("/{jobId}/selection")
     @PreAuthorize("@workspaceSecurity.can(#slug, 'DATA_IMPORT')")
-    public ImportJobResponse select(@PathVariable String slug, @PathVariable UUID jobId, @RequestBody ImportSelection selection) {
-        return importService.select(slug, jobId, selection);
+    public ImportJobResponse select(@PathVariable String slug, @PathVariable UUID jobId, @AuthenticationPrincipal UserPrincipal me,
+                                    @RequestBody ImportSelection selection) {
+        return importService.select(slug, jobId, me.getId(), selection);
     }
 
     @Operation(summary = "Guardar las equivalencias", description = "La respuesta trae lo que se crearía con ellas.")

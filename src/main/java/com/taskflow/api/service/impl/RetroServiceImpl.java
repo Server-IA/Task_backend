@@ -1,5 +1,6 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.security.AccessControl;
 import com.taskflow.api.dto.request.CreateIssueRequest;
 import com.taskflow.api.dto.request.RetroNoteRequest;
 import com.taskflow.api.dto.request.UpdateIssueRequest;
@@ -70,6 +71,7 @@ public class RetroServiceImpl implements RetroService {
     private final NotificationService notificationService;
     private final ProjectAccess projectAccess;
     private final ResourceLookup lookup;
+    private final AccessControl accessControl;
     private final PlanningMapper mapper;
 
     @Override
@@ -236,7 +238,8 @@ public class RetroServiceImpl implements RetroService {
      * después en el tablero. Con la tarea bloqueada, para no cruzarse con otra edición de sus asignados.
      */
     private void assignConvertedTask(String slug, UUID projectId, RetroNote note, UUID userId) {
-        if (note.getIssue() == null) {
+        // Asignar la tarea es editarla: quien no puede editar tareas solo cambia el responsable de la acción
+        if (note.getIssue() == null || !accessControl.can(slug, userId, Permission.ISSUE_EDIT)) {
             return;
         }
         UUID issueId = note.getIssue().getId();

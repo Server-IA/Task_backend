@@ -546,7 +546,9 @@
     "Última ejecución": "Last run",
     "correcta": "succeeded",
     "fallida": "failed",
-    "días": "days"
+    "días": "days",
+    "Para importar en un proyecto existente necesitas poder agregarle personas": "To import into an existing project you need to be able to add people to it",
+    "Tu rol no permite crear proyectos: elige uno existente como destino": "Your role cannot create projects: choose an existing one as the destination"
   },
   "patterns": [
     {

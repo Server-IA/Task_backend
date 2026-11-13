@@ -28,7 +28,7 @@ public interface ImportService {
     ImportJobResponse upload(String slug, UUID userId, ImportUploadRequest request);
 
     /** Guarda qué se trae y empieza a leerlo del origen (en segundo plano). */
-    ImportJobResponse select(String slug, UUID jobId, ImportSelection selection);
+    ImportJobResponse select(String slug, UUID jobId, UUID userId, ImportSelection selection);
 
     /** Guarda las equivalencias; la respuesta trae lo que se crearía con ellas. */
     ImportJobResponse saveMapping(String slug, UUID jobId, UUID userId, ImportMapping mapping);

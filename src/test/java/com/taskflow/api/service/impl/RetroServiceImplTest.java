@@ -81,6 +81,8 @@ class RetroServiceImplTest {
     private ResourceLookup lookup;
     @Mock
     private PlanningMapper mapper;
+    @Mock
+    private com.taskflow.api.security.AccessControl accessControl;
 
     @InjectMocks
     private RetroServiceImpl retroService;
@@ -306,6 +308,23 @@ class RetroServiceImplTest {
                     new UpdateRetroNoteRequest(" Deploys sin sustos ", null, null));
 
             assertThat(mine.getText()).isEqualTo("Deploys sin sustos");
+        }
+
+        @Test
+        void sinPermisoDeEditarTareasElResponsableNoAsignaLaTareaConvertida() {
+            RetroNote action = note(RetroColumn.ACTION, member);
+            Issue task = new Issue();
+            task.setId(UUID.randomUUID());
+            action.setIssue(task);
+            when(projectMemberRepository.existsByProjectIdAndUserId(project.getId(), otherMember.getId())).thenReturn(true);
+            when(accessControl.can(SLUG, member.getId(), Permission.ISSUE_EDIT)).thenReturn(false);
+
+            retroService.updateNote(SLUG, project.getId(), cycle.getId(), action.getId(), member.getId(),
+                    new UpdateRetroNoteRequest(null, otherMember.getId(), null));
+
+            // La acción cambia de responsable, pero la tarea no se toca (asignarla es editarla)
+            assertThat(action.getOwner()).isSameAs(otherMember);
+            verify(issueService, never()).update(any(), any(), any(), any(), any());
         }
 
         @Test

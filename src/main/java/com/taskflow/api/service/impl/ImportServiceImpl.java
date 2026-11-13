@@ -1,5 +1,6 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.security.WorkspaceSecurity;
 import com.taskflow.api.dto.request.ImportConnectRequest;
 import com.taskflow.api.dto.request.ImportUploadRequest;
 import com.taskflow.api.dto.request.ValidationPatterns;
@@ -111,6 +112,7 @@ public class ImportServiceImpl implements ImportService {
     private final ImportRunner runner;
     private final ImportCredentials credentials;
     private final AccessControl accessControl;
+    private final WorkspaceSecurity workspaceSecurity;
     private final WorkspaceMemberRepository memberRepository;
     private final ProjectRepository projectRepository;
     private final StateRepository stateRepository;
@@ -217,13 +219,14 @@ public class ImportServiceImpl implements ImportService {
 
     @Override
     @Transactional
-    public ImportJobResponse select(String slug, UUID jobId, ImportSelection selection) {
+    public ImportJobResponse select(String slug, UUID jobId, UUID userId, ImportSelection selection) {
         ImportJob job = lockedJob(slug, jobId);
         if (job.getStatus() != ImportStatus.DRAFT && job.getStatus() != ImportStatus.READY) {
             throw new ConflictException(job.getStatus().working() ? BUSY : "Esta importación ya terminó: empieza una nueva");
         }
         ImportDiscovery discovery = ImportJson.read(job.getDiscovery(), ImportDiscovery.class);
         validate(slug, job, discovery, selection);
+        ensureMayTarget(slug, userId, selection);
         if (job.getVia() == ImportVia.API && credentials.get(jobId).isEmpty()) {
             throw new ConflictException(ImportRunner.CONNECTION_LOST);
         }
@@ -234,6 +237,28 @@ public class ImportServiceImpl implements ImportService {
         job.setProgress(null);
         afterCommit(() -> runner.fetch(jobId));
         return view(slug, job, true);
+    }
+
+    /**
+     * Quien importa solo escribe donde podría hacerlo a mano. En un proyecto existente, tiene que poder verlo y poder
+     * agregarle personas (la importación crea su contenido y suma como miembros a quienes quedan asignados). Para un
+     * proyecto nuevo, tiene que poder crear proyectos. Sin esto, alguien con «Importar datos» escribía en proyectos que
+     * no ve y se hacía miembro de ellos.
+     */
+    private void ensureMayTarget(String slug, UUID userId, ImportSelection selection) {
+        List<ProjectChoice> choices = selection == null || selection.projects() == null ? List.of() : selection.projects();
+        for (ProjectChoice choice : choices) {
+            if (choice.targetProjectId() == null) {
+                if (!accessControl.can(slug, userId, Permission.PROJECT_CREATE)) {
+                    throw new ForbiddenException("Tu rol no permite crear proyectos: elige uno existente como destino");
+                }
+            } else if (!workspaceSecurity.canAccessProject(userId, slug, choice.targetProjectId())) {
+                // Igual que si no existiera: no se revela qué proyectos hay
+                throw new BadRequestException("El proyecto de destino no existe en este workspace");
+            } else if (!accessControl.can(slug, userId, Permission.PROJECT_MEMBERS)) {
+                throw new ForbiddenException("Para importar en un proyecto existente necesitas poder agregarle personas");
+            }
+        }
     }
 
     private void validate(String slug, ImportJob job, ImportDiscovery discovery, ImportSelection selection) {
@@ -318,6 +343,8 @@ public class ImportServiceImpl implements ImportService {
         if (another) {
             throw new ConflictException("Ya hay otra importación en curso en este workspace. Espera a que termine.");
         }
+        // La selección pudo guardarla otra persona (o cambiar los permisos desde entonces): se comprueba con quien arranca
+        ensureMayTarget(slug, userId, ImportJson.read(job.getSelection(), ImportSelection.class));
         // Las equivalencias con las que corre: lo que la persona eligió y, donde no tocó nada, lo propuesto
         Ready ready = ready(slug, job);
         ImportMapping mapping = ready.proposal().toMapping();

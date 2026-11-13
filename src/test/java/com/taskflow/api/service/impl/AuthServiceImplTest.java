@@ -94,10 +94,11 @@ class AuthServiceImplTest {
                 new AppProperties.Tokens(24, 60, 7, 30));
         authService = new AuthServiceImpl(userRepository, refreshTokenRepository, verificationTokenRepository,
                 authenticationManager, passwordEncoder, jwtService, emailNotifier, userMapper, properties,
-                rateLimitService, credentialsGuard);
+                rateLimitService, knownLogins, credentialsGuard);
     }
 
     private final RateLimitService rateLimitService = new RateLimitService();
+    private final com.taskflow.api.ratelimit.KnownLogins knownLogins = new com.taskflow.api.ratelimit.KnownLogins();
 
     /** La fila del usuario bloqueada ({@code UserRepository.lockCredentials}). */
     private static LockedCredentials locked(String passwordHash, int credentialsVersion) {
@@ -334,7 +335,7 @@ class AuthServiceImplTest {
                     new AppProperties.Tokens(24, 60, 7, 0));
             AuthServiceImpl strictService = new AuthServiceImpl(userRepository, refreshTokenRepository,
                     verificationTokenRepository, authenticationManager, passwordEncoder, jwtService, emailNotifier,
-                    userMapper, strict, rateLimitService, credentialsGuard);
+                    userMapper, strict, rateLimitService, knownLogins, credentialsGuard);
             User user = user("ana@test.com");
             RefreshToken stored = rotated(user, active(user), Instant.now().minusMillis(100));
             lockedRefresh(user, stored);
@@ -650,6 +651,27 @@ class AuthServiceImplTest {
             // El intento rechazado por el techo no gastó el de esa IP
             assertThat(rateLimitService.tryConsume(RateLimitRule.LOGIN_ACCOUNT_IP, "ana@test.com|10.9.9.9")
                     .getRemainingTokens()).isEqualTo(RateLimitRule.LOGIN_ACCOUNT_IP.getCapacity() - 1);
+        }
+
+        @Test
+        void quienGastaElTechoDeUnaCuentaDesdeAfueraNoDejaFueraALaDuenaEnSuLugarDeSiempre() {
+            User user = user("ana@test.com");
+            when(authenticationManager.authenticate(argThat(token -> token != null && "mala".equals(token.getCredentials()))))
+                    .thenThrow(new BadCredentialsException("mala"));
+            correctPassword(user);
+            LoginRequest right = new LoginRequest("ana@test.com", "Clave1234");
+            authService.login(right, from("198.51.100.5"));
+
+            // Alguien que sabe su correo gasta el techo de la cuenta desde muchas IPs
+            for (int i = 0; i < RateLimitRule.LOGIN_ACCOUNT.getCapacity(); i++) {
+                ClientInfo client = from("10.0." + (i / 200) + "." + (i % 200));
+                assertThatThrownBy(() -> authService.login(wrong, client)).isInstanceOf(BadCredentialsException.class);
+            }
+            // Desde una IP nueva sigue bloqueado (la prueba repartida no avanza)...
+            assertThatThrownBy(() -> authService.login(right, from("10.9.9.9"))).isInstanceOf(TooManyRequestsException.class);
+            // ...pero Ana entra desde donde ya había entrado
+            org.assertj.core.api.Assertions.assertThatCode(() -> authService.login(right, from("198.51.100.5")))
+                    .doesNotThrowAnyException();
         }
 
         @Test
