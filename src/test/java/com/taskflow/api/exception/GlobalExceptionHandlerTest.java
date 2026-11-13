@@ -26,6 +26,17 @@ class GlobalExceptionHandlerTest {
     private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
 
     @Test
+    void cerrarUnaConexionDeTiempoRealNoEsUnErrorInesperado() {
+        var resolver = new org.springframework.web.method.annotation.ExceptionHandlerMethodResolver(GlobalExceptionHandler.class);
+        var method = resolver.resolveMethod(
+                new org.springframework.web.context.request.async.AsyncRequestNotUsableException("Broken pipe"));
+
+        assertThat(method).isNotNull();
+        assertThat(method.getName()).isEqualTo("handleClientGone");
+        assertThat(method.getReturnType()).isEqualTo(void.class);
+    }
+
+    @Test
     void elConflictoDeDescripcionTraeLaVersionActualQuienYCuando() {
         UserSummaryResponse luis = new UserSummaryResponse(UUID.randomUUID(), "luis@test.com", "Luis Muñoz", null);
         Instant at = Instant.parse("2026-10-29T10:15:00Z");
