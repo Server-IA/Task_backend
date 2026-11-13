@@ -61,6 +61,10 @@ public class R2ObjectStorage implements ObjectStorage, AutoCloseable {
                 .key(key)
                 .contentType(contentType)
                 .contentLength(size)
+                // Solo si todavía no existe: la URL firmada no sirve para cambiar el archivo después de confirmado (si
+                // no, una segunda subida con el mismo tipo y tamaño se saltaba la comprobación del contenido). R2
+                // responde 412 a un segundo intento
+                .ifNoneMatch("*")
                 .build();
         PresignedPutObjectRequest presigned = presigner.presignPutObject(request -> request
                 .signatureDuration(ttl)

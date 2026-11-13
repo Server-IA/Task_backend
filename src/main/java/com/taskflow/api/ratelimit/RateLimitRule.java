@@ -46,7 +46,12 @@ public enum RateLimitRule {
     /** Intentos de cambiar la contraseña (adivinar la actual con una sesión robada). */
     CHANGE_PASSWORD(null, 5, Duration.ofMinutes(15)),
     /** Subidas que pide cada persona (adjuntos, imágenes y foto de perfil): frena llenar el bucket con un script. */
-    UPLOADS(null, 300, Duration.ofHours(1));
+    UPLOADS(null, 300, Duration.ofHours(1)),
+    /**
+     * Avisos por correo cuando alguien se registra con un correo que ya tiene cuenta: uno por hora a cada correo, para
+     * que el registro no sirva para llenarle la bandeja a nadie.
+     */
+    REGISTER_EXISTING(null, 1, Duration.ofHours(1));
 
     private final String method;
     private final String path;

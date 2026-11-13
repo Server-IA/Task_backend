@@ -95,12 +95,13 @@ public interface IssueActivityRepository extends JpaRepository<IssueActivity, UU
                                                    @Param("since") Instant since);
 
     /**
-     * Momento de la última entrada del historial del proyecto en {@code [from, to)} (de cualquier tipo, comentarios
-     * incluidos); {@code null} si no hubo ninguna.
+     * Momento de la última entrada del historial del proyecto en {@code [from, to)} hecha por una persona (de cualquier
+     * tipo, comentarios incluidos); {@code null} si no hubo ninguna. Lo automático (GitHub, el avance de una historia)
+     * no cuenta: la daily lo excluye, y un día con solo eso quedaba como «ayer» vacío.
      */
     @Query("""
             select max(a.createdAt) from IssueActivity a
-            where a.issue.project.id = :projectId and a.createdAt >= :from and a.createdAt < :to
+            where a.issue.project.id = :projectId and a.createdAt >= :from and a.createdAt < :to and a.actor is not null
             """)
     Instant findLastInProjectBetween(@Param("projectId") UUID projectId, @Param("from") Instant from,
                                      @Param("to") Instant to);

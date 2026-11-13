@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="es"
+      th:replace="~{email/layout :: layout(#{security.meta}, #{exists.preheader}, ~{::content})}">
+<body>
+<div th:fragment="content">
+    <div th:replace="~{email/parts :: heading('@', 'accent', #{exists.title})}"></div>
+    <p class="tf-muted" style="margin:12px 0 0;color:#67615A;">
+        <th:block th:text="#{greeting}">Hola</th:block> <strong class="tf-ink" style="color:#23201B;" th:text="${name}">Ana</strong><th:block th:text="#{exists.intro}">, alguien intentó
+        crear una cuenta de TaskFlow con este correo, pero ya tienes una. Si fuiste tú, entra con tu contraseña.</th:block>
+    </p>
+    <div th:replace="~{email/parts :: button(${link}, #{exists.button}, null)}"></div>
+    <div th:replace="~{email/parts :: notYou(${resetLink}, #{exists.action})}"></div>
+</div>
+</body>
+</html>

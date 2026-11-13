@@ -428,7 +428,6 @@
     "Vistas, estadísticas y reportes": "Views, stats and reports",
     "Workspace no encontrado": "Workspace not found",
     "Workspace y equipo": "Workspace and team",
-    "Ya existe una cuenta con ese correo": "An account with that email already exists",
     "Ya votaste por esta nota": "You already voted for this note",
     "(sin título)": "(untitled)",
     "Adjunto de un tipo que TaskFlow no acepta": "Attachment of a type TaskFlow does not accept",
@@ -546,7 +545,13 @@
     "Última ejecución": "Last run",
     "correcta": "succeeded",
     "fallida": "failed",
-    "días": "days"
+    "días": "days",
+    "Para importar en un proyecto existente necesitas poder agregarle personas": "To import into an existing project you need to be able to add people to it",
+    "Tu rol no permite crear proyectos: elige uno existente como destino": "Your role cannot create projects: choose an existing one as the destination",
+    "Una de las tareas está vacía": "One of the tasks is empty",
+    "Id de asignado inválido": "Invalid assignee id",
+    "Id de etiqueta inválido": "Invalid label id",
+    "Uno de los pasos del checklist está vacío": "One of the checklist steps is empty"
   },
   "patterns": [
     {

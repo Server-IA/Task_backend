@@ -97,6 +97,8 @@ class ImportIntegrationTest {
     @Autowired
     private ImportService importService;
     @Autowired
+    private com.taskflow.api.service.RoleService roleService;
+    @Autowired
     private ImportPendingAssignments pendingAssignments;
     @Autowired
     private TransactionTemplate transaction;
@@ -307,7 +309,7 @@ class ImportIntegrationTest {
         ImportJobResponse uploaded = upload("jira-portal.csv", jiraCsv());
         ProjectChoice choice = new ProjectChoice(uploaded.discovery().projects().get(0).id(), null, "Portal", "PRT");
         List<CsvField> columns = uploaded.discovery().csv().columns().stream().map(CsvImport.Column::suggested).toList();
-        importService.select(slug, uploaded.id(), new ImportSelection(List.of(choice), new Options(false, false, true, true, true, false),
+        importService.select(slug, uploaded.id(), pm.getId(), new ImportSelection(List.of(choice), new Options(false, false, true, true, true, false),
                 new CsvSetup(columns)));
         ImportJobResponse ready = await(uploaded.id(), ImportStatus.READY);
         ImportJobResponse mapped = importService.saveMapping(slug, ready.id(), pm.getId(),
@@ -329,6 +331,40 @@ class ImportIntegrationTest {
         assertThat(value("SELECT count(*) FROM issues WHERE project_id = '" + projectId + "' AND parent_id IS NOT NULL")).isEqualTo("0");
     }
 
+    @Test
+    void quienImportaSoloEscribeEnProyectosQuePuedeVerYSoloCreaSiPuedeCrearProyectos() {
+        // Luis tiene un rol que solo puede importar: no ve el proyecto «Secreto» ni puede crear proyectos
+        var importer = roleService.create(slug, pm.getId(), new com.taskflow.api.dto.request.RoleRequest("Importador", null,
+                List.of("DATA_IMPORT")));
+        workspaceService.updateMemberRole(slug, pm.getId(), luis.getId(),
+                new com.taskflow.api.dto.request.UpdateMemberRoleRequest(com.taskflow.api.entity.enums.WorkspaceRole.MEMBER, importer.id()));
+        UUID secret = projectService.create(slug, pm.getId(), new CreateProjectRequest("Secreto", "SEC", null, null)).id();
+
+        ImportJobResponse uploaded = importService.upload(slug, luis.getId(), new ImportUploadRequest(ImportSourceType.CSV, "tareas.csv",
+                Base64.getEncoder().encodeToString(("Title,Assignee\nTarea colada," + luis.getEmail() + "\n").getBytes(StandardCharsets.UTF_8))));
+        List<CsvField> columns = uploaded.discovery().csv().columns().stream().map(CsvImport.Column::suggested).toList();
+        String external = uploaded.discovery().projects().get(0).id();
+
+        // Al proyecto que no ve: como si no existiera
+        assertThatThrownBy(() -> importService.select(slug, uploaded.id(), luis.getId(), new ImportSelection(
+                List.of(new ProjectChoice(external, secret, null, null)), Options.DEFAULTS, new CsvSetup(columns))))
+                .isInstanceOf(com.taskflow.api.exception.BadRequestException.class);
+        // A un proyecto nuevo: su rol no puede crear proyectos
+        assertThatThrownBy(() -> importService.select(slug, uploaded.id(), luis.getId(), new ImportSelection(
+                List.of(new ProjectChoice(external, null, "Colado", "COL")), Options.DEFAULTS, new CsvSetup(columns))))
+                .isInstanceOf(com.taskflow.api.exception.ForbiddenException.class);
+
+        // Si la selección la guardó quien sí podía, arrancarla igual se comprueba con quien arranca
+        importService.select(slug, uploaded.id(), pm.getId(), new ImportSelection(
+                List.of(new ProjectChoice(external, secret, null, null)), Options.DEFAULTS, new CsvSetup(columns)));
+        ImportJobResponse ready = await(uploaded.id(), ImportStatus.READY);
+        assertThatThrownBy(() -> importService.start(slug, ready.id(), luis.getId()))
+                .isInstanceOf(com.taskflow.api.exception.BadRequestException.class);
+        assertThat(value("SELECT count(*) FROM issues WHERE project_id = '" + secret + "'")).isEqualTo("0");
+        assertThat(value("SELECT count(*) FROM project_members WHERE project_id = '" + secret + "' AND user_id = '" + luis.getId() + "'"))
+                .isEqualTo("0");
+    }
+
     // ----- Utilidades
 
     private ImportJobResponse upload(String fileName, String csv) {
@@ -339,7 +375,7 @@ class ImportIntegrationTest {
     /** Elige el proyecto con las columnas tal como se propusieron y espera a que se lea el archivo. */
     private ImportJobResponse select(ImportJobResponse uploaded, ProjectChoice choice) {
         List<CsvField> columns = uploaded.discovery().csv().columns().stream().map(CsvImport.Column::suggested).toList();
-        importService.select(slug, uploaded.id(), new ImportSelection(List.of(choice), Options.DEFAULTS, new CsvSetup(columns)));
+        importService.select(slug, uploaded.id(), pm.getId(), new ImportSelection(List.of(choice), Options.DEFAULTS, new CsvSetup(columns)));
         return await(uploaded.id(), ImportStatus.READY);
     }
 

@@ -1,5 +1,6 @@
 package com.taskflow.api.dto.request;
 
+import jakarta.validation.constraints.NotNull;
 import com.taskflow.api.entity.enums.IssuePriority;
 import com.taskflow.api.entity.enums.IssueType;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -47,10 +48,10 @@ public record UpdateIssueRequest(
         LocalDate dueDate,
 
         @Size(max = 20, message = "Máximo 20 asignados")
-        List<UUID> assigneeIds,
+        List<@NotNull(message = "Id de asignado inválido") UUID> assigneeIds,
 
         @Size(max = 20, message = "Máximo 20 etiquetas")
-        List<UUID> labelIds,
+        List<@NotNull(message = "Id de etiqueta inválido") UUID> labelIds,
 
         Boolean clearParent,
 

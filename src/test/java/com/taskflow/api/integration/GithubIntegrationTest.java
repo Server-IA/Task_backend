@@ -227,6 +227,19 @@ class GithubIntegrationTest {
     }
 
     @Test
+    void quienPerdioElPermisoDeGestionarGithubNoConectaConUnEnlaceViejo() {
+        // Marta tenía un enlace de instalación (vale una hora) pero ya no puede gestionar GitHub en el workspace
+        User marta = user("marta-" + suffix + "@test.com", "Marta Sin Permiso");
+        link(marta, "marta-" + suffix);
+        sql("INSERT INTO workspace_members (id, workspace_id, user_id, role) SELECT gen_random_uuid(), w.id, '" + marta.getId()
+                + "', 'MEMBER' FROM workspaces w WHERE w.slug = '" + slug + "'");
+        String state = state(githubService.installUrl(slug, marta.getId()));
+
+        assertThat(githubService.completeSetup(installationId, state)).endsWith("github=forbidden");
+        assertThat(githubService.workspace(slug).connected()).isFalse();
+    }
+
+    @Test
     void unaInstalacionQueLaCuentaDeQuienConectaNoVeNoSeConecta() {
         // Alguien con un enlace válido de su workspace que prueba con el número de la instalación de otra organización
         GITHUB.outsider(pmLogin);
@@ -534,6 +547,25 @@ class GithubIntegrationTest {
 
         assertThat(GITHUB.bodies("POST /repos/" + repositoryName + "/actions/workflows/88/dispatches")).hasSize(1);
         assertThat(githubService.runs(slug, projectId)).singleElement().satisfies(run -> assertThat(run.issueId()).isEqualTo(task.id()));
+    }
+
+    @Test
+    void unaReglaNoUsaElTokenDeQuienYaNoPuedeEjecutarWorkflows() {
+        UUID repositoryId = connect();
+        // La creó Ana cuando podía; hoy su rol no permite ejecutar workflows (la fila se pone a mano: con el permiso
+        // actual no podría crearla)
+        User ana = user("ana-" + suffix + "@test.com", "Ana Sin Permiso");
+        link(ana, "ana-" + suffix);
+        sql("INSERT INTO workspace_members (id, workspace_id, user_id, role) SELECT gen_random_uuid(), w.id, '" + ana.getId()
+                + "', 'MEMBER' FROM workspaces w WHERE w.slug = '" + slug + "'");
+        sql("INSERT INTO github_rules (id, project_id, fires_on, repository_id, workflow_id, workflow_name, ref, created_by_id) "
+                + "VALUES (gen_random_uuid(), '" + projectId + "', '" + GithubService.FIRES_ON_COMPLETED + "', '" + repositoryId
+                + "', 89, 'Deploy de Ana', 'main', '" + ana.getId() + "')");
+        IssueResponse task = task("Con regla ajena");
+
+        issueService.move(slug, projectId, task.id(), pm.getId(), new MoveIssueRequest(done, null, null));
+
+        assertThat(GITHUB.bodies("POST /repos/" + repositoryName + "/actions/workflows/89/dispatches")).isEmpty();
     }
 
     @Test

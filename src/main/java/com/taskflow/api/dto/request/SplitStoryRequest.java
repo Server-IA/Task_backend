@@ -1,5 +1,6 @@
 package com.taskflow.api.dto.request;
 
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Size;
@@ -13,7 +14,7 @@ import java.util.List;
 public record SplitStoryRequest(
         @NotEmpty(message = "Escribe al menos una tarea")
         @Size(max = 50, message = "Máximo 50 tareas a la vez")
-        List<@Valid SplitItemRequest> items,
+        List<@NotNull(message = "Una de las tareas está vacía") @Valid SplitItemRequest> items,
 
         /**
          * La historia está cerrada y se le agregan tareas: {@code true} la reabre (si no, 409 con

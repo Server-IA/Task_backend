@@ -44,14 +44,14 @@ public record CreateIssueRequest(
         LocalDate dueDate,
 
         @Size(max = 20, message = "Máximo 20 asignados")
-        List<UUID> assigneeIds,
+        List<@NotNull(message = "Id de asignado inválido") UUID> assigneeIds,
 
         @Size(max = 20, message = "Máximo 20 etiquetas")
-        List<UUID> labelIds,
+        List<@NotNull(message = "Id de etiqueta inválido") UUID> labelIds,
 
         /** Criterios y pasos que se crean junto con la tarea (por ejemplo, los de una plantilla), en orden. */
         @Size(max = 50, message = "Máximo 50 elementos en la checklist")
-        List<@Valid ChecklistItemRequest> checklist,
+        List<@NotNull(message = "Uno de los pasos del checklist está vacío") @Valid ChecklistItemRequest> checklist,
 
         /** Plantilla usada (del mismo proyecto); suma un uso a la plantilla. */
         UUID templateId,

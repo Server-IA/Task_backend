@@ -366,11 +366,22 @@ public class IssueServiceImpl implements IssueService {
 
         Issue above = request.afterIssueId() != null ? findNeighbor(project, target, issue, request.afterIssueId()) : null;
         Issue below = request.beforeIssueId() != null ? findNeighbor(project, target, issue, request.beforeIssueId()) : null;
+        // Con un solo vecino (tablero filtrado, carriles) puede haber tarjetas que no se ven justo al lado: el otro
+        // extremo es la tarjeta real siguiente (o anterior) de la columna. Si no, «debajo de la última visible» caía
+        // en la misma posición que una oculta y después no se podía soltar nada entre las dos
+        if (above != null && below == null) {
+            below = issueRepository.findFirstByStateIdAndSortOrderGreaterThanAndIdNotOrderBySortOrderAsc(
+                    target.getId(), above.getSortOrder(), issue.getId()).orElse(null);
+        } else if (below != null && above == null) {
+            above = issueRepository.findFirstByStateIdAndSortOrderLessThanAndIdNotOrderBySortOrderDesc(
+                    target.getId(), below.getSortOrder(), issue.getId()).orElse(null);
+        }
 
         if (above != null && below != null) {
-            if (above.getSortOrder() >= below.getSortOrder()) {
+            if (above.getSortOrder() > below.getSortOrder()) {
                 throw new BadRequestException("afterIssueId debe estar justo arriba de beforeIssueId en la columna");
             }
+            // Dos tarjetas con la misma posición (o casi): se renumera la columna antes de meter la nueva en medio
             if (SortOrderCalculator.needsRebalance(above.getSortOrder(), below.getSortOrder())) {
                 rebalanceColumn(target, issue);
             }

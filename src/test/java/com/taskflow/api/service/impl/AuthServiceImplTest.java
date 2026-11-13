@@ -94,10 +94,11 @@ class AuthServiceImplTest {
                 new AppProperties.Tokens(24, 60, 7, 30));
         authService = new AuthServiceImpl(userRepository, refreshTokenRepository, verificationTokenRepository,
                 authenticationManager, passwordEncoder, jwtService, emailNotifier, userMapper, properties,
-                rateLimitService, credentialsGuard);
+                rateLimitService, knownLogins, credentialsGuard);
     }
 
     private final RateLimitService rateLimitService = new RateLimitService();
+    private final com.taskflow.api.ratelimit.KnownLogins knownLogins = new com.taskflow.api.ratelimit.KnownLogins();
 
     /** La fila del usuario bloqueada ({@code UserRepository.lockCredentials}). */
     private static LockedCredentials locked(String passwordHash, int credentialsVersion) {
@@ -128,18 +129,38 @@ class AuthServiceImplTest {
     class Register {
 
         @Test
-        void rechazaCorreoDuplicadoSinImportarMayusculas() {
-            when(userRepository.existsByEmail("ana@test.com")).thenReturn(true);
+        void unCorreoQueYaTieneCuentaRecibeLaMismaRespuestaYLaDuenaUnAvisoPorHora() {
+            User ana = user("ana@test.com");
+            ana.setEmailVerified(true);
+            when(userRepository.findByEmail("ana@test.com")).thenReturn(Optional.of(ana));
 
-            assertThatThrownBy(() -> authService.register(
-                    new RegisterRequest("  Ana@Test.com ", "Clave1234", "Ana")))
-                    .isInstanceOf(ConflictException.class);
+            // Igual que una cuenta nueva (sin importar mayúsculas): no revela que el correo está registrado
+            assertThat(authService.register(new RegisterRequest("  Ana@Test.com ", "Clave1234", "Ana")))
+                    .isEqualTo(new com.taskflow.api.dto.response.RegisterResponse("ana@test.com"));
+            authService.register(new RegisterRequest("ana@test.com", "Clave1234", "Ana"));
+
             verify(userRepository, never()).save(any());
+            // El hash se calcula igual (misma demora) y a la dueña le llega un solo aviso en la hora
+            verify(passwordEncoder, org.mockito.Mockito.times(2)).encode("Clave1234");
+            verify(emailNotifier, org.mockito.Mockito.times(1)).sendAccountExists(ana);
+        }
+
+        @Test
+        void siLaCuentaExistenteNuncaSeVerificoSeReenviaLaVerificacion() {
+            User ana = user("ana@test.com");
+            ana.setEmailVerified(false);
+            when(userRepository.findByEmail("ana@test.com")).thenReturn(Optional.of(ana));
+
+            authService.register(new RegisterRequest("ana@test.com", "Clave1234", "Ana"));
+
+            verify(userRepository, never()).save(any());
+            verify(emailNotifier).sendEmailVerification(eq(ana), any());
+            verify(emailNotifier, never()).sendAccountExists(any());
         }
 
         @Test
         void guardaUsuarioConContrasenaHasheadaYEnviaVerificacion() {
-            when(userRepository.existsByEmail("ana@test.com")).thenReturn(false);
+            when(userRepository.findByEmail("ana@test.com")).thenReturn(Optional.empty());
             when(passwordEncoder.encode("Clave1234")).thenReturn("bcrypt-hash");
 
             authService.register(new RegisterRequest("Ana@Test.com", "Clave1234", " Ana \t  Pérez "));
@@ -334,7 +355,7 @@ class AuthServiceImplTest {
                     new AppProperties.Tokens(24, 60, 7, 0));
             AuthServiceImpl strictService = new AuthServiceImpl(userRepository, refreshTokenRepository,
                     verificationTokenRepository, authenticationManager, passwordEncoder, jwtService, emailNotifier,
-                    userMapper, strict, rateLimitService, credentialsGuard);
+                    userMapper, strict, rateLimitService, knownLogins, credentialsGuard);
             User user = user("ana@test.com");
             RefreshToken stored = rotated(user, active(user), Instant.now().minusMillis(100));
             lockedRefresh(user, stored);
@@ -650,6 +671,27 @@ class AuthServiceImplTest {
             // El intento rechazado por el techo no gastó el de esa IP
             assertThat(rateLimitService.tryConsume(RateLimitRule.LOGIN_ACCOUNT_IP, "ana@test.com|10.9.9.9")
                     .getRemainingTokens()).isEqualTo(RateLimitRule.LOGIN_ACCOUNT_IP.getCapacity() - 1);
+        }
+
+        @Test
+        void quienGastaElTechoDeUnaCuentaDesdeAfueraNoDejaFueraALaDuenaEnSuLugarDeSiempre() {
+            User user = user("ana@test.com");
+            when(authenticationManager.authenticate(argThat(token -> token != null && "mala".equals(token.getCredentials()))))
+                    .thenThrow(new BadCredentialsException("mala"));
+            correctPassword(user);
+            LoginRequest right = new LoginRequest("ana@test.com", "Clave1234");
+            authService.login(right, from("198.51.100.5"));
+
+            // Alguien que sabe su correo gasta el techo de la cuenta desde muchas IPs
+            for (int i = 0; i < RateLimitRule.LOGIN_ACCOUNT.getCapacity(); i++) {
+                ClientInfo client = from("10.0." + (i / 200) + "." + (i % 200));
+                assertThatThrownBy(() -> authService.login(wrong, client)).isInstanceOf(BadCredentialsException.class);
+            }
+            // Desde una IP nueva sigue bloqueado (la prueba repartida no avanza)...
+            assertThatThrownBy(() -> authService.login(right, from("10.9.9.9"))).isInstanceOf(TooManyRequestsException.class);
+            // ...pero Ana entra desde donde ya había entrado
+            org.assertj.core.api.Assertions.assertThatCode(() -> authService.login(right, from("198.51.100.5")))
+                    .doesNotThrowAnyException();
         }
 
         @Test

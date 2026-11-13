@@ -82,9 +82,12 @@ class R2ObjectStorageTest {
                 .contains("X-Amz-Expires=900");
         // R2 compara las cabeceras firmadas: otro tipo u otro tamaño dan 403
         assertThat(query).containsPattern("X-Amz-SignedHeaders=[^&]*content-length")
-                .containsPattern("X-Amz-SignedHeaders=[^&]*content-type");
-        // El navegador manda el tipo; el tamaño y el host los pone él solo
-        assertThat(put.headers()).containsExactly(java.util.Map.entry("Content-Type", "image/png"));
+                .containsPattern("X-Amz-SignedHeaders=[^&]*content-type")
+                // Solo crea: con la misma URL no se puede reemplazar el archivo ya subido (R2 responde 412)
+                .containsPattern("X-Amz-SignedHeaders=[^&]*if-none-match");
+        // El navegador manda el tipo y la condición; el tamaño y el host los pone él solo
+        assertThat(put.headers()).containsOnly(java.util.Map.entry("Content-Type", "image/png"),
+                java.util.Map.entry("If-None-Match", "*"));
         assertThat(put.expiresAt()).isCloseTo(Instant.now().plus(Duration.ofMinutes(15)), within(5,
                 java.time.temporal.ChronoUnit.SECONDS));
     }

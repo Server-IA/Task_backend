@@ -1,5 +1,7 @@
 package com.taskflow.api.service.impl;
 
+import com.taskflow.api.dto.response.RegisterResponse;
+import java.util.Optional;
 import com.taskflow.api.config.AppProperties;
 import com.taskflow.api.dto.request.ChangePasswordRequest;
 import com.taskflow.api.dto.request.LoginRequest;
@@ -19,6 +21,7 @@ import com.taskflow.api.exception.TooManyRequestsException;
 import com.taskflow.api.exception.UnauthorizedException;
 import com.taskflow.api.mapper.UserMapper;
 import com.taskflow.api.ratelimit.RateLimitRule;
+import com.taskflow.api.ratelimit.KnownLogins;
 import com.taskflow.api.ratelimit.RateLimitService;
 import com.taskflow.api.repository.LockedCredentials;
 import com.taskflow.api.repository.RefreshTokenRepository;
@@ -67,26 +70,42 @@ public class AuthServiceImpl implements AuthService {
     private final UserMapper userMapper;
     private final AppProperties properties;
     private final RateLimitService rateLimitService;
+    private final KnownLogins knownLogins;
     private final CredentialsGuard credentialsGuard;
 
     @Override
     @Transactional
-    public UserResponse register(RegisterRequest request) {
+    public RegisterResponse register(RegisterRequest request) {
         String email = normalizeEmail(request.email());
-        if (userRepository.existsByEmail(email)) {
-            throw new ConflictException("Ya existe una cuenta con ese correo");
+        // El hash se calcula siempre (tarda): así la respuesta tarda lo mismo exista o no la cuenta
+        String passwordHash = passwordEncoder.encode(request.password());
+        Optional<User> existing = userRepository.findByEmail(email);
+        if (existing.isPresent()) {
+            // Misma respuesta que una cuenta nueva: el registro no revela qué correos tienen cuenta. A la dueña le llega
+            // un aviso (o, si nunca verificó, otra vez la verificación), como mucho uno por hora
+            User owner = existing.get();
+            if (rateLimitService.tryConsume(RateLimitRule.REGISTER_EXISTING, email).isConsumed()) {
+                if (owner.isEmailVerified()) {
+                    emailNotifier.sendAccountExists(owner);
+                } else {
+                    String token = createVerificationToken(owner, VerificationTokenType.EMAIL_VERIFICATION,
+                            Duration.ofHours(properties.tokens().emailVerificationHours()));
+                    emailNotifier.sendEmailVerification(owner, token);
+                }
+            }
+            return new RegisterResponse(email);
         }
 
         User user = new User();
         user.setEmail(email);
-        user.setPasswordHash(passwordEncoder.encode(request.password()));
+        user.setPasswordHash(passwordHash);
         user.setFullName(HumanNames.required(request.fullName(), "fullName"));
         userRepository.save(user);
 
         String token = createVerificationToken(user, VerificationTokenType.EMAIL_VERIFICATION,
                 Duration.ofHours(properties.tokens().emailVerificationHours()));
         emailNotifier.sendEmailVerification(user, token);
-        return userMapper.toResponse(user);
+        return new RegisterResponse(email);
     }
 
     @Override
@@ -118,9 +137,14 @@ public class AuthServiceImpl implements AuthService {
         // la contraseña (así no se saltan con muchas peticiones a la vez) y un login correcto los devuelve:
         //  - por cuenta e IP: quien prueba contraseñas desde una IP se bloquea solo a sí mismo, no a la dueña;
         //  - por cuenta, desde cualquier IP: un techo más alto que frena repartir los intentos entre muchas IPs.
+        //  - desde una IP donde la cuenta ya entró bien no se aplica el techo por cuenta: si no, cualquiera que supiera el
+        //    correo podía gastarlo desde afuera y dejar a la dueña sin poder entrar (ver KnownLogins).
         String accountAndIp = email + "|" + ClientKeys.ip(client.ip());
+        boolean knownPlace = knownLogins.known(accountAndIp);
         consumeLoginAttempt(RateLimitRule.LOGIN_ACCOUNT_IP, accountAndIp, null, null);
-        consumeLoginAttempt(RateLimitRule.LOGIN_ACCOUNT, email, RateLimitRule.LOGIN_ACCOUNT_IP, accountAndIp);
+        if (!knownPlace) {
+            consumeLoginAttempt(RateLimitRule.LOGIN_ACCOUNT, email, RateLimitRule.LOGIN_ACCOUNT_IP, accountAndIp);
+        }
 
         // Lanza BadCredentials, Disabled (sin verificar) o Locked (inactivo); el handler global los traduce. Cualquier
         // fallo deja gastados los intentos.
@@ -135,7 +159,10 @@ public class AuthServiceImpl implements AuthService {
         User user = userRepository.findById(principal.getId())
                 .orElseThrow(() -> new UnauthorizedException("Correo o contraseña incorrectos"));
         rateLimitService.refund(RateLimitRule.LOGIN_ACCOUNT_IP, accountAndIp);
-        rateLimitService.refund(RateLimitRule.LOGIN_ACCOUNT, email);
+        if (!knownPlace) {
+            rateLimitService.refund(RateLimitRule.LOGIN_ACCOUNT, email);
+        }
+        knownLogins.remember(accountAndIp);
 
         AuthResponse response = issueTokens(user, credentials.getCredentialsVersion()).response();
         emailNotifier.sendLoginAlert(user, client, Instant.now());

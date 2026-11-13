@@ -1,5 +1,7 @@
 package com.taskflow.api.github;
 
+import com.taskflow.api.security.AccessControl;
+import com.taskflow.api.entity.enums.Permission;
 import com.taskflow.api.config.AppProperties;
 import com.taskflow.api.entity.Issue;
 import com.taskflow.api.entity.Project;
@@ -97,6 +99,8 @@ public class GithubService {
     private final NotificationService notificationService;
     private final GithubAccounts accounts;
     private final GithubBackground background;
+    private final AccessControl accessControl;
+    private final com.taskflow.api.security.WorkspaceSecurity workspaceSecurity;
     private final RealtimeHub realtime;
     /** Los workflows ejecutables de cada repositorio, unos minutos: leerlos cuesta una petición a GitHub por workflow. */
     private final Map<UUID, CachedWorkflows> workflowCache = new java.util.concurrent.ConcurrentHashMap<>();
@@ -237,6 +241,11 @@ public class GithubService {
             return back + "taken";
         }
         UUID installer = UUID.fromString(parts[1]);
+        // El enlace vale una hora: si mientras tanto quien lo pidió salió del workspace o perdió el permiso de gestionar
+        // GitHub, ya no puede conectar nada
+        if (!accessControl.can(workspace.getSlug(), installer, Permission.GITHUB_MANAGE)) {
+            return back + "forbidden";
+        }
         if (!accounts.linked(installer)) {
             return back + "unlinked";
         }
@@ -1013,13 +1022,24 @@ public class GithubService {
 
     /**
      * Pide a GitHub el workflow de una regla, con la cuenta de quien la creó: sale a su nombre y GitHub solo lo deja si
-     * todavía puede escribir en el repositorio. Si esa persona ya no está en el workspace o desenlazó su cuenta, la regla
-     * no ejecuta nada. Si falla, queda en el registro y la ejecución pedida se quita.
+     * todavía puede escribir en el repositorio. La regla no ejecuta nada si esa persona ya no está en el workspace, ya no
+     * ve el proyecto o ya no puede ejecutar workflows, si desenlazó su cuenta, o si el repositorio ya no es del
+     * proyecto: su token no se usa para algo que esa persona ya no podría hacer a mano. Si falla, queda en el registro
+     * y la ejecución pedida se quita.
      */
     private void dispatchRule(Rule rule, Repository repository, UUID runId) {
         try {
             if (rule.createdById() == null || !store.isWorkspaceMember(repository.workspaceId(), rule.createdById())) {
                 throw new IllegalStateException("quien creó la regla ya no está en el workspace");
+            }
+            String slug = workspaceRepository.findById(repository.workspaceId()).map(Workspace::getSlug)
+                    .orElseThrow(() -> new IllegalStateException("el workspace ya no existe"));
+            if (!workspaceSecurity.canAccessProject(rule.createdById(), slug, rule.projectId())
+                    || !accessControl.can(slug, rule.createdById(), Permission.GITHUB_RUN)) {
+                throw new IllegalStateException("quien creó la regla ya no puede ejecutar workflows en ese proyecto");
+            }
+            if (!background.write(() -> store.projectHasRepository(rule.projectId(), repository.id()))) {
+                throw new IllegalStateException("el repositorio ya no está enlazado al proyecto");
             }
             String token = accounts.token(rule.createdById());
             client.dispatchWorkflowAs(token, repository.fullName(), rule.workflowId(), rule.ref(), Map.of());

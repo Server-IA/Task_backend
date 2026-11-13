@@ -352,18 +352,21 @@ public class ReportServiceImpl implements ReportService {
 
     /** De más a menos tareas (a igual cantidad, por nombre) y «Sin asignar» al final. */
     private static List<Count> byAssignee(List<Issue> issues, Language language) {
-        Map<String, Integer> byName = new LinkedHashMap<>();
+        // Por persona (su id), no por nombre: dos personas que se llaman igual no se suman en una sola fila
+        Map<UUID, Integer> byPerson = new LinkedHashMap<>();
+        Map<UUID, String> names = new LinkedHashMap<>();
         int unassigned = 0;
         for (Issue issue : issues) {
             if (issue.getAssignees().isEmpty()) {
                 unassigned++;
             }
             for (User assignee : issue.getAssignees()) {
-                byName.merge(assignee.getFullName(), 1, Integer::sum);
+                byPerson.merge(assignee.getId(), 1, Integer::sum);
+                names.putIfAbsent(assignee.getId(), assignee.getFullName());
             }
         }
-        List<Count> counts = new ArrayList<>(byName.entrySet().stream()
-                .map(entry -> new Count(entry.getKey(), entry.getValue()))
+        List<Count> counts = new ArrayList<>(byPerson.entrySet().stream()
+                .map(entry -> new Count(names.get(entry.getKey()), entry.getValue()))
                 .sorted(Comparator.comparingInt(Count::count).reversed().thenComparing(Count::name, BY_NAME))
                 .toList());
         if (unassigned > 0) {
