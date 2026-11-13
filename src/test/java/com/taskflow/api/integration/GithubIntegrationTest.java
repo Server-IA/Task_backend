@@ -1056,6 +1056,7 @@ class GithubIntegrationTest {
         connect();
         IssueResponse task = task("Con autora");
         IssueResponse other = task("De alguien de fuera");
+        sql("UPDATE users SET avatar_url = '/files/foto-de-paula' WHERE id = '" + pm.getId() + "'");
 
         send("pull_request", pullEvent("opened", 60, "Con autora", branch(task), "open", false, false, pmLogin));
         send("pull_request", pullEvent("opened", 61, "De fuera", branch(other), "open", false, false, "externo"));
@@ -1063,9 +1064,14 @@ class GithubIntegrationTest {
         assertThat(githubService.issue(slug, projectId, task.id()).pullRequests()).singleElement().satisfies(pull -> {
             assertThat(pull.authorName()).isEqualTo("Paula PM");
             assertThat(pull.authorUserId()).isEqualTo(pm.getId());
+            // Su foto de TaskFlow: el módulo GitHub la muestra en vez de sus iniciales
+            assertThat(pull.authorAvatarUrl()).isEqualTo("/files/foto-de-paula");
         });
         assertThat(githubService.issue(slug, projectId, other.id()).pullRequests()).singleElement()
-                .satisfies(pull -> assertThat(pull.authorName()).isNull());
+                .satisfies(pull -> {
+                    assertThat(pull.authorName()).isNull();
+                    assertThat(pull.authorAvatarUrl()).isNull();
+                });
         // En la actividad de la tarea, lo hizo ella; lo de alguien de fuera queda sin autor de TaskFlow
         assertThat(values("SELECT coalesce(a.actor_id::text, 'nadie') FROM issue_activities a WHERE a.issue_id = '" + task.id()
                 + "' AND a.field = 'GITHUB' AND a.new_value LIKE 'PR_OPENED%'")).containsExactly(pm.getId().toString());

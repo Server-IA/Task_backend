@@ -44,13 +44,13 @@ public class GithubStore {
                               String issueState, String issueStateGroup, UUID issueProjectId, int number, String title, String state,
                               String url, String authorLogin, String headBranch, String baseBranch, String headSha, String reviewers,
                               String checksState, int checksTotal, int checksFailed, Instant mergedAt, Instant openedAt,
-                              Instant changedAt, UUID authorUserId, String authorName) {
+                              Instant changedAt, UUID authorUserId, String authorName, String authorAvatarUrl) {
 
         /** El mismo pull request sin los datos de su tarea (cuando la tarea es de un proyecto que no es el que se mira). */
         public PullRequest withoutIssue() {
             return new PullRequest(id, repositoryId, repository, null, null, null, null, null, null, number, title, state, url,
                     authorLogin, headBranch, baseBranch, headSha, reviewers, checksState, checksTotal, checksFailed, mergedAt, openedAt,
-                    changedAt, authorUserId, authorName);
+                    changedAt, authorUserId, authorName, authorAvatarUrl);
         }
     }
 
@@ -308,7 +308,8 @@ public class GithubStore {
             SELECT pr.id, pr.repository_id, r.full_name, pr.issue_id,
                    CASE WHEN i.id IS NULL THEN NULL ELSE p.identifier || '-' || i.sequence_id END, i.title, s.name, s.state_group, i.project_id,
                    pr.number, pr.title, pr.state, pr.url, pr.author_login, pr.head_branch, pr.base_branch, pr.head_sha, pr.reviewers,
-                   pr.checks_state, pr.checks_total, pr.checks_failed, pr.merged_at, pr.opened_at, pr.changed_at, au.id, au.full_name
+                   pr.checks_state, pr.checks_total, pr.checks_failed, pr.merged_at, pr.opened_at, pr.changed_at, au.id, au.full_name,
+                   au.avatar_url
             FROM github_pull_requests pr JOIN github_repositories r ON r.id = pr.repository_id
                  JOIN github_installations gi ON gi.id = r.installation_id
                  LEFT JOIN issues i ON i.id = pr.issue_id LEFT JOIN projects p ON p.id = i.project_id LEFT JOIN states s ON s.id = i.state_id
@@ -321,7 +322,7 @@ public class GithubStore {
             uuid(row, 4), row.getString(5), row.getString(6), row.getString(7), row.getString(8), uuid(row, 9), row.getInt(10),
             row.getString(11), row.getString(12), row.getString(13), row.getString(14), row.getString(15), row.getString(16),
             row.getString(17), row.getString(18), row.getString(19), row.getInt(20), row.getInt(21), instant(row, 22), instant(row, 23),
-            instant(row, 24), uuid(row, 25), row.getString(26));
+            instant(row, 24), uuid(row, 25), row.getString(26), row.getString(27));
 
     public Optional<PullRequest> pullRequest(UUID repositoryId, int number) {
         return jdbc.query(PULL + " WHERE pr.repository_id = ? AND pr.number = ?", PULL_ROW, repositoryId, number).stream().findFirst();

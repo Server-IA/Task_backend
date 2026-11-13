@@ -64,13 +64,25 @@ public class WorkspaceSecurity {
                 .orElse(false);
     }
 
+    /** {@link #isMember} para otra persona (los avisos en tiempo real se reparten fuera de su petición). */
+    public boolean isMember(UUID userId, String slug) {
+        return accessControl.find(slug, userId).isPresent();
+    }
+
+    /** {@link #canAccessProject} para otra persona (los avisos en tiempo real se reparten fuera de su petición). */
+    public boolean canAccessProject(UUID userId, String slug, UUID projectId) {
+        return accessControl.find(slug, userId).map(access -> canAccess(access, userId, slug, projectId)).orElse(false);
+    }
+
     private boolean canAccess(AccessControl.Access access, String slug, UUID projectId) {
+        return SecurityUtils.currentUserId().map(userId -> canAccess(access, userId, slug, projectId)).orElse(false);
+    }
+
+    private boolean canAccess(AccessControl.Access access, UUID userId, String slug, UUID projectId) {
         if (access.can(Permission.PROJECT_VIEW_ALL)) {
             return !projectRepository.existsInOtherWorkspace(projectId, slug);
         }
-        return SecurityUtils.currentUserId()
-                .map(userId -> projectMemberRepository.existsMemberInWorkspace(projectId, slug, userId))
-                .orElse(false);
+        return projectMemberRepository.existsMemberInWorkspace(projectId, slug, userId);
     }
 
     private Optional<AccessControl.Access> currentAccess(String slug) {

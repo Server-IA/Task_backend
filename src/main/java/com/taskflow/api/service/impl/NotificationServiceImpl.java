@@ -15,6 +15,7 @@ import com.taskflow.api.entity.enums.NotificationType;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.CollaborationMapper;
+import com.taskflow.api.realtime.RealtimeHub;
 import com.taskflow.api.repository.NotificationRepository;
 import com.taskflow.api.repository.ProjectMemberRepository;
 import com.taskflow.api.repository.UserRepository;
@@ -56,6 +57,7 @@ public class NotificationServiceImpl implements NotificationService {
     static final Duration STORAGE_WARNING_INTERVAL = Duration.ofDays(7);
 
     private final NotificationRepository notificationRepository;
+    private final RealtimeHub realtime;
     private final ProjectMemberRepository projectMemberRepository;
     private final UserRepository userRepository;
     private final CollaborationMapper mapper;
@@ -292,7 +294,9 @@ public class NotificationServiceImpl implements NotificationService {
         notificationRepository.save(notification);
     }
 
-    private static Notification notification(User recipient, User actor, NotificationType type, String message) {
+    private Notification notification(User recipient, User actor, NotificationType type, String message) {
+        // Su bandeja se actualiza sola en cuanto se guarda (el aviso sale después del commit)
+        realtime.notifications(recipient.getId(), null);
         Notification notification = new Notification();
         notification.setRecipient(recipient);
         notification.setActor(actor);

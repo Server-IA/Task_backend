@@ -23,6 +23,7 @@ import com.taskflow.api.github.GithubStore.Rule;
 import com.taskflow.api.github.GithubStore.Run;
 import com.taskflow.api.github.GithubStore.Settings;
 import com.taskflow.api.github.GithubText.Code;
+import com.taskflow.api.realtime.RealtimeHub;
 import com.taskflow.api.repository.IssueRepository;
 import com.taskflow.api.repository.ProjectRepository;
 import com.taskflow.api.repository.StateRepository;
@@ -96,6 +97,7 @@ public class GithubService {
     private final NotificationService notificationService;
     private final GithubAccounts accounts;
     private final GithubBackground background;
+    private final RealtimeHub realtime;
     /** Los workflows ejecutables de cada repositorio, unos minutos: leerlos cuesta una petición a GitHub por workflow. */
     private final Map<UUID, CachedWorkflows> workflowCache = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<UUID, CachedBranches> branchCache = new java.util.concurrent.ConcurrentHashMap<>();
@@ -735,6 +737,7 @@ public class GithubService {
         }
         // Al final: es lo único que toca la fila de la instalación, y así dos avisos a la vez casi no se esperan
         store.touch(installationId);
+        realtime.workspace(installation.workspaceId());
     }
 
     private java.util.Optional<Repository> repository(long installationId, JsonNode payload) {
@@ -921,6 +924,7 @@ public class GithubService {
                 }
             }
             store.setChecks(repository.id(), sha, state, counted, broken);
+            realtime.workspace(repository.workspaceId());
         });
     }
 

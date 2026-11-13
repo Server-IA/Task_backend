@@ -4,6 +4,7 @@ import com.taskflow.api.ratelimit.RateLimitFilter;
 import com.taskflow.api.security.CustomUserDetailsService;
 import com.taskflow.api.security.JwtAuthFilter;
 import com.taskflow.api.security.RestAuthenticationHandler;
+import jakarta.servlet.DispatcherType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -60,6 +61,9 @@ public class SecurityConfig {
                         .authenticationEntryPoint(authenticationHandler)
                         .accessDeniedHandler(authenticationHandler))
                 .authorizeHttpRequests(auth -> auth
+                        // Al cerrarse una conexión de tiempo real (SseEmitter) Tomcat vuelve a despachar la petición
+                        // (ASYNC) sin pasar otra vez por el filtro del token: esa petición ya se autorizó al abrirse
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                         .requestMatchers(PUBLIC_PATHS).permitAll()
                         // Ver una invitación con su token no requiere sesión (aceptarla sí)
                         .requestMatchers(HttpMethod.GET, "/api/v1/invitations/*").permitAll()

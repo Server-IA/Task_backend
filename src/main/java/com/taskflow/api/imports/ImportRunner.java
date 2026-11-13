@@ -21,6 +21,7 @@ import com.taskflow.api.imports.source.SourceException;
 import com.taskflow.api.imports.source.TrelloFile;
 import com.taskflow.api.repository.ImportJobRepository;
 import com.taskflow.api.service.NotificationService;
+import com.taskflow.api.realtime.RealtimeHub;
 import com.taskflow.api.storage.ObjectStorage;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -66,10 +67,12 @@ public class ImportRunner {
     private final Map<ImportSourceType, ImportSource> sources = new EnumMap<>(ImportSourceType.class);
     private final TransactionTemplate transaction;
     private final Set<UUID> stopRequested = ConcurrentHashMap.newKeySet();
+    private final RealtimeHub realtime;
 
     public ImportRunner(ImportJobRepository jobRepository, ImportStore store, ImportWriter writer, ImportCredentials credentials,
                         NotificationService notificationService, ObjectStorage storage, List<ImportSource> sources,
-                        PlatformTransactionManager transactionManager) {
+                        PlatformTransactionManager transactionManager, RealtimeHub realtime) {
+        this.realtime = realtime;
         this.jobRepository = jobRepository;
         this.store = store;
         this.writer = writer;
@@ -316,6 +319,8 @@ public class ImportRunner {
             job.setStatus(result);
             job.setError(error);
             job.setFinishedAt(Instant.now());
+            // Lo importado aparece solo en las pantallas de todo el equipo
+            realtime.workspace(job.getWorkspace().getId());
             job.setProgress(null);
             if (session != null) {
                 job.setReport(ImportJson.write(session.report()));
@@ -414,6 +419,7 @@ public class ImportRunner {
                 store.deleteItems(jobId);
                 job.setStatus(ImportStatus.UNDONE);
                 job.setError(null);
+                realtime.workspace(job.getWorkspace().getId());
             });
         } catch (RuntimeException ex) {
             log.error("Importación {}: no se pudo deshacer", jobId, ex);
