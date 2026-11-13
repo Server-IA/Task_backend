@@ -39,6 +39,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -75,6 +76,9 @@ public class DailyServiceImpl implements DailyService {
     static final String CREATED = "creó";
     static final String COMMENTED = "comentó";
     static final String UPDATED = "actualizó";
+
+    /** Diferencia máxima entre el registro de un cambio de estado y el completedAt que puso ese mismo cambio. */
+    static final Duration SAME_CHANGE = Duration.ofSeconds(5);
 
     /** Por nombre (sin importar mayúsculas) y, si coinciden, por correo. */
     private static final Comparator<User> BY_NAME = Comparator
@@ -355,7 +359,7 @@ public class DailyServiceImpl implements DailyService {
                     if (state == null) {
                         yield new Change(issue, UPDATED, 4, at);
                     }
-                    yield groupByStateName.get(key(state)) == StateGroup.COMPLETED
+                    yield completedBy(state, issue, at, groupByStateName)
                             ? new Change(issue, COMPLETED, 0, at, activity.getOldValue(), state)
                             : new Change(issue, MOVED_TO + state, 1, at, activity.getOldValue(), state);
                 }
@@ -363,6 +367,21 @@ public class DailyServiceImpl implements DailyService {
                 case COMMENT -> new Change(issue, COMMENTED, 3, at);
                 default -> new Change(issue, UPDATED, 4, at);
             };
+        }
+
+        /**
+         * Si el cambio a {@code state} completó la tarea. El historial guarda el nombre que tenía el estado: si después
+         * se renombró (o se borró) ya no está en el proyecto, y entonces cuenta como completar si la tarea entró a
+         * completada en ese mismo momento y sigue completada.
+         */
+        static boolean completedBy(String state, Issue issue, Instant at, Map<String, StateGroup> groupByStateName) {
+            StateGroup group = groupByStateName.get(key(state));
+            if (group != null) {
+                return group == StateGroup.COMPLETED;
+            }
+            Instant completedAt = issue.getCompletedAt();
+            return completedAt != null && at != null
+                    && Duration.between(completedAt, at).abs().compareTo(SAME_CHANGE) <= 0;
         }
     }
 }

@@ -12,6 +12,7 @@ import com.taskflow.api.entity.ProjectMember;
 import com.taskflow.api.entity.User;
 import com.taskflow.api.entity.Workspace;
 import com.taskflow.api.entity.enums.NotificationType;
+import com.taskflow.api.entity.enums.StateGroup;
 import com.taskflow.api.exception.BadRequestException;
 import com.taskflow.api.exception.ResourceNotFoundException;
 import com.taskflow.api.mapper.CollaborationMapper;
@@ -180,7 +181,12 @@ public class NotificationServiceImpl implements NotificationService {
     @Override
     @Transactional
     public void notifyUnblocked(Issue blocked, Issue blocker, User actor) {
-        String message = blocked.getCode() + " ya no está bloqueada: " + blocker.getCode() + " se completó";
+        String message;
+        if (blocker.getState() != null && blocker.getState().getStateGroup() == StateGroup.CANCELLED) {
+            message = blocked.getCode() + " ya no está bloqueada: " + blocker.getCode() + " se canceló";
+        } else {
+            message = blocked.getCode() + " ya no está bloqueada: " + blocker.getCode() + " se completó";
+        }
         // Sin autor (la completó una automatización) el aviso le llega a todos los asignados
         Collection<User> assignees = actor == null ? distinct(blocked.getAssignees()) : distinctExcept(blocked.getAssignees(), actor);
         withAccess(blocked, assignees)

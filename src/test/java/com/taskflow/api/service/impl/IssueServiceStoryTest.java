@@ -296,6 +296,8 @@ class IssueServiceStoryTest {
             assertThat(story.getCompletedAt()).isNotNull();
             verify(activityService).record(story, pm, ActivityField.STATE, "In Progress", "Done");
             verify(relationService).notifyUnblocked(story, pm);
+            // Cerrarla es completarla: corren las reglas «al completar una tarea» de GitHub, como al moverla a Done
+            verify(events).publishEvent(new IssueCompletedEvent(story.getId(), project.getId()));
         }
 
         @Test

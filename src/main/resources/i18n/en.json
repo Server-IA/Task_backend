@@ -711,6 +711,10 @@
       "en": "{1} is no longer blocked: {2} was completed"
     },
     {
+      "es": "(.+?)\\ ya\\ no\\ está\\ bloqueada:\\ (.+?)\\ se\\ canceló",
+      "en": "{1} is no longer blocked: {2} was cancelled"
+    },
+    {
       "es": "Ya\\ existe\\ una\\ plantilla\\ llamada\\ '(.+?)'",
       "en": "A template named '{1}' already exists"
     },

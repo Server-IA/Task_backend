@@ -590,18 +590,34 @@ class IssueServiceImplTest {
         }
 
         @Test
-        void moverEntreEstadosCompletadosOCancelarNoAvisa() {
+        void moverEntreEstadosCerradosNoAvisa() {
             State deployed = state("Deployed", StateGroup.COMPLETED);
             when(stateRepository.findForShare(deployed.getId(), project.getId()))
                     .thenReturn(Optional.of(deployed));
             Issue completed = issue(done, 1);
-            Issue open = issue(todo, 2);
+            Issue wasCancelled = issue(cancelled, 2);
 
             issueService.move(SLUG, project.getId(), completed.getId(), author.getId(),
                     new MoveIssueRequest(deployed.getId(), null, null));
-            issueService.update(SLUG, project.getId(), open.getId(), author.getId(), updateState(cancelled.getId()));
+            issueService.update(SLUG, project.getId(), wasCancelled.getId(), author.getId(), updateState(done.getId()));
 
             verify(relationService, never()).notifyUnblocked(any(), any());
+        }
+
+        @Test
+        void cancelarLaQueBloqueaTambienAvisaPeroNoEsCompletarla() {
+            Issue moved = issue(todo, 1);
+            Issue edited = issue(todo, 2);
+
+            issueService.move(SLUG, project.getId(), moved.getId(), author.getId(),
+                    new MoveIssueRequest(cancelled.getId(), null, null));
+            issueService.update(SLUG, project.getId(), edited.getId(), author.getId(), updateState(cancelled.getId()));
+
+            // Una tarea cancelada ya no bloquea: a las que quedan libres les llega el aviso
+            verify(relationService).notifyUnblocked(moved, author);
+            verify(relationService).notifyUnblocked(edited, author);
+            // Pero cancelar no dispara las reglas «al completar una tarea» de GitHub
+            verify(events, never()).publishEvent(any(IssueCompletedEvent.class));
         }
     }
 

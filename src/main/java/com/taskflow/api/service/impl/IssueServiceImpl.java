@@ -211,6 +211,7 @@ public class IssueServiceImpl implements IssueService {
         User actor = lookup.user(userId);
         IssueChanges changes = new IssueChanges(issue, actor);
         boolean completed = false;
+        boolean closed = false;
         // Lo que puede mover a su historia: cambiar de estado, de padre o de tipo
         Issue previousParent = issue.getParent();
         StateGroup originalGroup = issue.getState().getStateGroup();
@@ -254,6 +255,7 @@ public class IssueServiceImpl implements IssueService {
             updateStartedAt(issue, now);
             StoryRules.updateClosed(issue, previousGroup, actor, now);
             completed = becameCompleted(previousGroup, state.getStateGroup());
+            closed = becameClosed(previousGroup, state.getStateGroup());
             issue.setSortOrder(SortOrderCalculator.endOfColumn(issueRepository.findMaxSortOrder(state.getId())));
             storyRelevant = true;
             started |= StoryRules.startsStory(previousGroup, state.getStateGroup());
@@ -333,8 +335,10 @@ public class IssueServiceImpl implements IssueService {
         }
         // El flush ejecuta @PreUpdate para que la respuesta lleve el updatedAt nuevo.
         Issue saved = issueRepository.saveAndFlush(issue);
-        if (completed) {
+        if (closed) {
             relationService.notifyUnblocked(saved, actor);
+        }
+        if (completed) {
             events.publishEvent(new IssueCompletedEvent(saved.getId(), project.getId()));
         }
         if (storyRelevant) {
@@ -399,9 +403,11 @@ public class IssueServiceImpl implements IssueService {
         updateStartedAt(issue, now);
         StoryRules.updateClosed(issue, previousGroup, actor, now);
         Issue saved = issueRepository.saveAndFlush(issue);
-        // Pasar de un grupo abierto a COMPLETED implica cambiar de estado, así que actor ya está cargado.
-        if (becameCompleted(previousGroup, target.getStateGroup())) {
+        // Pasar de un grupo abierto a uno cerrado implica cambiar de estado, así que actor ya está cargado.
+        if (becameClosed(previousGroup, target.getStateGroup())) {
             relationService.notifyUnblocked(saved, actor);
+        }
+        if (becameCompleted(previousGroup, target.getStateGroup())) {
             events.publishEvent(new IssueCompletedEvent(saved.getId(), project.getId()));
         }
         if (stateChanged && saved.getParent() != null) {
@@ -438,8 +444,10 @@ public class IssueServiceImpl implements IssueService {
         updateCompletedAt(issue, previousGroup, now);
         updateStartedAt(issue, now);
         Issue saved = issueRepository.saveAndFlush(issue);
-        if (becameCompleted(previousGroup, target.getStateGroup())) {
+        if (becameClosed(previousGroup, target.getStateGroup())) {
             relationService.notifyUnblocked(saved, null);
+        }
+        if (becameCompleted(previousGroup, target.getStateGroup())) {
             events.publishEvent(new IssueCompletedEvent(saved.getId(), saved.getProject().getId()));
         }
         if (saved.getParent() != null) {
@@ -573,6 +581,7 @@ public class IssueServiceImpl implements IssueService {
         Issue saved = issueRepository.saveAndFlush(story);
         if (becameCompleted(previousGroup, done.getStateGroup())) {
             relationService.notifyUnblocked(saved, actor);
+            events.publishEvent(new IssueCompletedEvent(saved.getId(), project.getId()));
         }
         return issueMapper.toResponse(saved);
     }
@@ -786,6 +795,14 @@ public class IssueServiceImpl implements IssueService {
      */
     static boolean becameCompleted(StateGroup previousGroup, StateGroup currentGroup) {
         return previousGroup != null && previousGroup.isOpen() && currentGroup == StateGroup.COMPLETED;
+    }
+
+    /**
+     * Una tarea abierta pasó a un grupo cerrado (COMPLETED o CANCELLED): deja de bloquear a otras, así que a las que
+     * quedan libres les llega el aviso. Cancelarla no dispara las reglas «al completar» de GitHub.
+     */
+    static boolean becameClosed(StateGroup previousGroup, StateGroup currentGroup) {
+        return previousGroup != null && previousGroup.isOpen() && currentGroup != null && !currentGroup.isOpen();
     }
 
     /**

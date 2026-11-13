@@ -266,6 +266,32 @@ class DailyServiceImplTest {
         }
 
         @Test
+        void unCambioAUnEstadoQueDespuesSeRenombroSigueContandoComoCompletar() {
+            members(ana);
+            LocalDate tuesday = WEDNESDAY.minusDays(1);
+            // «Listo» era el nombre del estado completado cuando Ana movió las tareas; después lo renombraron
+            Issue completed = issue(done, null);
+            completed.setCompletedAt(at(tuesday, 11).plusMillis(40));
+            Issue reopened = issue(todo, null);
+            Issue movedAgain = issue(done, null);
+            movedAgain.setCompletedAt(at(tuesday, 17));
+            activities(
+                    activity(ana, completed, ActivityField.STATE, "Listo", at(tuesday, 11)),
+                    activity(ana, reopened, ActivityField.STATE, "Listo", at(tuesday, 12)),
+                    activity(ana, movedAgain, ActivityField.STATE, "Listo", at(tuesday, 13)));
+
+            DailyResponse daily = dailyService.getDaily(SLUG, project.getId(), VIEWER, WEDNESDAY);
+
+            // Solo cuenta como completar si la tarea entró a completada en ese momento y sigue completada
+            assertThat(daily.people().getFirst().yesterday())
+                    .extracting(change -> change.issue().id(), DailyChange::change)
+                    .containsExactly(
+                            org.assertj.core.groups.Tuple.tuple(completed.getId(), "completó"),
+                            org.assertj.core.groups.Tuple.tuple(movedAgain.getId(), "movió a Listo"),
+                            org.assertj.core.groups.Tuple.tuple(reopened.getId(), "movió a Listo"));
+        }
+
+        @Test
         void ayerEsUnaEntradaPorTareaConElCambioMasImportante() {
             members(ana, beto);
             LocalDate tuesday = WEDNESDAY.minusDays(1);
