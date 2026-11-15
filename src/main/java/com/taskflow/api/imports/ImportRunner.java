@@ -308,7 +308,15 @@ public class ImportRunner {
                         .filter(project -> session.projects.containsKey(project.source().id()))
                         .forEach(project -> writer.finishProject(session, project)));
                 if (result == ImportStatus.COMPLETED) {
-                    writer.invitations(session).forEach((email, roleId) -> writer.invite(session, email, roleId));
+                    List<String> invited = new ArrayList<>();
+                    writer.invitations(session).forEach((email, roleId) -> {
+                        if (writer.invite(session, email, roleId)) {
+                            invited.add(email);
+                        }
+                    });
+                    if (!invited.isEmpty()) {
+                        transaction.executeWithoutResult(status -> writer.addPendingMembers(session, invited));
+                    }
                 }
             }
         } catch (RuntimeException ex) {
@@ -408,6 +416,7 @@ public class ImportRunner {
                 store.deleteByIds("modules", store.items(jobId, ItemKind.MODULE));
                 store.deleteByIds("cycles", store.items(jobId, ItemKind.CYCLE));
                 store.deleteUnusedLabels(store.items(jobId, ItemKind.LABEL));
+                store.deletePendingMembers(jobId);
             });
             // Aparte: si un estado no se puede quitar (otra cosa del proyecto lo usa), lo demás ya quedó deshecho
             tolerate(() -> {

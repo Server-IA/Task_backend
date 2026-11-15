@@ -116,9 +116,34 @@ public class ImportStore {
                 .setParameter("workspace", workspaceId).setParameter("email", email).getResultList();
     }
 
+    /** Apunta que, al aceptar, la persona entra al proyecto (aunque no tenga tareas en él). */
+    public void addPendingMember(UUID jobId, UUID workspaceId, String email, UUID projectId) {
+        entityManager.createNativeQuery("""
+                        INSERT INTO import_pending_members (job_id, workspace_id, email, project_id) VALUES (:job, :workspace, :email, :project)
+                        ON CONFLICT (project_id, email) DO NOTHING
+                        """)
+                .setParameter("job", jobId).setParameter("workspace", workspaceId).setParameter("email", email)
+                .setParameter("project", projectId).executeUpdate();
+    }
+
+    @SuppressWarnings("unchecked")
+    public List<UUID> pendingProjects(UUID workspaceId, String email) {
+        return entityManager.createNativeQuery(
+                        "SELECT project_id FROM import_pending_members WHERE workspace_id = :workspace AND email = :email", UUID.class)
+                .setParameter("workspace", workspaceId).setParameter("email", email).getResultList();
+    }
+
     public void deletePending(UUID workspaceId, String email) {
         entityManager.createNativeQuery("DELETE FROM import_pending_assignments WHERE workspace_id = :workspace AND email = :email")
                 .setParameter("workspace", workspaceId).setParameter("email", email).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM import_pending_members WHERE workspace_id = :workspace AND email = :email")
+                .setParameter("workspace", workspaceId).setParameter("email", email).executeUpdate();
+    }
+
+    /** Al deshacer: quien fue invitado ya no entra a los proyectos de esta importación. */
+    public void deletePendingMembers(UUID jobId) {
+        entityManager.createNativeQuery("DELETE FROM import_pending_members WHERE job_id = :job")
+                .setParameter("job", jobId).executeUpdate();
     }
 
     /** Asigna la tarea a la persona, si no lo estaba. */
