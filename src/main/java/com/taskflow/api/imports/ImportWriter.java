@@ -78,6 +78,7 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -788,32 +789,49 @@ public class ImportWriter {
         session.report.projects.add(new ImportReport.CreatedProject(target.id, target.identifier, target.name, target.issues, target.created));
     }
 
-    /** A quiénes hay que invitar: las personas marcadas así que tienen alguna tarea (correo → rol). */
+    /**
+     * A quiénes hay que invitar: todas las personas que se marcaron así, tengan o no tareas asignadas (alguien que en
+     * el origen solo creaba o comentaba tareas también es del equipo). Correo → rol.
+     */
     public Map<String, UUID> invitations(Session session) {
         Map<String, UUID> emails = new LinkedHashMap<>();
-        for (PlannedProject project : session.plan.projects()) {
-            for (PlannedIssue issue : project.issues()) {
-                if (issue.source().assigneeIds() == null) {
-                    continue;
-                }
-                for (String assignee : issue.source().assigneeIds()) {
-                    PersonTarget person = session.plan.person(assignee);
-                    if (person.action() == PersonAction.INVITE && person.email() != null && !person.email().isBlank()) {
-                        emails.putIfAbsent(person.email().strip().toLowerCase(Locale.ROOT), person.roleId());
-                    }
-                }
+        Map<String, PersonTarget> people = session.plan.mapping().people();
+        if (people == null) {
+            return emails;
+        }
+        for (PersonTarget person : people.values()) {
+            if (person != null && person.action() == PersonAction.INVITE && person.email() != null && !person.email().isBlank()) {
+                emails.putIfAbsent(person.email().strip().toLowerCase(Locale.ROOT), person.roleId());
             }
         }
         return emails;
     }
 
-    /** Envía una invitación; si no se puede (ya es miembro, límite de invitaciones), queda en el informe y la importación sigue. */
-    public void invite(Session session, String email, UUID roleId) {
+    /**
+     * Envía una invitación; si no se puede (ya es miembro, límite de invitaciones), queda en el informe y la importación sigue.
+     *
+     * @return si se envió
+     */
+    public boolean invite(Session session, String email, UUID roleId) {
         try {
             invitationService.invite(session.slug, session.importerId, new InviteMemberRequest(email, roleId));
             session.report.invitations++;
+            return true;
         } catch (ApiException ex) {
             session.report.skip(SkipReason.INVITATION_FAILED, null, email, session.language.t(ex.getMessage()), null);
+            return false;
+        }
+    }
+
+    /** Las personas invitadas entran, al aceptar, a los proyectos de esta importación (sus tareas aparte se les asignan). */
+    public void addPendingMembers(Session session, Collection<String> emails) {
+        for (Target target : session.projects.values()) {
+            if (target.id == null) {
+                continue;
+            }
+            for (String email : emails) {
+                store.addPendingMember(session.jobId, session.workspaceId, email, target.id);
+            }
         }
     }
 

@@ -310,6 +310,14 @@ public final class ImportPlan {
                 unassigned += lost ? 1 : 0;
             }
         }
+        // Se invita a todas las personas marcadas así, tengan o no tareas asignadas
+        if (mapping.people() != null) {
+            mapping.people().forEach((id, target) -> {
+                if (target != null && target.action() == PersonAction.INVITE) {
+                    invited.add(id);
+                }
+            });
+        }
         return new Totals(newProjects, modules, cycles, closedCycles, stories, tasks, subtasks, bugs, comments, attachments, bytes,
                 tooBig, notAllowed, withPoints, unassigned, invited.size());
     }

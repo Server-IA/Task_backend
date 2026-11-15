@@ -305,6 +305,68 @@ class ImportIntegrationTest {
     }
 
     @Test
+    void seInvitaAQuienSeEligioAunqueNoTengaTareasYAlAceptarEntraAlProyecto() {
+        UUID web = projectService.create(slug, pm.getId(), new CreateProjectRequest("Web", "V" + suffix.substring(0, 4).toUpperCase().replaceAll("[0-9]", "X"), null, null)).id();
+        String eva = "eva-" + suffix + "@fuera.com";
+        ImportJobResponse uploaded = upload("tareas.csv", """
+                Título;Creado por
+                Revisar los textos del sitio;%s
+                """.formatted(eva));
+        ImportJobResponse ready = select(uploaded, new ProjectChoice(uploaded.discovery().projects().get(0).id(), web, null, null));
+
+        // Eva solo creó la tarea: no tiene ninguna asignada, pero se la invita igual
+        PersonRow evaRow = person(ready, eva);
+        Map<String, PersonTarget> people = new LinkedHashMap<>();
+        ready.mapping().people().forEach(row -> people.put(row.id(), row.target()));
+        people.put(evaRow.id(), new PersonTarget(PersonAction.INVITE, null, eva, null));
+        ImportJobResponse mapped = importService.saveMapping(slug, ready.id(), pm.getId(), new ImportMapping(null, null, null, people));
+        assertThat(mapped.preview().totals().invitations()).isEqualTo(1);
+
+        importService.start(slug, ready.id(), pm.getId());
+        ImportJobResponse done = await(ready.id(), ImportStatus.COMPLETED);
+
+        assertThat(done.report().invitations()).isEqualTo(1);
+        assertThat(value("SELECT count(*) FROM workspace_invitations WHERE email = '" + eva + "'")).isEqualTo("1");
+        assertThat(value("SELECT count(*) FROM import_pending_members WHERE email = '" + eva + "' AND project_id = '" + web + "'"))
+                .isEqualTo("1");
+
+        // Al aceptar entra al proyecto, sin tareas asignadas
+        User evaUser = user(eva, "Eva Ríos");
+        workspaceMember(evaUser);
+        Workspace workspace = workspaceRepository.findBySlug(slug).orElseThrow();
+        transaction.executeWithoutResult(status -> pendingAssignments.apply(workspace, evaUser));
+        assertThat(value("SELECT count(*) FROM project_members WHERE project_id = '" + web + "' AND user_id = '" + evaUser.getId() + "'"))
+                .isEqualTo("1");
+        assertThat(value("SELECT count(*) FROM issue_assignees WHERE user_id = '" + evaUser.getId() + "'")).isEqualTo("0");
+        assertThat(value("SELECT count(*) FROM import_pending_members WHERE email = '" + eva + "'")).isEqualTo("0");
+    }
+
+    @Test
+    void deshacerQuitaLaEntradaPendienteAlProyectoQueYaExistia() {
+        UUID web = projectService.create(slug, pm.getId(), new CreateProjectRequest("Web", "D" + suffix.substring(0, 4).toUpperCase().replaceAll("[0-9]", "X"), null, null)).id();
+        String eva = "eva-" + suffix + "@fuera.com";
+        ImportJobResponse uploaded = upload("tareas.csv", """
+                Título;Creado por
+                Revisar los textos del sitio;%s
+                """.formatted(eva));
+        ImportJobResponse ready = select(uploaded, new ProjectChoice(uploaded.discovery().projects().get(0).id(), web, null, null));
+        Map<String, PersonTarget> people = new LinkedHashMap<>();
+        ready.mapping().people().forEach(row -> people.put(row.id(), row.target()));
+        people.put(person(ready, eva).id(), new PersonTarget(PersonAction.INVITE, null, eva, null));
+        importService.saveMapping(slug, ready.id(), pm.getId(), new ImportMapping(null, null, null, people));
+        importService.start(slug, ready.id(), pm.getId());
+        await(ready.id(), ImportStatus.COMPLETED);
+        assertThat(value("SELECT count(*) FROM import_pending_members WHERE email = '" + eva + "'")).isEqualTo("1");
+
+        importService.undo(slug, ready.id());
+        await(ready.id(), ImportStatus.UNDONE);
+
+        // El proyecto sigue, pero quien acepte la invitación ya no entra a él por esta importación
+        assertThat(value("SELECT count(*) FROM projects WHERE id = '" + web + "'")).isEqualTo("1");
+        assertThat(value("SELECT count(*) FROM import_pending_members WHERE email = '" + eva + "'")).isEqualTo("0");
+    }
+
+    @Test
     void conUnTipoDescartadoYSinLoTerminadoSoloEntraLoQueQueda() {
         ImportJobResponse uploaded = upload("jira-portal.csv", jiraCsv());
         ProjectChoice choice = new ProjectChoice(uploaded.discovery().projects().get(0).id(), null, "Portal", "PRT");
