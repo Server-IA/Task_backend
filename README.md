@@ -418,9 +418,14 @@ Los listados largos se paginan con `page`/`size` (máximo 200); la bandeja de no
 
 ## Modelo de datos
 
-PostgreSQL 16 con **48 tablas**. Todo el esquema está en una sola migración,
-`src/main/resources/db/migration/V1__esquema_inicial.sql`: las del desarrollo se unificaron antes del primer
-despliegue. Hibernate solo valida (`ddl-auto: validate`).
+PostgreSQL 16 con **49 tablas**, creadas por las migraciones de Flyway en `src/main/resources/db/migration/`:
+
+| Migración | Qué hace |
+|---|---|
+| `V1__esquema_inicial.sql` | Todo el esquema hasta el primer despliegue (las migraciones del desarrollo se unificaron en esta). No se vuelve a editar |
+| `V2__proyectos_de_invitados_por_importacion.sql` | Tabla `import_pending_members`: quien recibe una invitación desde una importación entra, al aceptarla, a los proyectos importados aunque no tenga tareas |
+
+Cada cambio nuevo de la base es una migración nueva (`V3__…`, `V4__…`). Hibernate solo valida (`ddl-auto: validate`).
 
 - **Llaves:** las entidades usan **UUID** y `created_at`/`updated_at`. Las tablas intermedias (`issue_assignees`,
   `issue_labels`, `cycle_issues`, `module_issues`…) usan llave compuesta.
