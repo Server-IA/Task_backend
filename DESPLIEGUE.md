@@ -17,8 +17,8 @@ expuesta. GitHub también entra por ahí (`https://<dominio>/api/v1/github/...`)
 
 1. *Create Service → Database → PostgreSQL*, versión 16. Anota el **host interno** (el *App Name* que muestra
    Dokploy), la base, el usuario y la contraseña.
-2. No hace falta crear tablas: la API las crea al arrancar (Flyway aplica `V1__esquema_inicial.sql`, que trae todo el
-   esquema en una sola migración).
+2. No hace falta crear tablas: la API las crea al arrancar (Flyway aplica en orden las migraciones de
+   `src/main/resources/db/migration/`: `V1__esquema_inicial.sql` con el esquema inicial y las que vinieron después).
 3. Respaldos (opcional; hoy no están activados): en *Backups*, un destino S3 apuntando a R2 (endpoint
    `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com`, región `auto`, el bucket `taskflow-backups`) y un respaldo
    diario.
