@@ -39,6 +39,10 @@ spring:
 
 server:
   port: 8080
+  # La subruta de la API (/taskflow en producción: la raíz del dominio es de otra página, así la API queda en
+  # /taskflow/api/v1/…). Vacía en desarrollo. Tiene que ser la misma BASE_PATH del frontend
+  servlet:
+    context-path: ${SERVER_CONTEXT_PATH:}
   error:
     include-message: never
   # none (por defecto): la IP del cliente es la de la conexión. Detrás de un proxy (Dokploy/Traefik) usar native: Tomcat

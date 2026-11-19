@@ -38,7 +38,9 @@ public class RealtimeInterceptor implements HandlerInterceptor {
             return;
         }
         String origin = clientId(request);
-        if (request.getRequestURI().startsWith("/api/v1/notifications")) {
+        // Sin la subruta de la app (/taskflow en producción)
+        String path = request.getRequestURI().substring(request.getContextPath().length());
+        if (path.startsWith("/api/v1/notifications")) {
             // Marcar como leída en una pestaña: las demás de esa persona actualizan su contador
             SecurityUtils.currentUserId().ifPresent(userId -> hub.notifications(userId, origin));
             return;

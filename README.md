@@ -4,7 +4,7 @@ API REST de **TaskFlow**, una aplicación de gestión de proyectos ágiles hecha
 (al estilo de Plane o Jira, sin copiar código de ninguno). Proyecto de prácticas universitarias.
 
 - La consume la SPA de [`Task_frontend`](https://github.com/Server-IA/Task_frontend).
-- En producción corre en **https://dev.inmero.co** (Dokploy de la universidad); ver [DESPLIEGUE.md](DESPLIEGUE.md).
+- En producción corre en **https://dev.inmero.co/taskflow** (Dokploy de la universidad); ver [DESPLIEGUE.md](DESPLIEGUE.md).
 
 ## Contenido
 
@@ -73,7 +73,8 @@ se registra crea su workspace y queda como project manager.
 
 - **Swagger UI:** http://localhost:8080/swagger-ui.html (botón *Authorize* → pegar el `accessToken` del login).
 - **OpenAPI:** http://localhost:8080/v3/api-docs (el frontend genera sus tipos con esto).
-- **Salud:** `GET /api/v1/health` → `{"status":"ok"}` cuando la API llega a la base de datos.
+- **Salud:** `GET /api/v1/health` → `{"status":"ok"}` cuando la API llega a la base de datos (en producción,
+  `/taskflow/api/v1/health`: ver *Despliegue*).
 - **Esquema:** lo crea Flyway al arrancar (`src/main/resources/db/migration`).
 - **Correos en local:** con `MAIL_PROVIDER=smtp` y los valores de `.env.example`, todo correo (verificación,
   recuperar contraseña, invitaciones, avisos) llega a **Mailpit** en http://localhost:8025, sea cual sea el
@@ -468,11 +469,15 @@ TaskFlow corre en **Dokploy** con tres servicios en una red interna. Solo el fro
 
 | Servicio | Imagen | Puerto |
 |---|---|---|
-| `frontend` | nginx sin privilegios con la SPA; reenvía `/api` a la API | 5446 (dominio) |
-| `backend` | Este repositorio: `Dockerfile` multi-stage (Maven → `eclipse-temurin:21-jre-alpine`), usuario sin privilegios, `HEALTHCHECK` contra `/api/v1/health` | 8080 (interno) |
+| `frontend` | nginx sin privilegios con la SPA en `/taskflow`; reenvía `/taskflow/api` a la API | 5446 (dominio, path `/taskflow`) |
+| `backend` | Este repositorio: `Dockerfile` multi-stage (Maven → `eclipse-temurin:21-jre-alpine`), usuario sin privilegios, `HEALTHCHECK` contra `/taskflow/api/v1/health` | 8080 (interno) |
 | `db` | PostgreSQL 16 de Dokploy | 5432 (interno) |
 
-**Imagen:** ya trae `FORWARD_HEADERS_STRATEGY=native`, `SPRINGDOC_ENABLED=false` y la memoria de la JVM ajustada al
+**Subruta:** TaskFlow se sirve en `https://dev.inmero.co/taskflow` (la raíz del dominio es de otra página). La API
+corre con `SERVER_CONTEXT_PATH=/taskflow` (`server.servlet.context-path`; vacía en local) y el frontend se compila
+con la misma `BASE_PATH`.
+
+**Imagen:** ya trae `FORWARD_HEADERS_STRATEGY=native`, `SPRINGDOC_ENABLED=false`, `SERVER_CONTEXT_PATH=/taskflow` y la memoria de la JVM ajustada al
 contenedor.
 
 **Arranque:** Flyway aplica las migraciones pendientes. Cuando la API nueva pasa el health check (unos 30 s después
