@@ -9,9 +9,14 @@ el frontend tiene dominio público:
 | API | **Application** con build *Dockerfile* | `Server-IA/Task_backend`, rama `main` | 8080 (interno) |
 | Frontend | **Application** con build *Dockerfile* y el dominio | `Server-IA/Task_frontend`, rama `main` | 5446 (dominio) |
 
-El navegador solo habla con el frontend (`https://<dominio>`). Su nginx sirve la app y reenvía todo lo que empieza por
-`/api` a la API dentro de la red de Dokploy, así la app y la API comparten dominio (sin CORS) y la API no queda
-expuesta. GitHub también entra por ahí (`https://<dominio>/api/v1/github/...`).
+TaskFlow vive en la subruta **`/taskflow`** del dominio (`https://dev.inmero.co/taskflow`): la raíz es de otra página
+(la landing). El navegador solo habla con el frontend (`https://<dominio>/taskflow`). Su nginx sirve la app y reenvía
+todo lo que empieza por `/taskflow/api` a la API dentro de la red de Dokploy, así la app y la API comparten dominio
+(sin CORS) y la API no queda expuesta. GitHub también entra por ahí (`https://<dominio>/taskflow/api/v1/github/...`).
+
+La subruta está en las dos imágenes y tiene que ser la misma: `BASE_PATH=/taskflow` (argumento de build del frontend)
+y `SERVER_CONTEXT_PATH=/taskflow` (variable de la API). Para servir TaskFlow en otra subruta se cambian las dos, y
+también `FRONTEND_URL` y la ruta del dominio en Dokploy.
 
 ## 1. Base de datos
 
@@ -34,7 +39,7 @@ expuesta. GitHub también entra por ahí (`https://<dominio>/api/v1/github/...`)
 | `DB_URL` | `jdbc:postgresql://<host interno de la base>:5432/<base>` |
 | `DB_USER` / `DB_PASSWORD` | Los de la base |
 | `JWT_SECRET` | Aleatorio y largo: `openssl rand -base64 48` |
-| `FRONTEND_URL` | `https://<dominio>` (sin `/` al final). Base de los enlaces de los correos y único origen permitido |
+| `FRONTEND_URL` | `https://<dominio>/taskflow` (sin `/` al final). Base de los enlaces de los correos; su origen (`https://<dominio>`) es el único que CORS deja pasar |
 | `MAIL_PROVIDER` | `smtp` (Gmail, ver más abajo) o `resend` (con dominio verificado y `RESEND_API_KEY`) |
 | `MAIL_FROM` | `TaskFlow <cuenta@gmail.com>` (con Gmail, la misma cuenta que envía) |
 | `SMTP_HOST` / `SMTP_PORT` | `smtp.gmail.com` / `587` |
@@ -44,9 +49,10 @@ expuesta. GitHub también entra por ahí (`https://<dominio>/api/v1/github/...`)
 | `GITHUB_*` | Las seis de la GitHub App de producción (sección 5); la clave en `GITHUB_PRIVATE_KEY` |
 
 Ya vienen puestas en la imagen (no hace falta tocarlas): `FORWARD_HEADERS_STRATEGY=native` (la IP real del cliente
-llega de Traefik), `SPRINGDOC_ENABLED=false` (sin Swagger público) y la memoria de la JVM ajustada al contenedor.
+llega de Traefik), `SPRINGDOC_ENABLED=false` (sin Swagger público), `SERVER_CONTEXT_PATH=/taskflow` (la API responde en
+`/taskflow/api/v1/…`) y la memoria de la JVM ajustada al contenedor.
 
-3. *Deploy*. La imagen se marca sana cuando `GET /api/v1/health` responde `{"status":"ok"}` (llega a la base). El
+3. *Deploy*. La imagen se marca sana cuando `GET /taskflow/api/v1/health` responde `{"status":"ok"}` (llega a la base). El
    primer arranque tarda un poco más porque crea el esquema. Anota el **App Name** de la API: es su nombre dentro de
    la red (lo usa el frontend).
 
@@ -54,9 +60,11 @@ llega de Traefik), `SPRINGDOC_ENABLED=false` (sin Swagger público) y la memoria
 
 1. *Create Service → Application*, repositorio `Task_frontend`, rama `main`, build type **Dockerfile**.
 2. *Environment*: `BACKEND_URL=http://<App Name de la API>:8080`.
-3. *Domains*: el dominio, **puerto del contenedor 5446**, HTTPS con Let's Encrypt.
-4. *Deploy* y abre `https://<dominio>`: la primera persona que se registra crea su workspace y queda como project
-   manager.
+3. *Domains*: el dominio, **path `/taskflow`** con *Strip Path* **apagado** (nginx espera la ruta completa),
+   **puerto del contenedor 5446**, HTTPS con Let's Encrypt. Así Traefik solo manda aquí lo que empieza por
+   `/taskflow` y la raíz del dominio queda libre para la otra página.
+4. *Deploy* y abre `https://<dominio>/taskflow`: la primera persona que se registra crea su workspace y queda como
+   project manager.
 
 nginx sirve la app con caché larga para `/assets`. Pone las cabeceras de seguridad: nosniff, sin iframes, HSTS y una
 **Content-Security-Policy** que solo deja ejecutar los scripts de la app y conectarse a la API y a R2.
@@ -81,10 +89,10 @@ organización):
 
 | Campo | Valor |
 |---|---|
-| Homepage URL | `https://<dominio>` |
-| Callback URL | `https://<dominio>/github/callback` · **Expire user authorization tokens** activado · *Request user authorization (OAuth) during installation* **apagado** |
-| Setup URL | `https://<dominio>/api/v1/github/setup` (sin *Redirect on update*) |
-| Webhook | Activo, URL `https://<dominio>/api/v1/github/webhook`, un secreto aleatorio (va en `GITHUB_WEBHOOK_SECRET`) |
+| Homepage URL | `https://<dominio>/taskflow` |
+| Callback URL | `https://<dominio>/taskflow/github/callback` · **Expire user authorization tokens** activado · *Request user authorization (OAuth) during installation* **apagado** |
+| Setup URL | `https://<dominio>/taskflow/api/v1/github/setup` (sin *Redirect on update*) |
+| Webhook | Activo, URL `https://<dominio>/taskflow/api/v1/github/webhook`, un secreto aleatorio (va en `GITHUB_WEBHOOK_SECRET`) |
 | Permisos del repositorio | Actions: *Read & write* · Checks: *Read* · Contents: *Read & write* · Metadata: *Read* · Pull requests: *Read* · Commit statuses: *Read* |
 | Permisos de la organización | Members: *Read* (para comprobar que quien conecta una organización es dueño) |
 | Eventos | Check suite · Create · Delete · Pull request · Workflow run |
@@ -119,7 +127,7 @@ dominio de producción (*R2 → bucket → Settings → CORS policy*):
 
 ## 7. Comprobar
 
-- `https://<dominio>/api/v1/health` → `{"status":"ok"}`.
+- `https://<dominio>/taskflow/api/v1/health` → `{"status":"ok"}`.
 - Registrarse, verificar el correo (llega de la cuenta de Gmail), crear un proyecto y una tarea, subir una imagen.
 - *Ajustes del workspace → Integraciones → Conectar con GitHub* y un PR de prueba que nombre una tarea.
 
